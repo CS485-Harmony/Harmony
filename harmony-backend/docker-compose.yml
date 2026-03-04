@@ -14,6 +14,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: redis-server --requirepass devsecret
     ports:
       - "6379:6379"
     volumes:
