@@ -2,7 +2,10 @@
 node_modules/
 # Build output
 dist/
-# Environment
+# Environment — ignore actual env files but track the example
 .env
+.env.local
+.env.*.local
+!.env.example
 # TypeScript incremental build
 *.tsbuildinfo
