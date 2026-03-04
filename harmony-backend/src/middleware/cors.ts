@@ -1,6 +1,13 @@
 import cors from 'cors';
 import type { CorsOptions } from 'cors';
 
+export class CorsError extends Error {
+  constructor() {
+    super('CORS: origin not allowed');
+    this.name = 'CorsError';
+  }
+}
+
 const defaultAllowedOrigins = ['http://localhost:3000'];
 
 export const corsOptions: CorsOptions = {
@@ -14,7 +21,7 @@ export const corsOptions: CorsOptions = {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('CORS: origin not allowed'));
+      callback(new CorsError());
     }
   },
   credentials: true,

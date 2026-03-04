@@ -1,15 +1,16 @@
 import express, { NextFunction, Request, Response } from 'express';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import helmet from 'helmet';
-import corsMiddleware from './middleware/cors';
+import corsMiddleware, { CorsError } from './middleware/cors';
 import { appRouter } from './trpc/router';
 
 export function createApp() {
   const app = express();
 
   app.use(helmet());
-  app.use(express.json());
+  // CORS must come before body parsers so error responses include CORS headers
   app.use(corsMiddleware);
+  app.use(express.json());
 
   // Health check (plain HTTP — no tRPC client required)
   app.get('/health', (_req, res) => {
@@ -34,7 +35,7 @@ export function createApp() {
 
   // Global error handler — must have 4 params for Express to treat it as an error handler
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-    const isCorsError = err.message.startsWith('CORS:');
+    const isCorsError = err instanceof CorsError;
     const status = isCorsError ? 403 : 500;
     const message = isCorsError ? err.message : 'Internal server error';
     if (!isCorsError) console.error('Unhandled error:', err);
