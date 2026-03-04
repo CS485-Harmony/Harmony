@@ -17,7 +17,8 @@ export const corsOptions: CorsOptions = {
       ...defaultAllowedOrigins,
       ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
     ];
-    // Allow server-to-server requests (no origin) or whitelisted origins
+    // Allow server-to-server requests (no Origin header) so internal callers
+    // and health-check probes work without a CORS preflight.
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {

@@ -1,7 +1,12 @@
 import request from 'supertest';
 import { createApp } from '../src/app';
+import type { Express } from 'express';
 
-const app = createApp();
+let app: Express;
+
+beforeAll(() => {
+  app = createApp();
+});
 
 describe('GET /health', () => {
   it('returns 200 with status ok', async () => {
@@ -9,6 +14,15 @@ describe('GET /health', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ status: 'ok' });
     expect(typeof res.body.timestamp).toBe('string');
+  });
+});
+
+describe('GET /trpc/health', () => {
+  it('returns 200 with tRPC result envelope', async () => {
+    const res = await request(app).get('/trpc/health');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ result: { data: { status: 'ok' } } });
+    expect(typeof res.body.result.data.timestamp).toBe('string');
   });
 });
 

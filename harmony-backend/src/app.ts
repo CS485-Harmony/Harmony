@@ -38,7 +38,7 @@ export function createApp() {
     const isCorsError = err instanceof CorsError;
     const status = isCorsError ? 403 : 500;
     const message = isCorsError ? err.message : 'Internal server error';
-    if (!isCorsError) console.error('Unhandled error:', err);
+    if (!isCorsError) console.error('Unhandled error:', process.env.NODE_ENV === 'production' ? err.message : err);
     res.status(status).json({ error: message });
   });
 
