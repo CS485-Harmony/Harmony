@@ -455,6 +455,7 @@ These types are returned by services and repositories. They are not exposed over
 ```mermaid
 classDiagram
     class ChannelController {
+        +getChannelBySlug(serverSlug, channelSlug, ctx) ChannelSettingsResponse
         +getChannelSettings(channelId, ctx) ChannelSettingsResponse
         +updateChannelVisibility(channelId, body, ctx) VisibilityUpdateResponse
         +getVisibilityAuditLog(channelId, query, ctx) AuditLogResponse
@@ -480,6 +481,7 @@ classDiagram
 
     ChannelController ..> ChannelVisibilityService : uses
     ChannelController ..> PermissionService : uses
+    ChannelController ..> ChannelRepository : uses
     PublicChannelController ..> VisibilityGuard : uses
     PublicChannelController ..> MessageService : uses
     PublicChannelController ..> SEOService : uses
@@ -492,6 +494,7 @@ classDiagram
     class MessageService { }
     class SEOService { }
     class ServerRepository { }
+    class ChannelRepository { }
     class IndexingService { }
 ```
 
@@ -1029,7 +1032,7 @@ graph TB
 
 | Label | Class | Visibility | Methods |
 |-------|-------|------------|---------|
-| CL-C-B1.1 | ChannelController | Public | `getChannelSettings()`, `updateChannelVisibility()`, `getVisibilityAuditLog()` |
+| CL-C-B1.1 | ChannelController | Public | `getChannelBySlug()`, `getChannelSettings()`, `updateChannelVisibility()`, `getVisibilityAuditLog()` |
 | CL-C-B1.2 | PublicChannelController | Public | `getPublicChannelPage()`, `getPublicMessages()`, `getPublicMessage()` |
 | CL-C-B1.3 | PublicServerController | Public | `getPublicServerInfo()`, `getPublicChannelList()`, `getServerLandingPage()` |
 | CL-C-B1.4 | SEOController | Public | `getServerSitemap()`, `getRobotsTxt()` |
