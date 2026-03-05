@@ -134,33 +134,22 @@ The unified backend organizes into **shared backend modules** (prefixed `M-B`) a
 
 ## 3. Unified Class Hierarchy
 
-### 3.1 Domain Model (Entities, DTOs, Events)
+### 3.1 Core Entities
 
 ```mermaid
 classDiagram
-    %% === Interfaces ===
-    class IVisibilityToggle {
-        <<interface>>
-        +setVisibility(channelId, visibility, actorId, ip) VisibilityChangeResult
-        +getVisibility(channelId) ChannelVisibility
-        +canChangeVisibility(channelId, actorId) boolean
+    class Server {
+        <<entity>>
+        +id: UUID
+        +name: string
+        +slug: string
+        +description: string?
+        +iconUrl: string?
+        +isPublic: boolean
+        +memberCount: number
+        +createdAt: DateTime
     }
 
-    class IMetaTagGenerator {
-        <<interface>>
-        +generate(channelId) MetaTagSet
-        +validate(tags) ValidationResult
-    }
-
-    %% === Enumerations ===
-    class ChannelVisibility {
-        <<enumeration>>
-        PUBLIC_INDEXABLE
-        PUBLIC_NO_INDEX
-        PRIVATE
-    }
-
-    %% === Domain Entities ===
     class Channel {
         <<entity>>
         +id: UUID
@@ -175,18 +164,6 @@ classDiagram
         +updatedAt: DateTime
         +isPublic() boolean
         +isIndexable() boolean
-    }
-
-    class Server {
-        <<entity>>
-        +id: UUID
-        +name: string
-        +slug: string
-        +description: string?
-        +iconUrl: string?
-        +isPublic: boolean
-        +memberCount: number
-        +createdAt: DateTime
     }
 
     class Message {
@@ -250,7 +227,38 @@ classDiagram
         +schemaVersion: number
     }
 
-    %% === Events ===
+    Server "1" --> "*" Channel
+    Channel "1" --> "*" Message
+    Message "*" --> "1" User
+    Message "1" --> "*" Attachment
+    Channel "1" --> "*" AuditLogEntry
+    Channel "1" --> "0..1" GeneratedMetaTags
+```
+
+### 3.2 Interfaces, Enums & Events
+
+```mermaid
+classDiagram
+    class IVisibilityToggle {
+        <<interface>>
+        +setVisibility(channelId, visibility, actorId, ip) VisibilityChangeResult
+        +getVisibility(channelId) ChannelVisibility
+        +canChangeVisibility(channelId, actorId) boolean
+    }
+
+    class IMetaTagGenerator {
+        <<interface>>
+        +generate(channelId) MetaTagSet
+        +validate(tags) ValidationResult
+    }
+
+    class ChannelVisibility {
+        <<enumeration>>
+        PUBLIC_INDEXABLE
+        PUBLIC_NO_INDEX
+        PRIVATE
+    }
+
     class VisibilityChangeEvent {
         <<event>>
         +channelId: UUID
@@ -260,7 +268,13 @@ classDiagram
         +timestamp: DateTime
     }
 
-    %% === DTOs ===
+    VisibilityChangeEvent --> ChannelVisibility
+```
+
+### 3.3 Data Transfer Objects (DTOs)
+
+```mermaid
+classDiagram
     class PublicChannelDTO {
         <<DTO>>
         +id: string
@@ -321,129 +335,14 @@ classDiagram
         +indexingStatus: string
     }
 
-    %% === Entity Relationships ===
-    Server "1" --> "*" Channel
-    Channel "1" --> "*" Message
-    Message "*" --> "1" User
-    Message "1" --> "*" Attachment
-    Channel "1" --> "*" AuditLogEntry
-    Channel "1" --> "0..1" GeneratedMetaTags
+    PublicMessageDTO --> PublicAuthorDTO
+    VisibilityUpdateResponse --> PublicChannelDTO
 ```
 
-### 3.2 Service & Repository Layer
+### 3.4 API Controllers (M-B1)
 
 ```mermaid
 classDiagram
-    %% === Services (M-B3: Visibility Management) ===
-    class ChannelVisibilityService {
-        -channelRepository: ChannelRepository
-        -auditLogger: AuditLogService
-        -eventBus: EventBus
-        -permissionService: PermissionService
-        +setVisibility() VisibilityChangeResult
-        +getVisibility() ChannelVisibility
-        +canChangeVisibility() boolean
-        -validateTransition() ValidationResult
-        -emitVisibilityChange() void
-    }
-
-    class PermissionService {
-        +canManageChannel(userId, channelId) boolean
-        +isServerAdmin(userId, serverId) boolean
-        +getEffectivePermissions(userId, channelId) PermissionSet
-    }
-
-    class AuditLogService {
-        +logVisibilityChange(entry) void
-        +getAuditHistory(channelId, options) AuditLogEntry[]
-        +exportAuditLog(channelId, format) Buffer
-    }
-
-    %% === Services (M-B4: Content Delivery) ===
-    class MessageService {
-        -messageRepository: MessageRepository
-        -contentFilter: ContentFilter
-        +getMessagesForPublicView(channelId, page) PublicMessageDTO[]
-        +getMessageById(messageId) PublicMessageDTO
-        +buildMessageDTO(message) PublicMessageDTO
-    }
-
-    class AuthorService {
-        -userRepository: UserRepository
-        +getPublicAuthorInfo(userId) PublicAuthorDTO
-        +anonymizeAuthor(user) PublicAuthorDTO
-        +getDisplayName(user) string
-    }
-
-    class AttachmentService {
-        -storageClient: StorageClient
-        +getPublicAttachmentUrl(attachmentId) string
-        +generateThumbnail(attachment) string
-        +isAttachmentPublic(attachment) boolean
-    }
-
-    %% === Services (M-B5: Meta Tag Engine) ===
-    class MetaTagService {
-        +generateMetaTags(channelId) MetaTagSet
-        +getOrGenerateCached(channelId) MetaTagSet
-        +invalidateCache(channelId) void
-        +scheduleRegeneration(channelId) void
-    }
-
-    class ContentAnalyzer {
-        +analyzeThread(channelId) ContentAnalysis
-        +getTopicCategory(messages) string
-    }
-
-    %% === Services (M-B6: SEO & Indexing) ===
-    class IndexingService {
-        -sitemapGenerator: SitemapGenerator
-        +updateSitemap(serverId) void
-        +notifySearchEngines(url, action) NotificationResult
-        +generateCanonicalUrl(serverId, channelId) string
-        +getRobotsDirectives(visibility) RobotsDirectives
-    }
-
-    class SitemapGenerator {
-        -publicChannelRepo: ChannelRepository
-        +generate(serverId) SitemapXML
-        +getLastModified(serverId) DateTime
-    }
-
-    class SEOService {
-        +generatePageTitle(channel, server) string
-        +generateDescription(channel, messages) string
-        +generateStructuredData(channel, messages) JSON
-        +generateBreadcrumbs(server, channel) JSON
-        +getCanonicalUrl(server, channel) string
-    }
-
-    %% === Access Control (M-B2) ===
-    class VisibilityGuard {
-        -channelRepository: ChannelRepository
-        -cacheService: CacheClient
-        +isChannelPublic(channelId) boolean
-        +isServerPublic(serverId) boolean
-        +getVisibilityStatus(channelId) ChannelVisibility
-    }
-
-    class ContentFilter {
-        -sensitivePatterns: RegExp[]
-        +filterSensitiveContent(content) string
-        +redactUserMentions(content) string
-        +sanitizeForDisplay(html) string
-        +sanitizeAttachments(attachments) Attachment[]
-    }
-
-    class RateLimiter {
-        -windowMs: number
-        -maxRequests: number
-        +checkLimit(key) boolean
-        +incrementCounter(key) void
-        +isRateLimited(key) boolean
-    }
-
-    %% === API Controllers (M-B1) ===
     class ChannelController {
         +getChannelSettings(channelId, ctx) ChannelSettingsResponse
         +updateChannelVisibility(channelId, body, ctx) VisibilityUpdateResponse
@@ -468,7 +367,170 @@ classDiagram
         +getRobotsTxt() RobotsTxt
     }
 
-    %% === Repositories (M-D1) ===
+    ChannelController ..> ChannelVisibilityService : uses
+    ChannelController ..> PermissionService : uses
+    PublicChannelController ..> VisibilityGuard : uses
+    PublicChannelController ..> MessageService : uses
+    PublicChannelController ..> SEOService : uses
+    PublicServerController ..> ServerRepository : uses
+    SEOController ..> IndexingService : uses
+
+    class ChannelVisibilityService { }
+    class PermissionService { }
+    class VisibilityGuard { }
+    class MessageService { }
+    class SEOService { }
+    class ServerRepository { }
+    class IndexingService { }
+```
+
+### 3.5 Visibility & Access Control (M-B2, M-B3)
+
+```mermaid
+classDiagram
+    class ChannelVisibilityService {
+        -channelRepository: ChannelRepository
+        -auditLogger: AuditLogService
+        -eventBus: EventBus
+        -permissionService: PermissionService
+        +setVisibility() VisibilityChangeResult
+        +getVisibility() ChannelVisibility
+        +canChangeVisibility() boolean
+        -validateTransition() ValidationResult
+        -emitVisibilityChange() void
+    }
+
+    class PermissionService {
+        +canManageChannel(userId, channelId) boolean
+        +isServerAdmin(userId, serverId) boolean
+        +getEffectivePermissions(userId, channelId) PermissionSet
+    }
+
+    class AuditLogService {
+        +logVisibilityChange(entry) void
+        +getAuditHistory(channelId, options) AuditLogEntry[]
+        +exportAuditLog(channelId, format) Buffer
+    }
+
+    class VisibilityGuard {
+        -channelRepository: ChannelRepository
+        -cacheService: CacheClient
+        +isChannelPublic(channelId) boolean
+        +isServerPublic(serverId) boolean
+        +getVisibilityStatus(channelId) ChannelVisibility
+    }
+
+    class ContentFilter {
+        -sensitivePatterns: RegExp[]
+        +filterSensitiveContent(content) string
+        +redactUserMentions(content) string
+        +sanitizeForDisplay(html) string
+        +sanitizeAttachments(attachments) Attachment[]
+    }
+
+    class RateLimiter {
+        -windowMs: number
+        -maxRequests: number
+        +checkLimit(key) boolean
+        +incrementCounter(key) void
+        +isRateLimited(key) boolean
+    }
+
+    IVisibilityToggle <|.. ChannelVisibilityService
+    ChannelVisibilityService --> PermissionService
+    ChannelVisibilityService --> AuditLogService
+    ChannelVisibilityService --> ChannelRepository
+    AuditLogService --> AuditLogRepository
+    VisibilityGuard --> ChannelRepository
+
+    class IVisibilityToggle { }
+    class ChannelRepository { }
+    class AuditLogRepository { }
+```
+
+### 3.6 Content, Meta Tags & SEO (M-B4, M-B5, M-B6)
+
+```mermaid
+classDiagram
+    class MessageService {
+        -messageRepository: MessageRepository
+        -contentFilter: ContentFilter
+        +getMessagesForPublicView(channelId, page) PublicMessageDTO[]
+        +getMessageById(messageId) PublicMessageDTO
+        +buildMessageDTO(message) PublicMessageDTO
+    }
+
+    class AuthorService {
+        -userRepository: UserRepository
+        +getPublicAuthorInfo(userId) PublicAuthorDTO
+        +anonymizeAuthor(user) PublicAuthorDTO
+        +getDisplayName(user) string
+    }
+
+    class AttachmentService {
+        -storageClient: StorageClient
+        +getPublicAttachmentUrl(attachmentId) string
+        +generateThumbnail(attachment) string
+        +isAttachmentPublic(attachment) boolean
+    }
+
+    class MetaTagService {
+        +generateMetaTags(channelId) MetaTagSet
+        +getOrGenerateCached(channelId) MetaTagSet
+        +invalidateCache(channelId) void
+        +scheduleRegeneration(channelId) void
+    }
+
+    class ContentAnalyzer {
+        +analyzeThread(channelId) ContentAnalysis
+        +getTopicCategory(messages) string
+    }
+
+    class IndexingService {
+        -sitemapGenerator: SitemapGenerator
+        +updateSitemap(serverId) void
+        +notifySearchEngines(url, action) NotificationResult
+        +generateCanonicalUrl(serverId, channelId) string
+        +getRobotsDirectives(visibility) RobotsDirectives
+    }
+
+    class SitemapGenerator {
+        -publicChannelRepo: ChannelRepository
+        +generate(serverId) SitemapXML
+        +getLastModified(serverId) DateTime
+    }
+
+    class SEOService {
+        +generatePageTitle(channel, server) string
+        +generateDescription(channel, messages) string
+        +generateStructuredData(channel, messages) JSON
+        +generateBreadcrumbs(server, channel) JSON
+        +getCanonicalUrl(server, channel) string
+    }
+
+    IMetaTagGenerator <|.. MetaTagService
+    MessageService --> ContentFilter
+    MetaTagService --> ContentAnalyzer
+    MetaTagService --> MetaTagRepository
+    MetaTagService --> ChannelRepository
+    IndexingService --> SitemapGenerator
+    SitemapGenerator --> ChannelRepository
+    AuthorService --> UserRepository
+    SEOService --> ChannelRepository
+    SEOService --> MessageRepository
+
+    class IMetaTagGenerator { }
+    class ContentFilter { }
+    class MetaTagRepository { }
+    class ChannelRepository { }
+    class UserRepository { }
+    class MessageRepository { }
+```
+
+### 3.7 Repositories (M-D1)
+
+```mermaid
+classDiagram
     class ChannelRepository {
         +findById(channelId) Channel
         +findBySlug(serverSlug, channelSlug) Channel
@@ -507,41 +569,9 @@ classDiagram
         +upsert(channelId, tags) GeneratedMetaTags
         +markForRegeneration(channelId) void
     }
-
-    %% === Relationships ===
-    IVisibilityToggle <|.. ChannelVisibilityService
-    IMetaTagGenerator <|.. MetaTagService
-
-    ChannelVisibilityService --> ChannelRepository
-    ChannelVisibilityService --> AuditLogService
-    ChannelVisibilityService --> PermissionService
-
-    AuditLogService --> AuditLogRepository
-
-    MessageService --> MessageRepository
-    MessageService --> ContentFilter
-    AuthorService --> UserRepository
-    MetaTagService --> ContentAnalyzer
-    MetaTagService --> MetaTagRepository
-    MetaTagService --> ChannelRepository
-
-    IndexingService --> SitemapGenerator
-    SitemapGenerator --> ChannelRepository
-    SEOService --> ChannelRepository
-    SEOService --> MessageRepository
-
-    VisibilityGuard --> ChannelRepository
-
-    ChannelController --> ChannelVisibilityService
-    ChannelController --> PermissionService
-    PublicChannelController --> VisibilityGuard
-    PublicChannelController --> MessageService
-    PublicChannelController --> SEOService
-    PublicServerController --> ServerRepository
-    SEOController --> IndexingService
 ```
 
-### 3.3 Relationship Legend
+### 3.8 Relationship Legend
 
 | Symbol | Meaning |
 |--------|---------|
