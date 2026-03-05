@@ -20,3 +20,4 @@ Always check for lint or build errors before committing code.
 - Keep **Section 3 (Class Diagram)** and **Section 4 (List of Classes)** synchronized whenever classes are added/renamed.
 - Preserve canonical visibility enum values exactly: `PUBLIC_INDEXABLE`, `PUBLIC_NO_INDEX`, `PRIVATE`.
 
+- Always verify tests are running successfully in both the backend and the frontend before pushing changes
