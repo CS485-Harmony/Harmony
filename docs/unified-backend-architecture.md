@@ -448,6 +448,7 @@ These types are returned by services and repositories. They are not exposed over
 | `RobotsDirectives` | `index: boolean`, `follow: boolean`, `robotsTag: string` | `IndexingService.getRobotsDirectives()` |
 | `ChannelMetadata` | `messageCount: number`, `lastActivity: DateTime`, `activeUsers: number` | `ChannelRepository.getMetadata()` |
 | `PaginationInfo` | `page: number`, `limit: number`, `total: number`, `hasMore: boolean` | Used in page response types |
+| `GuestSession` | `sessionId: string`, `preferences: { theme?: string, locale?: string }`, `createdAt: DateTime`, `expiresAt: DateTime` | `AnonymousSessionManager.getSession()` |
 
 ### 3.4 API Controllers (M-B1)
 
@@ -731,7 +732,7 @@ erDiagram
         UUID server_id FK
         VARCHAR_100 name
         VARCHAR_100 slug
-        VARCHAR_20 channel_type
+        channel_type_enum channel_type
         visibility_enum visibility
         TEXT topic
         INTEGER position
@@ -802,6 +803,7 @@ erDiagram
 
 ```sql
 CREATE TYPE visibility_enum AS ENUM ('PUBLIC_INDEXABLE', 'PUBLIC_NO_INDEX', 'PRIVATE');
+CREATE TYPE channel_type_enum AS ENUM ('TEXT', 'VOICE', 'ANNOUNCEMENT');
 ```
 
 ### 4.3 Index Strategy (Canonical Set)
@@ -942,6 +944,7 @@ read `ctx.userId` and `ctx.ip` without additional null checks.
 graph LR
     subgraph tRPC["tRPC Router (/trpc)"]
         direction TB
+        CB["channel.getBySlug"]
         CS["channel.getSettings"]
         CV["channel.updateVisibility"]
         CA["channel.getAuditLog"]
@@ -955,6 +958,7 @@ graph LR
 
 | Procedure | Input | Output | Feature |
 |-----------|-------|--------|---------|
+| `channel.getBySlug` | `{ serverSlug: string, channelSlug: string }` | `ChannelSettingsResponse` | Channel Visibility Toggle |
 | `channel.getSettings` | `{ channelId: UUID }` | `ChannelSettingsResponse` | Channel Visibility Toggle |
 | `channel.updateVisibility` | `{ channelId: UUID, visibility: ChannelVisibility }` | `VisibilityUpdateResponse` | Channel Visibility Toggle |
 | `channel.getAuditLog` | `{ channelId: UUID, limit?, offset?, startDate? }` | `AuditLogResponse` | Channel Visibility Toggle |
@@ -962,7 +966,7 @@ graph LR
 | `admin.updateMetaTags` | `{ channelId: UUID, overrides: Partial<MetaTagSet> }` | `MetaTagSet` | SEO Meta Tag Generation |
 | `admin.regenerateMetaTags` | `{ channelId: UUID }` | `{ jobId: string }` | SEO Meta Tag Generation |
 
-> **Channel identity note:** The `VisibilityToggle` frontend component currently receives `serverSlug` + `channelSlug`. When wiring to the real backend, the settings page must first call `channel.getSettings` (which returns `channelId` in `ChannelSettingsResponse`) and forward that UUID as a prop to `VisibilityToggle`. This slug→UUID resolution happens once at the settings page level; the tRPC procedures operate on UUIDs only.
+> **Channel identity note:** The `VisibilityToggle` frontend component receives `serverSlug` + `channelSlug` from the URL. The settings page calls `channel.getBySlug({ serverSlug, channelSlug })` which returns `ChannelSettingsResponse` (including `channelId: UUID`). The settings page then passes that UUID as a prop to `VisibilityToggle`. All subsequent operations (`channel.updateVisibility`, `channel.getAuditLog`) use the UUID directly. The slug→UUID resolution happens exactly once at settings-page load.
 
 ### 5.2 Public APIs (REST)
 
@@ -1324,8 +1328,11 @@ sequenceDiagram
 
     Admin->>ChannelController: updateVisibility(channelId, PUBLIC_INDEXABLE)
     ChannelController->>VisService: setVisibility(channelId, PUBLIC_INDEXABLE, actorId, ip)
-    VisService->>DB: UPDATE channels SET visibility = 'PUBLIC_INDEXABLE'
-    VisService->>DB: INSERT INTO visibility_audit_log
+    rect rgb(200, 230, 200)
+        note over VisService,DB: Prisma $transaction — atomic<br/>rolls back both on failure
+        VisService->>DB: UPDATE channels SET visibility = 'PUBLIC_INDEXABLE'
+        VisService->>DB: INSERT INTO visibility_audit_log
+    end
     VisService->>EventBus: publish VISIBILITY_CHANGED
 
     par Parallel Event Processing
