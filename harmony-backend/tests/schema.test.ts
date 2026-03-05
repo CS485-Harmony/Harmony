@@ -71,12 +71,12 @@ describe('Enum types', () => {
   }
 
   it('ChannelVisibility has correct values', async () => {
-    const values = await enumValues('ChannelVisibility');
+    const values = await enumValues('channel_visibility');
     expect(values).toEqual(['PUBLIC_INDEXABLE', 'PUBLIC_NO_INDEX', 'PRIVATE']);
   });
 
   it('ChannelType has correct values', async () => {
-    const values = await enumValues('ChannelType');
+    const values = await enumValues('channel_type');
     expect(values).toEqual(['TEXT', 'VOICE', 'ANNOUNCEMENT']);
   });
 });
@@ -108,10 +108,10 @@ describe('Canonical indexes', () => {
     'idx_audit_channel_time',
     'idx_audit_actor',
     // servers
-    'servers_slug_key',          // idx_servers_slug (created as unique)
+    'idx_servers_slug',
     'idx_servers_public',
     // generated_meta_tags
-    'generated_meta_tags_channel_id_key', // idx_meta_tags_channel (unique)
+    'idx_meta_tags_channel',
     'idx_meta_tags_needs_regen',
   ];
 
