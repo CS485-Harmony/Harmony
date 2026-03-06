@@ -43,12 +43,17 @@ describe('server tRPC router', () => {
   });
 
   it('server.getServers returns a result (even if empty)', async () => {
+    const getServersSpy = jest
+      .spyOn(ServerService.prototype, 'getServers')
+      .mockResolvedValue([]);
+
     const res = await request(app).get('/trpc/server.getServers');
-    // Will fail with DB error if not connected, but validates router wiring
-    expect([200, 500]).toContain(res.status);
-    if (res.status === 200) {
-      expect(res.body.result).toBeDefined();
-    }
+
+    expect(res.status).toBe(200);
+    expect(res.body.result).toBeDefined();
+    expect(getServersSpy).toHaveBeenCalled();
+
+    getServersSpy.mockRestore();
   });
 
   it('server.createServer requires authentication', async () => {

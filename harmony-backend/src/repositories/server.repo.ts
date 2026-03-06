@@ -1,6 +1,5 @@
-import { PrismaClient, Server } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { Server } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 
 export class ServerRepository {
   async findById(id: string): Promise<Server | null> {

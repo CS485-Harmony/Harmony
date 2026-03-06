@@ -1,4 +1,5 @@
-import { Server } from '@prisma/client';
+import { Server, Prisma } from '@prisma/client';
+import { TRPCError } from '@trpc/server';
 import { ServerRepository } from '../repositories/server.repo';
 
 export class ServerService {
@@ -19,8 +20,23 @@ export class ServerService {
     isPublic?: boolean;
     ownerId: string;
   }): Promise<Server> {
-    const slug = await this.generateUniqueSlug(input.name);
-    return this.repo.create({ ...input, slug });
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const slug = await this.generateUniqueSlug(input.name);
+      try {
+        return await this.repo.create({ ...input, slug });
+      } catch (err) {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002' &&
+          attempt < maxRetries - 1
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new TRPCError({ code: 'CONFLICT', message: 'Unable to generate a unique slug' });
   }
 
   async updateServer(
@@ -29,8 +45,8 @@ export class ServerService {
     data: { name?: string; description?: string; iconUrl?: string; isPublic?: boolean },
   ): Promise<Server> {
     const server = await this.repo.findById(id);
-    if (!server) throw new Error('Server not found');
-    if (server.ownerId !== actorId) throw new Error('Only the server owner can update');
+    if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
+    if (server.ownerId !== actorId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the server owner can update' });
 
     const updateData: typeof data & { slug?: string } = { ...data };
     if (data.name && data.name !== server.name) {
@@ -41,8 +57,8 @@ export class ServerService {
 
   async deleteServer(id: string, actorId: string): Promise<Server> {
     const server = await this.repo.findById(id);
-    if (!server) throw new Error('Server not found');
-    if (server.ownerId !== actorId) throw new Error('Only the server owner can delete');
+    if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
+    if (server.ownerId !== actorId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the server owner can delete' });
     return this.repo.delete(id);
   }
 

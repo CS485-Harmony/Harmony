@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, publicProcedure } from './init';
 import { ServerService } from '../services/server.service';
 
@@ -13,7 +14,7 @@ export const serverRouter = router({
     .input(z.object({ slug: z.string().min(1) }))
     .query(async ({ input }) => {
       const server = await serverService.getServer(input.slug);
-      if (!server) throw new Error('Server not found');
+      if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
       return server;
     }),
 
