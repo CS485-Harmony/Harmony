@@ -4,23 +4,37 @@ on:
   pull_request:
     types: [opened]
 
+permissions:
+  pull-requests: write # Required to update the PR body
+
 jobs:
   create-forum-post:
     runs-on: ubuntu-latest
     steps:
-      - name: Send Webhook to Discord Forum
+      - name: Send Webhook and Save Thread ID
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           PR_NUM: ${{ github.event.pull_request.number }}
           USER: ${{ github.event.pull_request.user.login }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          jq -n \
+          # Append ?wait=true to receive the message object back from Discord
+          RESPONSE=$(jq -n \
             --arg tn "PR #$PR_NUM: $PR_TITLE" \
-            --arg ct "**New Pull Request opened by @$USER:** $PR_URL" \
+            --arg ct "**New Pull Request opened by @$USER:**\n$PR_URL" \
             --arg tag "1479275090901336146" \
             '{thread_name: $tn, content: $ct, applied_tags: [$tag]}' | \
-          curl -s -X POST "$WEBHOOK_URL" \
+          curl -s -X POST "$WEBHOOK_URL?wait=true" \
             -H "Content-Type: application/json" \
-            -d @-
+            -d @-)
+          
+          # Extract the channel_id (which acts as the thread ID in a forum)
+          THREAD_ID=$(echo "$RESPONSE" | jq -r .channel_id)
+          
+          # Append the Thread ID as a hidden HTML comment in the PR body
+          gh pr edit $PR_NUM --body "$PR_BODY
+          
+          **Discord Thread ID:** $THREAD_ID"
