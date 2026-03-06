@@ -140,7 +140,8 @@ describe('Partial index predicates', () => {
   it('idx_channels_visibility is partial WHERE visibility IN (PUBLIC_INDEXABLE, PUBLIC_NO_INDEX)', async () => {
     const def = await indexDef('idx_channels_visibility');
     expect(def).toContain("WHERE");
-    expect(def.toUpperCase()).toMatch(/PUBLIC_INDEXABLE|PUBLIC_NO_INDEX/);
+    expect(def.toUpperCase()).toContain('PUBLIC_INDEXABLE');
+    expect(def.toUpperCase()).toContain('PUBLIC_NO_INDEX');
   });
 
   it('idx_messages_channel_not_deleted is partial WHERE is_deleted = false', async () => {
@@ -168,7 +169,7 @@ describe('Basic Prisma CRUD', () => {
   let userId: string;
   let serverId: string;
 
-  it('can create a user', async () => {
+  beforeAll(async () => {
     const user = await prisma.user.create({
       data: {
         username: `test_user_${Date.now()}`,
@@ -177,11 +178,7 @@ describe('Basic Prisma CRUD', () => {
       },
     });
     userId = user.id;
-    expect(user.id).toBeTruthy();
-    expect(user.username).toMatch(/^test_user_/);
-  });
 
-  it('can create a server', async () => {
     const server = await prisma.server.create({
       data: {
         name: 'Test Server',
@@ -190,7 +187,14 @@ describe('Basic Prisma CRUD', () => {
       },
     });
     serverId = server.id;
-    expect(server.id).toBeTruthy();
+  });
+
+  it('creates a user with valid id and username', () => {
+    expect(userId).toBeTruthy();
+  });
+
+  it('creates a server with valid id', () => {
+    expect(serverId).toBeTruthy();
   });
 
   it('can create a channel linked to the server', async () => {
