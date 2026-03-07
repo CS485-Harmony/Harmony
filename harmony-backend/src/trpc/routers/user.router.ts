@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import { UserStatus } from '@prisma/client';
 import { router, authedProcedure } from '../init';
 import { userService } from '../../services/user.service';
 
-const UserStatusSchema = z.enum(['ONLINE', 'IDLE', 'DND', 'OFFLINE']);
+const UserStatusSchema = z.nativeEnum(UserStatus);
 
 export const userRouter = router({
   getCurrentUser: authedProcedure.query(({ ctx }) =>

@@ -12,6 +12,7 @@ import { userService } from '../src/services/user.service';
 const prisma = new PrismaClient();
 
 let userId: string;
+let privateUserId: string;
 
 beforeAll(async () => {
   const user = await prisma.user.create({
@@ -22,22 +23,40 @@ beforeAll(async () => {
     },
   });
   userId = user.id;
+
+  const privateUser = await prisma.user.create({
+    data: {
+      username: `private-${Date.now()}`,
+      displayName: 'Private User',
+      publicProfile: false,
+    },
+  });
+  privateUserId = privateUser.id;
 });
 
 afterAll(async () => {
-  if (userId) {
-    await prisma.user.delete({ where: { id: userId } }).catch(() => {});
-  }
+  await prisma.user.deleteMany({
+    where: { id: { in: [userId, privateUserId].filter(Boolean) } },
+  }).catch(() => {});
   await prisma.$disconnect();
 });
 
 // ─── getUser ──────────────────────────────────────────────────────────────────
 
 describe('userService.getUser', () => {
-  it('returns a user by id', async () => {
+  it('returns a public user by id', async () => {
     const user = await userService.getUser(userId);
     expect(user.id).toBe(userId);
     expect(user.displayName).toBe('Test User');
+    expect(user.status).toBe('OFFLINE');
+  });
+
+  it('anonymises a user with publicProfile=false', async () => {
+    const user = await userService.getUser(privateUserId);
+    expect(user.id).toBe(privateUserId);
+    expect(user.displayName).toBe('Anonymous');
+    expect(user.username).toBe('anonymous');
+    expect(user.avatarUrl).toBeNull();
     expect(user.status).toBe('OFFLINE');
   });
 
@@ -56,6 +75,13 @@ describe('userService.getCurrentUser', () => {
     expect(user.id).toBe(userId);
   });
 
+  it('bypasses publicProfile filter — returns own full profile even when private', async () => {
+    const user = await userService.getCurrentUser(privateUserId);
+    expect(user.id).toBe(privateUserId);
+    expect(user.displayName).toBe('Private User');
+    expect(user.username).not.toBe('anonymous');
+  });
+
   it('throws NOT_FOUND for unknown userId', async () => {
     await expect(
       userService.getCurrentUser('00000000-0000-0000-0000-000000000000'),
@@ -66,6 +92,14 @@ describe('userService.getCurrentUser', () => {
 // ─── updateUser ───────────────────────────────────────────────────────────────
 
 describe('userService.updateUser', () => {
+  it('empty patch is a no-op — returns unchanged user', async () => {
+    const before = await userService.getCurrentUser(userId);
+    const after = await userService.updateUser(userId, {});
+    expect(after.displayName).toBe(before.displayName);
+    expect(after.publicProfile).toBe(before.publicProfile);
+    expect(after.status).toBe(before.status);
+  });
+
   it('updates displayName', async () => {
     const updated = await userService.updateUser(userId, { displayName: 'Updated Name' });
     expect(updated.displayName).toBe('Updated Name');
@@ -89,6 +123,11 @@ describe('userService.updateUser', () => {
   it('updates status to DND', async () => {
     const updated = await userService.updateUser(userId, { status: 'DND' });
     expect(updated.status).toBe('DND');
+  });
+
+  it('updates status to OFFLINE', async () => {
+    const updated = await userService.updateUser(userId, { status: 'OFFLINE' });
+    expect(updated.status).toBe('OFFLINE');
   });
 
   it('updates avatarUrl', async () => {

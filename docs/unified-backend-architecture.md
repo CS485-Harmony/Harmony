@@ -183,6 +183,7 @@ classDiagram
         +displayName: string
         +avatarUrl: string?
         +publicProfile: boolean
+        +status: UserStatus
         +createdAt: DateTime
     }
 
@@ -760,6 +761,7 @@ erDiagram
         VARCHAR_100 display_name
         VARCHAR_500 avatar_url
         BOOLEAN public_profile
+        user_status status
         TIMESTAMPTZ created_at
     }
 
