@@ -1,10 +1,37 @@
 import express, { NextFunction, Request, Response } from 'express';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import corsMiddleware, { CorsError } from './middleware/cors';
 import { appRouter } from './trpc/router';
 import { createContext } from './trpc/init';
 import { authRouter } from './routes/auth.router';
+
+// ─── Auth rate limiters ───────────────────────────────────────────────────────
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again later.' },
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many registration attempts. Please try again later.' },
+});
+
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many token refresh attempts. Please try again later.' },
+});
 
 export function createApp() {
   const app = express();
@@ -20,6 +47,9 @@ export function createApp() {
   });
 
   // Auth endpoints
+  app.use('/api/auth/login', loginLimiter);
+  app.use('/api/auth/register', registerLimiter);
+  app.use('/api/auth/refresh', refreshLimiter);
   app.use('/api/auth', authRouter);
 
   // tRPC endpoint

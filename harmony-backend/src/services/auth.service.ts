@@ -1,14 +1,17 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { TRPCError } from '@trpc/server';
 
 const BCRYPT_ROUNDS = 12;
+// Dummy hash used to equalise bcrypt timing when the email is not found
+const TIMING_DUMMY_HASH = '$2a$12$invalidhashfortimingequalizerXXXXXXXXXXXXXXXXXXXXXXXX';
 
 const ACCESS_SECRET = (() => {
   const value = process.env.JWT_ACCESS_SECRET;
-  if (!value && process.env.NODE_ENV === 'production') {
+  if (!value && process.env.NODE_ENV !== 'test') {
     throw new Error('JWT_ACCESS_SECRET environment variable is not set');
   }
   return value ?? 'dev-access-secret-change-in-prod';
@@ -16,7 +19,7 @@ const ACCESS_SECRET = (() => {
 
 const REFRESH_SECRET = (() => {
   const value = process.env.JWT_REFRESH_SECRET;
-  if (!value && process.env.NODE_ENV === 'production') {
+  if (!value && process.env.NODE_ENV !== 'test') {
     throw new Error('JWT_REFRESH_SECRET environment variable is not set');
   }
   return value ?? 'dev-refresh-secret-change-in-prod';
@@ -93,14 +96,22 @@ export const authService = {
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        username,
-        passwordHash,
-        displayName: username,
-      },
-    });
+    let user: Awaited<ReturnType<typeof prisma.user.create>>;
+    try {
+      user = await prisma.user.create({
+        data: {
+          email,
+          username,
+          passwordHash,
+          displayName: username,
+        },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new TRPCError({ code: 'CONFLICT', message: 'Email or username already in use' });
+      }
+      throw err;
+    }
 
     const accessToken = signAccessToken(user.id);
     const refreshToken = signRefreshToken(user.id);
@@ -112,6 +123,8 @@ export const authService = {
   async login(email: string, password: string): Promise<AuthTokens> {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
+      // Equalise timing so unknown emails are indistinguishable from wrong passwords
+      await bcrypt.compare(password, TIMING_DUMMY_HASH);
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
     }
 
@@ -144,17 +157,17 @@ export const authService = {
     }
 
     const hash = hashToken(rawRefreshToken);
-    const stored = await prisma.refreshToken.findUnique({ where: { tokenHash: hash } });
 
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Refresh token revoked or expired' });
-    }
-
-    // Rotate: revoke old, issue new
-    await prisma.refreshToken.update({
-      where: { id: stored.id },
+    // Atomic compare-and-revoke: succeeds only if the token exists, is not revoked, and is not expired.
+    // Two concurrent requests with the same token will race; exactly one will get count === 1.
+    const revoked = await prisma.refreshToken.updateMany({
+      where: { tokenHash: hash, revokedAt: null, expiresAt: { gt: new Date() } },
       data: { revokedAt: new Date() },
     });
+
+    if (revoked.count === 0) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Refresh token revoked or expired' });
+    }
 
     const accessToken = signAccessToken(payload.sub);
     const newRefreshToken = signRefreshToken(payload.sub);

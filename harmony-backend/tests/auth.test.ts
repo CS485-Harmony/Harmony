@@ -6,7 +6,6 @@
  */
 
 import request from 'supertest';
-import crypto from 'crypto';
 import { createApp } from '../src/app';
 import type { Express } from 'express';
 import bcrypt from 'bcryptjs';
@@ -218,12 +217,8 @@ describe('POST /api/auth/refresh', () => {
 
     const { refreshToken } = loginRes.body as { refreshToken: string };
 
-    // Step 2: use the refresh token
-    mockPrisma.refreshToken.findUnique.mockResolvedValue({
-      ...mockRefreshToken,
-      tokenHash: crypto.createHash('sha256').update(refreshToken).digest('hex'),
-    });
-    mockPrisma.refreshToken.update.mockResolvedValue({ ...mockRefreshToken, revokedAt: new Date() });
+    // Step 2: use the refresh token — atomic updateMany returns count: 1 on success
+    mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshToken);
 
     const refreshRes = await request(app)
