@@ -54,9 +54,17 @@ jobs:
             - Tests must be able to run against a real PostgreSQL + Redis instance
             - Do not leave test files that import non-existent modules
 
+            Note: The PR branch is already checked out in the current working directory.
+
+            Use `gh pr comment` for top-level feedback.
+            Use `mcp__github_inline_comment__create_inline_comment` to highlight specific code issues.
+            Only post GitHub comments - don't submit review text as messages.
+
             After your review, submit a formal GitHub PR review using the `gh` CLI:
             - Use `gh pr review <PR_NUMBER> --approve -b "<summary>"` if the PR is ready to merge
             - Use `gh pr review <PR_NUMBER> --request-changes -b "<detailed feedback>"` if changes are needed
             - Include specific file:line references in your feedback
 
             # Do NOT leave nitpick-only comments; focus on issues that matter
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*)"
