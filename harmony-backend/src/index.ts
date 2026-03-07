@@ -1,9 +1,20 @@
 import { createApp } from './app';
+import { cacheInvalidator } from './services/cacheInvalidator.service';
 
 const PORT = Number(process.env.PORT) || 4000;
 
 const app = createApp();
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Harmony backend running on http://localhost:${PORT}`);
+  cacheInvalidator.start();
 });
+
+const shutdown = async () => {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await cacheInvalidator.stop();
+  process.exit(0);
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
