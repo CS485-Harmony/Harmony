@@ -6,6 +6,7 @@ import corsMiddleware, { CorsError } from './middleware/cors';
 import { appRouter } from './trpc/router';
 import { createContext } from './trpc/init';
 import { authRouter } from './routes/auth.router';
+import { publicRouter } from './routes/public.router';
 
 // ─── Auth rate limiters ───────────────────────────────────────────────────────
 
@@ -51,6 +52,9 @@ export function createApp() {
   app.use('/api/auth/register', registerLimiter);
   app.use('/api/auth/refresh', refreshLimiter);
   app.use('/api/auth', authRouter);
+
+  // Public API endpoints (cached, no auth required)
+  app.use('/api/public', publicRouter);
 
   // tRPC endpoint
   app.use(

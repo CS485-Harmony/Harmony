@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { ChannelType, ChannelVisibility } from '@prisma/client';
 import { prisma } from '../db/prisma';
+import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from './cache.service';
 
 export interface CreateChannelInput {
   serverId: string;
@@ -67,9 +68,19 @@ export const channelService = {
       throw new TRPCError({ code: 'CONFLICT', message: 'Channel slug already exists in this server' });
     }
 
-    return prisma.channel.create({
+    const channel = await prisma.channel.create({
       data: { serverId, name, slug, type, visibility, topic, position },
     });
+
+    // Write-through: cache new visibility and invalidate server channel list (best-effort)
+    cacheService.set(
+      CacheKeys.channelVisibility(channel.id),
+      channel.visibility,
+      { ttl: CacheTTL.channelVisibility },
+    ).catch(() => {});
+    cacheService.invalidate(`server:${sanitizeKeySegment(serverId)}:public_channels`).catch(() => {});
+
+    return channel;
   },
 
   async updateChannel(channelId: string, patch: UpdateChannelInput) {
@@ -78,7 +89,7 @@ export const channelService = {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found' });
     }
 
-    return prisma.channel.update({
+    const updated = await prisma.channel.update({
       where: { id: channelId },
       data: {
         ...(patch.name !== undefined && { name: patch.name }),
@@ -86,6 +97,12 @@ export const channelService = {
         ...(patch.position !== undefined && { position: patch.position }),
       },
     });
+
+    // Write-through: invalidate message caches and server channel list (best-effort)
+    cacheService.invalidatePattern(`channel:msgs:${sanitizeKeySegment(channelId)}:*`).catch(() => {});
+    cacheService.invalidate(`server:${sanitizeKeySegment(channel.serverId)}:public_channels`).catch(() => {});
+
+    return updated;
   },
 
   async deleteChannel(channelId: string) {
@@ -95,6 +112,11 @@ export const channelService = {
     }
 
     await prisma.channel.delete({ where: { id: channelId } });
+
+    // Write-through: invalidate all caches for deleted channel (best-effort)
+    cacheService.invalidate(CacheKeys.channelVisibility(channelId)).catch(() => {});
+    cacheService.invalidatePattern(`channel:msgs:${sanitizeKeySegment(channelId)}:*`).catch(() => {});
+    cacheService.invalidate(`server:${sanitizeKeySegment(channel.serverId)}:public_channels`).catch(() => {});
   },
 
   async createDefaultChannel(serverId: string) {
