@@ -50,6 +50,11 @@ describe('buildMockSeedData', () => {
     expect(data.messages.every((message) => userIds.has(message.authorId))).toBe(true);
   });
 
+  it('sets synthetic email and placeholder passwordHash for every user', () => {
+    expect(data.users.every((user) => user.email === `${user.username}@mock.harmony.test`)).toBe(true);
+    expect(data.users.every((user) => user.passwordHash === '!')).toBe(true);
+  });
+
   it('keeps voice channels free of messages', () => {
     const voiceChannelIds = new Set(
       data.channels

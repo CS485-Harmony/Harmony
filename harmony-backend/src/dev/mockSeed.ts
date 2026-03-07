@@ -150,6 +150,8 @@ export function buildMockSeedData(raw: RawSnapshot = snapshot): BuiltMockSeedDat
     displayName: user.displayName,
     avatarUrl: user.avatar,
     publicProfile: true,
+    email: `${user.username}@mock.harmony.test`,
+    passwordHash: '!',
     createdAt: new Date(Date.UTC(2024, 0, 1, 0, index, 0)),
   }));
 
@@ -240,13 +242,26 @@ async function assertNoUniqueConflicts(
   const expectedUserIdsByUsername = new Map(
     raw.users.map((user) => [user.username, legacyIdToUuid(user.id)] as const),
   );
-  const existingUsers = await prismaClient.user.findMany({
-    where: { username: { in: raw.users.map((user) => user.username) } },
-    select: { id: true, username: true },
-  });
+  const expectedUserIdsByEmail = new Map<string, string>(
+    raw.users.map((user) => [`${user.username}@mock.harmony.test`, legacyIdToUuid(user.id)]),
+  );
+
+  const [existingUsers, existingUsersByEmail] = await Promise.all([
+    prismaClient.user.findMany({
+      where: { username: { in: raw.users.map((user) => user.username) } },
+      select: { id: true, username: true },
+    }),
+    prismaClient.user.findMany({
+      where: { email: { in: raw.users.map((user) => `${user.username}@mock.harmony.test`) } },
+      select: { id: true, email: true },
+    }),
+  ]);
 
   const conflictingUsers = existingUsers.filter(
     (user) => expectedUserIdsByUsername.get(user.username) !== user.id,
+  );
+  const conflictingUsersByEmail = existingUsersByEmail.filter(
+    (user) => expectedUserIdsByEmail.get(user.email) !== user.id,
   );
 
   const expectedServerIdsBySlug = new Map(
@@ -280,6 +295,7 @@ async function assertNoUniqueConflicts(
 
   if (
     conflictingUsers.length === 0 &&
+    conflictingUsersByEmail.length === 0 &&
     conflictingServers.length === 0 &&
     conflictingChannels.length === 0
   ) {
@@ -289,6 +305,9 @@ async function assertNoUniqueConflicts(
   const details = [
     ...conflictingUsers.map(
       (user) => `user username "${user.username}" already exists with a different id (${user.id})`,
+    ),
+    ...conflictingUsersByEmail.map(
+      (user) => `user email "${user.email}" already exists with a different id (${user.id})`,
     ),
     ...conflictingServers.map(
       (server) => `server slug "${server.slug}" already exists with a different id (${server.id})`,
@@ -312,69 +331,77 @@ export async function seedMockData(db?: PrismaClient): Promise<SeedCounts> {
   await assertNoUniqueConflicts(prismaClient, snapshot, data);
 
   await prismaClient.$transaction(async (tx) => {
-    for (const user of data.users) {
-      await tx.user.upsert({
-        where: { id: user.id },
-        update: {
-          username: user.username,
-          displayName: user.displayName,
-          avatarUrl: user.avatarUrl,
-          publicProfile: user.publicProfile,
-          createdAt: user.createdAt,
-        },
-        create: user,
-      });
-    }
+    await Promise.all(
+      data.users.map((user) =>
+        tx.user.upsert({
+          where: { id: user.id },
+          update: {
+            username: user.username,
+            displayName: user.displayName,
+            avatarUrl: user.avatarUrl,
+            publicProfile: user.publicProfile,
+            createdAt: user.createdAt,
+          },
+          create: user,
+        }),
+      ),
+    );
 
-    for (const server of data.servers) {
-      await tx.server.upsert({
-        where: { id: server.id },
-        update: {
-          name: server.name,
-          slug: server.slug,
-          description: server.description,
-          iconUrl: server.iconUrl,
-          isPublic: server.isPublic,
-          memberCount: server.memberCount,
-          createdAt: server.createdAt,
-        },
-        create: server,
-      });
-    }
+    await Promise.all(
+      data.servers.map((server) =>
+        tx.server.upsert({
+          where: { id: server.id },
+          update: {
+            name: server.name,
+            slug: server.slug,
+            description: server.description,
+            iconUrl: server.iconUrl,
+            isPublic: server.isPublic,
+            memberCount: server.memberCount,
+            createdAt: server.createdAt,
+          },
+          create: server,
+        }),
+      ),
+    );
 
-    for (const channel of data.channels) {
-      await tx.channel.upsert({
-        where: { id: channel.id },
-        update: {
-          serverId: channel.serverId,
-          name: channel.name,
-          slug: channel.slug,
-          type: channel.type,
-          visibility: channel.visibility,
-          topic: channel.topic,
-          position: channel.position,
-          indexedAt: channel.indexedAt,
-          createdAt: channel.createdAt,
-          updatedAt: channel.updatedAt,
-        },
-        create: channel,
-      });
-    }
+    await Promise.all(
+      data.channels.map((channel) =>
+        tx.channel.upsert({
+          where: { id: channel.id },
+          update: {
+            serverId: channel.serverId,
+            name: channel.name,
+            slug: channel.slug,
+            type: channel.type,
+            visibility: channel.visibility,
+            topic: channel.topic,
+            position: channel.position,
+            indexedAt: channel.indexedAt,
+            createdAt: channel.createdAt,
+            updatedAt: channel.updatedAt,
+          },
+          create: channel,
+        }),
+      ),
+    );
 
-    for (const message of data.messages) {
-      await tx.message.upsert({
-        where: { id: message.id },
-        update: {
-          channelId: message.channelId,
-          authorId: message.authorId,
-          content: message.content,
-          createdAt: message.createdAt,
-          editedAt: message.editedAt,
-          isDeleted: message.isDeleted,
-        },
-        create: message,
-      });
-    }
+    await Promise.all(
+      data.messages.map((message) =>
+        tx.message.upsert({
+          where: { id: message.id },
+          update: {
+            channelId: message.channelId,
+            authorId: message.authorId,
+            content: message.content,
+            createdAt: message.createdAt,
+            editedAt: message.editedAt,
+            isDeleted: message.isDeleted,
+          },
+          create: message,
+        }),
+      ),
+    );
   });
 
   return {
