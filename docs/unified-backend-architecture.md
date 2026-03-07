@@ -897,7 +897,7 @@ graph LR
 
 | Event | Payload | Producer | Consumers |
 |-------|---------|----------|-----------|
-| `VISIBILITY_CHANGED` | `{ channelId, oldVisibility, newVisibility, actorId, timestamp }` | ChannelVisibilityService (M-B3) | IndexingService (M-B6), MetaTagService (M-B5), Cache Invalidator (M-D3) |
+| `VISIBILITY_CHANGED` | `{ channelId, serverId, oldVisibility, newVisibility, actorId, timestamp }` | ChannelVisibilityService (M-B3) | IndexingService (M-B6), MetaTagService (M-B5), Cache Invalidator (M-D3) |
 | `MESSAGE_CREATED` | `{ messageId, channelId, authorId, timestamp }` | Message System | MetaTagService (M-B5), Cache Invalidator (M-D3) |
 | `MESSAGE_EDITED` | `{ messageId, channelId, timestamp }` | Message System | MetaTagService (M-B5), Cache Invalidator (M-D3) |
 | `MESSAGE_DELETED` | `{ messageId, channelId, timestamp }` | Message System | MetaTagService (M-B5), Cache Invalidator (M-D3) |

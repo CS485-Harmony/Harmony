@@ -5,12 +5,16 @@
  * Invalidation rules:
  *   VISIBILITY_CHANGED  → channel:{id}:visibility
  *                       → server:{id}:public_channels
+ *                       → meta:channel:{id}
  *   MESSAGE_CREATED     → channel:msgs:{id}:* (all pages)
+ *                       → analysis:channel:{id}
  *   MESSAGE_EDITED      → channel:msgs:{id}:* (all pages)
+ *                       → analysis:channel:{id}
  *   MESSAGE_DELETED     → channel:msgs:{id}:* (all pages)
+ *                       → analysis:channel:{id}
  */
 
-import { eventBus, EventChannels } from './eventBus.service';
+import { eventBus, EventChannels } from '../events/eventBus';
 import { cacheService, CacheKeys, sanitizeKeySegment } from './cache.service';
 
 type UnsubscribeFn = () => void;
@@ -30,24 +34,40 @@ export const cacheInvalidator = {
       cacheService
         .invalidate(`server:${sanitizeKeySegment(payload.serverId)}:public_channels`)
         .catch((err) => console.error('[CacheInvalidator] VISIBILITY_CHANGED server key failed:', err));
+
+      cacheService
+        .invalidate(`meta:channel:${sanitizeKeySegment(payload.channelId)}`)
+        .catch((err) => console.error('[CacheInvalidator] VISIBILITY_CHANGED meta key failed:', err));
     });
 
     const u2 = eventBus.subscribe(EventChannels.MESSAGE_CREATED, (payload) => {
       cacheService
         .invalidatePattern(`channel:msgs:${sanitizeKeySegment(payload.channelId)}:*`)
         .catch((err) => console.error('[CacheInvalidator] MESSAGE_CREATED invalidation failed:', err));
+
+      cacheService
+        .invalidate(`analysis:channel:${sanitizeKeySegment(payload.channelId)}`)
+        .catch((err) => console.error('[CacheInvalidator] MESSAGE_CREATED analysis key failed:', err));
     });
 
     const u3 = eventBus.subscribe(EventChannels.MESSAGE_EDITED, (payload) => {
       cacheService
         .invalidatePattern(`channel:msgs:${sanitizeKeySegment(payload.channelId)}:*`)
         .catch((err) => console.error('[CacheInvalidator] MESSAGE_EDITED invalidation failed:', err));
+
+      cacheService
+        .invalidate(`analysis:channel:${sanitizeKeySegment(payload.channelId)}`)
+        .catch((err) => console.error('[CacheInvalidator] MESSAGE_EDITED analysis key failed:', err));
     });
 
     const u4 = eventBus.subscribe(EventChannels.MESSAGE_DELETED, (payload) => {
       cacheService
         .invalidatePattern(`channel:msgs:${sanitizeKeySegment(payload.channelId)}:*`)
         .catch((err) => console.error('[CacheInvalidator] MESSAGE_DELETED invalidation failed:', err));
+
+      cacheService
+        .invalidate(`analysis:channel:${sanitizeKeySegment(payload.channelId)}`)
+        .catch((err) => console.error('[CacheInvalidator] MESSAGE_DELETED analysis key failed:', err));
     });
 
     unsubscribers = [u1, u2, u3, u4];

@@ -10,7 +10,7 @@
  * Requires REDIS_URL pointing at a running Redis instance.
  */
 
-import { eventBus, EventChannels } from '../src/services/eventBus.service';
+import { eventBus, EventChannels } from '../src/events/eventBus';
 import { cacheInvalidator } from '../src/services/cacheInvalidator.service';
 import { cacheService } from '../src/services/cache.service';
 import { redis } from '../src/db/redis';
@@ -20,8 +20,25 @@ const TEST_SERVER_ID = '550e8400-e29b-41d4-a716-446655440002';
 const TEST_ACTOR_ID = '550e8400-e29b-41d4-a716-446655440003';
 const TEST_MESSAGE_ID = '550e8400-e29b-41d4-a716-446655440004';
 
-/** Wait for an async side-effect to propagate (pub/sub is async). */
-function waitForPropagation(ms = 100): Promise<void> {
+/**
+ * Polls until `condition()` returns true or `timeout` ms elapses.
+ * Resolves immediately once the condition is met, making tests both
+ * faster and more resilient to Redis latency than a fixed sleep.
+ */
+function waitFor(condition: () => boolean, timeout = 2000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      if (condition()) return resolve();
+      if (Date.now() - start > timeout) return reject(new Error('Timed out waiting for condition'));
+      setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
+/** Wait for the Redis subscribe handshake to complete. */
+function waitForSubscribe(ms = 100): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -48,7 +65,7 @@ describe('EventBus.publish / subscribe', () => {
       received.push(payload);
     });
 
-    await waitForPropagation(50); // allow subscribe handshake
+    await waitForSubscribe(50); // allow subscribe handshake
 
     const payload = {
       channelId: TEST_CHANNEL_ID,
@@ -60,7 +77,7 @@ describe('EventBus.publish / subscribe', () => {
     };
 
     await eventBus.publish(EventChannels.VISIBILITY_CHANGED, payload);
-    await waitForPropagation();
+    await waitFor(() => received.length === 1);
 
     expect(received).toHaveLength(1);
     expect(received[0]).toEqual(payload);
@@ -74,7 +91,7 @@ describe('EventBus.publish / subscribe', () => {
       received.push(payload);
     });
 
-    await waitForPropagation(50);
+    await waitForSubscribe(50);
 
     const payload = {
       messageId: TEST_MESSAGE_ID,
@@ -84,7 +101,7 @@ describe('EventBus.publish / subscribe', () => {
     };
 
     await eventBus.publish(EventChannels.MESSAGE_CREATED, payload);
-    await waitForPropagation();
+    await waitFor(() => received.length === 1);
 
     expect(received).toHaveLength(1);
     expect(received[0]).toEqual(payload);
@@ -98,7 +115,7 @@ describe('EventBus.publish / subscribe', () => {
       received.push(payload);
     });
 
-    await waitForPropagation(50);
+    await waitForSubscribe(50);
 
     const payload = {
       messageId: TEST_MESSAGE_ID,
@@ -107,7 +124,7 @@ describe('EventBus.publish / subscribe', () => {
     };
 
     await eventBus.publish(EventChannels.MESSAGE_EDITED, payload);
-    await waitForPropagation();
+    await waitFor(() => received.length === 1);
 
     expect(received).toHaveLength(1);
     expect(received[0]).toEqual(payload);
@@ -121,7 +138,7 @@ describe('EventBus.publish / subscribe', () => {
       received.push(payload);
     });
 
-    await waitForPropagation(50);
+    await waitForSubscribe(50);
 
     const payload = {
       messageId: TEST_MESSAGE_ID,
@@ -130,7 +147,7 @@ describe('EventBus.publish / subscribe', () => {
     };
 
     await eventBus.publish(EventChannels.MESSAGE_DELETED, payload);
-    await waitForPropagation();
+    await waitFor(() => received.length === 1);
 
     expect(received).toHaveLength(1);
     expect(received[0]).toEqual(payload);
@@ -144,7 +161,7 @@ describe('EventBus.publish / subscribe', () => {
       received.push(payload);
     });
 
-    await waitForPropagation(50);
+    await waitForSubscribe(50);
     unsub(); // unsubscribe before publishing
 
     await eventBus.publish(EventChannels.VISIBILITY_CHANGED, {
@@ -155,7 +172,8 @@ describe('EventBus.publish / subscribe', () => {
       actorId: TEST_ACTOR_ID,
       timestamp: new Date().toISOString(),
     });
-    await waitForPropagation();
+    // Give it time to confirm no message arrives
+    await waitForSubscribe(200);
 
     expect(received).toHaveLength(0);
   });
@@ -171,7 +189,7 @@ describe('CacheInvalidator', () => {
     invalidateSpy = jest.spyOn(cacheService, 'invalidate').mockResolvedValue();
     invalidatePatternSpy = jest.spyOn(cacheService, 'invalidatePattern').mockResolvedValue();
     cacheInvalidator.start();
-    await waitForPropagation(100); // allow subscribe handshakes
+    await waitForSubscribe(100); // allow subscribe handshakes
   });
 
   afterAll(async () => {
@@ -194,7 +212,7 @@ describe('CacheInvalidator', () => {
       actorId: TEST_ACTOR_ID,
       timestamp: new Date().toISOString(),
     });
-    await waitForPropagation();
+    await waitFor(() => invalidateSpy.mock.calls.length >= 1);
 
     expect(invalidateSpy).toHaveBeenCalledWith(`channel:${TEST_CHANNEL_ID}:visibility`);
   });
@@ -208,9 +226,23 @@ describe('CacheInvalidator', () => {
       actorId: TEST_ACTOR_ID,
       timestamp: new Date().toISOString(),
     });
-    await waitForPropagation();
+    await waitFor(() => invalidateSpy.mock.calls.length >= 1);
 
     expect(invalidateSpy).toHaveBeenCalledWith(`server:${TEST_SERVER_ID}:public_channels`);
+  });
+
+  it('VISIBILITY_CHANGED invalidates meta:channel cache key', async () => {
+    await eventBus.publish(EventChannels.VISIBILITY_CHANGED, {
+      channelId: TEST_CHANNEL_ID,
+      serverId: TEST_SERVER_ID,
+      oldVisibility: 'PRIVATE',
+      newVisibility: 'PUBLIC_INDEXABLE',
+      actorId: TEST_ACTOR_ID,
+      timestamp: new Date().toISOString(),
+    });
+    await waitFor(() => invalidateSpy.mock.calls.length >= 1);
+
+    expect(invalidateSpy).toHaveBeenCalledWith(`meta:channel:${TEST_CHANNEL_ID}`);
   });
 
   it('MESSAGE_CREATED invalidates all message page caches for the channel', async () => {
@@ -220,9 +252,21 @@ describe('CacheInvalidator', () => {
       authorId: TEST_ACTOR_ID,
       timestamp: new Date().toISOString(),
     });
-    await waitForPropagation();
+    await waitFor(() => invalidatePatternSpy.mock.calls.length >= 1);
 
     expect(invalidatePatternSpy).toHaveBeenCalledWith(`channel:msgs:${TEST_CHANNEL_ID}:*`);
+  });
+
+  it('MESSAGE_CREATED invalidates analysis:channel cache key', async () => {
+    await eventBus.publish(EventChannels.MESSAGE_CREATED, {
+      messageId: TEST_MESSAGE_ID,
+      channelId: TEST_CHANNEL_ID,
+      authorId: TEST_ACTOR_ID,
+      timestamp: new Date().toISOString(),
+    });
+    await waitFor(() => invalidateSpy.mock.calls.length >= 1);
+
+    expect(invalidateSpy).toHaveBeenCalledWith(`analysis:channel:${TEST_CHANNEL_ID}`);
   });
 
   it('MESSAGE_EDITED invalidates all message page caches for the channel', async () => {
@@ -231,9 +275,20 @@ describe('CacheInvalidator', () => {
       channelId: TEST_CHANNEL_ID,
       timestamp: new Date().toISOString(),
     });
-    await waitForPropagation();
+    await waitFor(() => invalidatePatternSpy.mock.calls.length >= 1);
 
     expect(invalidatePatternSpy).toHaveBeenCalledWith(`channel:msgs:${TEST_CHANNEL_ID}:*`);
+  });
+
+  it('MESSAGE_EDITED invalidates analysis:channel cache key', async () => {
+    await eventBus.publish(EventChannels.MESSAGE_EDITED, {
+      messageId: TEST_MESSAGE_ID,
+      channelId: TEST_CHANNEL_ID,
+      timestamp: new Date().toISOString(),
+    });
+    await waitFor(() => invalidateSpy.mock.calls.length >= 1);
+
+    expect(invalidateSpy).toHaveBeenCalledWith(`analysis:channel:${TEST_CHANNEL_ID}`);
   });
 
   it('MESSAGE_DELETED invalidates all message page caches for the channel', async () => {
@@ -242,9 +297,20 @@ describe('CacheInvalidator', () => {
       channelId: TEST_CHANNEL_ID,
       timestamp: new Date().toISOString(),
     });
-    await waitForPropagation();
+    await waitFor(() => invalidatePatternSpy.mock.calls.length >= 1);
 
     expect(invalidatePatternSpy).toHaveBeenCalledWith(`channel:msgs:${TEST_CHANNEL_ID}:*`);
+  });
+
+  it('MESSAGE_DELETED invalidates analysis:channel cache key', async () => {
+    await eventBus.publish(EventChannels.MESSAGE_DELETED, {
+      messageId: TEST_MESSAGE_ID,
+      channelId: TEST_CHANNEL_ID,
+      timestamp: new Date().toISOString(),
+    });
+    await waitFor(() => invalidateSpy.mock.calls.length >= 1);
+
+    expect(invalidateSpy).toHaveBeenCalledWith(`analysis:channel:${TEST_CHANNEL_ID}`);
   });
 
   it('cacheInvalidator.start() is idempotent (double-start safe)', () => {
