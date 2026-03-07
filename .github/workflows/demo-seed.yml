@@ -1,0 +1,55 @@
+name: Seed Demo Database
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: Run prisma migrate deploy before seeding the demo database
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  seed-demo:
+    name: Seed demo database
+    runs-on: ubuntu-latest
+    environment: demo
+    defaults:
+      run:
+        working-directory: harmony-backend
+    env:
+      DATABASE_URL: ${{ secrets.DEMO_DATABASE_URL }}
+      HARMONY_DEMO_MODE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: harmony-backend/package-lock.json
+
+      - name: Validate demo database secret
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Set the DEMO_DATABASE_URL secret for the demo environment before running this workflow."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run migrations
+        if: ${{ inputs.run_migrations }}
+        run: npx prisma migrate deploy
+
+      - name: Seed demo database
+        env:
+          NODE_ENV: production
+        run: npm run db:seed:demo
