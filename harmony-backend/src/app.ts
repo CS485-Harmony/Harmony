@@ -51,7 +51,7 @@ export function createApp() {
   app.use('/api/auth/login', loginLimiter);
   app.use('/api/auth/register', registerLimiter);
   app.use('/api/auth/refresh', refreshLimiter);
-  app.use('/api/auth', authRouter);
+  // app.use('/api/auth', authRouter);
 
   // Public API endpoints (cached, no auth required)
   app.use('/api/public', publicRouter);
