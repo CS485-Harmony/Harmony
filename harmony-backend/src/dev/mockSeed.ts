@@ -44,7 +44,7 @@ type RawMessage = {
   timestamp: string;
 };
 
-type RawSnapshot = {
+export type RawSnapshot = {
   users: RawUser[];
   servers: RawServer[];
   channels: RawChannel[];
@@ -234,7 +234,7 @@ async function getPrismaClient(): Promise<PrismaClient> {
   return (await import('../db/prisma')).prisma;
 }
 
-async function assertNoUniqueConflicts(
+export async function assertNoUniqueConflicts(
   prismaClient: PrismaClient,
   raw: RawSnapshot,
   data: BuiltMockSeedData,
@@ -323,11 +323,15 @@ async function assertNoUniqueConflicts(
   );
 }
 
-export async function seedMockData(db?: PrismaClient): Promise<SeedCounts> {
-  assertMockSeedAllowed();
+export async function seedMockData(db?: PrismaClient, allowMockSeed = false): Promise<SeedCounts> {
+  if (!allowMockSeed) {
+    assertMockSeedAllowed();
+  }
   const data = buildMockSeedData();
   const prismaClient = db ?? (await getPrismaClient());
 
+  // Note: intentional pre-flight check; not atomic with the upserts below.
+  // This is a TOCTOU trade-off acceptable for a dev/seed tool.
   await assertNoUniqueConflicts(prismaClient, snapshot, data);
 
   await prismaClient.$transaction(async (tx) => {
@@ -412,25 +416,4 @@ export async function seedMockData(db?: PrismaClient): Promise<SeedCounts> {
       messages: data.messages.length,
     },
   };
-}
-
-async function main(): Promise<void> {
-  assertMockSeedAllowed();
-  const prisma = await getPrismaClient();
-  try {
-    const counts = await seedMockData(prisma);
-    console.log(
-      `Reconciled removable mock dataset (${counts.reconciled.users} users, ${counts.reconciled.servers} servers, ${counts.reconciled.channels} channels, ${counts.reconciled.messages} messages).`,
-    );
-  } finally {
-    await prisma.$disconnect();
-  }
-}
-
-if (require.main === module) {
-  void main()
-    .catch((error: unknown) => {
-      console.error(error);
-      process.exitCode = 1;
-    });
 }

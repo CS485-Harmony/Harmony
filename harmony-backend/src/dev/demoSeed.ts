@@ -8,21 +8,16 @@ export function assertDemoSeedAllowed(env: NodeJS.ProcessEnv = process.env): voi
   }
 }
 
-export function enableDemoSeed(env: NodeJS.ProcessEnv = process.env): void {
-  env.HARMONY_ALLOW_MOCK_SEED = 'true';
-}
-
 async function getPrismaClient() {
   return (await import('../db/prisma')).prisma;
 }
 
 async function main(): Promise<void> {
   assertDemoSeedAllowed();
-  enableDemoSeed();
 
   const prisma = await getPrismaClient();
   try {
-    const counts = await seedMockData(prisma);
+    const counts = await seedMockData(prisma, true);
     console.log(
       `Reconciled demo dataset (${counts.reconciled.users} users, ${counts.reconciled.servers} servers, ${counts.reconciled.channels} channels, ${counts.reconciled.messages} messages).`,
     );

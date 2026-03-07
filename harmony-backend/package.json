@@ -12,7 +12,7 @@
     "db:seed:demo": "tsx src/dev/demoSeed.ts"
   },
   "prisma": {
-    "seed": "tsx src/dev/mockSeed.ts"
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
