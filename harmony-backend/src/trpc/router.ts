@@ -7,7 +7,6 @@ export const appRouter = router({
     return { status: 'ok', timestamp: new Date().toISOString() };
   }),
   channel: channelRouter,
-  user: userRouter,
 });
 
 export type AppRouter = typeof appRouter;
