@@ -49,7 +49,6 @@ const MEMBER_PERMISSIONS = new Set<Action>([
 const MODERATOR_PERMISSIONS = new Set<Action>([
   ...MEMBER_PERMISSIONS,
   'message:delete_any',
-  'channel:read',
 ]);
 
 const ADMIN_PERMISSIONS = new Set<Action>([

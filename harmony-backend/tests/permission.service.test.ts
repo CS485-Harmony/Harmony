@@ -7,7 +7,6 @@
  */
 
 import { PrismaClient, RoleType } from '@prisma/client';
-import { TRPCError } from '@trpc/server';
 import { permissionService, type Action } from '../src/services/permission.service';
 
 const prisma = new PrismaClient();

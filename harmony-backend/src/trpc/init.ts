@@ -27,6 +27,7 @@ export function createContext({ req }: { req: Request }): TRPCContext {
 const t = initTRPC.context<TRPCContext>().create();
 
 export const router = t.router;
+export const createCallerFactory = t.createCallerFactory;
 
 /** Use for unauthenticated procedures (health, public REST). */
 export const publicProcedure = t.procedure;
@@ -50,6 +51,12 @@ export const authedProcedure = t.procedure.use(({ ctx, next }) => {
  *     .mutation(...)
  *
  * The input schema MUST include `serverId: string` (UUID).
+ *
+ * Throws:
+ *   - BAD_REQUEST  — `serverId` is absent from the input
+ *   - FORBIDDEN    — caller is not a member, lacks the action, or the server
+ *                    does not exist (NOT_FOUND is collapsed to FORBIDDEN to
+ *                    prevent callers from probing arbitrary server UUIDs)
  */
 export function withPermission(action: Action) {
   return authedProcedure.use(async ({ ctx, getRawInput, next }) => {
@@ -59,7 +66,14 @@ export function withPermission(action: Action) {
     if (!serverId) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'serverId is required for permission checks' });
     }
-    await permissionService.requirePermission(ctx.userId, serverId, action);
+    try {
+      await permissionService.requirePermission(ctx.userId, serverId, action);
+    } catch (err) {
+      if (err instanceof TRPCError && err.code === 'NOT_FOUND') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Access denied' });
+      }
+      throw err;
+    }
     return next();
   });
 }
