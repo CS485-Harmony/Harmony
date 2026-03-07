@@ -8,9 +8,6 @@ export function assertDemoSeedAllowed(env: NodeJS.ProcessEnv = process.env): voi
   }
 }
 
-async function getPrismaClient() {
-  return (await import('../db/prisma')).prisma;
-}
 
 async function main(): Promise<void> {
   assertDemoSeedAllowed();
