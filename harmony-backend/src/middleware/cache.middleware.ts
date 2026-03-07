@@ -25,6 +25,7 @@ export function cacheMiddleware(options: CacheMiddlewareOptions) {
       if (entry && !cacheService.isStale(entry, options.ttl)) {
         res.set('X-Cache', 'HIT');
         res.set('X-Cache-Key', key);
+        res.set('Cache-Control', `public, max-age=${options.ttl}`);
         return res.json(entry.data);
       }
     } catch {
