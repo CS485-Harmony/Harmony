@@ -41,6 +41,30 @@ describe('server tRPC router', () => {
     app = createApp();
   });
 
+  it('server.getServer returns 404 for a private server (unauthenticated)', async () => {
+    const getServerSpy = jest
+      .spyOn(serverService, 'getServer')
+      .mockResolvedValue({ id: '1', slug: 'private-server', isPublic: false } as any);
+
+    const res = await request(app).get('/trpc/server.getServer?input=%7B%22slug%22%3A%22private-server%22%7D');
+
+    expect(res.status).toBe(404);
+    getServerSpy.mockRestore();
+  });
+
+  it('server.getServer returns the server when it is public', async () => {
+    const mockServer = { id: '1', slug: 'public-server', isPublic: true, name: 'Public Server' } as any;
+    const getServerSpy = jest
+      .spyOn(serverService, 'getServer')
+      .mockResolvedValue(mockServer);
+
+    const res = await request(app).get('/trpc/server.getServer?input=%7B%22slug%22%3A%22public-server%22%7D');
+
+    expect(res.status).toBe(200);
+    expect(res.body.result).toBeDefined();
+    getServerSpy.mockRestore();
+  });
+
   it('server.getServers returns a result (even if empty)', async () => {
     const getServersSpy = jest
       .spyOn(serverService, 'getPublicServers')

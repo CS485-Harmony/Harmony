@@ -12,7 +12,7 @@ export const serverRouter = router({
     .input(z.object({ slug: z.string().min(1) }))
     .query(async ({ input }) => {
       const server = await serverService.getServer(input.slug);
-      if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
+      if (!server || !server.isPublic) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
       return server;
     }),
 
