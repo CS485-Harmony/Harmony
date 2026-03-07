@@ -1,0 +1,60 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          direct_prompt: |
+            You are reviewing a pull request for the Harmony project — a search-engine-indexable
+            Discord-like chat application. 
+            Review this PR thoroughly against the following criteria:
+
+            **Best Practices**
+            - Ensure changes align with expectations defined in architecture/dev spec documents.
+            - If the PR is targeting an issue, make sure it fulfills all issue requirements.
+
+            **Code Quality & Style**
+            - TypeScript strict mode; no implicit `any`; unused vars/params must be prefixed with `_`
+            - Prettier formatting: 100-char line width, semicolons, single quotes, trailing commas
+            - ESLint 9 rules must be respected
+            - Backend: camelCase for code, snake_case in DB (mapped via Prisma `@map()`)
+            - Frontend: React components in PascalCase, hooks prefixed `use`
+
+            **Security**
+            - JWT tokens must not be stored insecurely or leaked in logs
+            - Auth middleware must be applied to all protected tRPC/REST routes
+            - No raw SQL that could lead to injection — use Prisma query builder
+            - No secrets/credentials hardcoded
+
+            **Project Conventions**
+            - REST routes are for public/unauthenticated access (SEO crawlers); tRPC is for
+              authenticated admin operations — do not mix these
+            - Prisma `ChannelVisibility` enum values (PUBLIC_INDEXABLE, PUBLIC_NO_INDEX, PRIVATE)
+              must not be renamed or altered
+            - New DB fields must follow snake_case naming and be added to `schema.prisma`
+            - Keep Section 3 (Class Diagram) and Section 4 (List of Classes) in docs in sync
+              if architectural changes are made
+
+            **Test Coverage**
+            - Backend changes must include or update Jest tests in `tests/**/*.test.ts`
+            - Tests must be able to run against a real PostgreSQL + Redis instance
+            - Do not leave test files that import non-existent modules
+
+            After your review, submit a formal GitHub PR review using the `gh` CLI:
+            - Use `gh pr review <PR_NUMBER> --approve -b "<summary>"` if the PR is ready to merge
+            - Use `gh pr review <PR_NUMBER> --request-changes -b "<detailed feedback>"` if changes are needed
+            - Include specific file:line references in your feedback
+
+            # Do NOT leave nitpick-only comments; focus on issues that matter

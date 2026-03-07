@@ -1,0 +1,236 @@
+
+ ▐▛███▜▌   Claude Code v2.1.70
+▝▜█████▛▘  Sonnet 4.6 · Claude Pro
+  ▘▘ ▝▝    ~/dev/school/cs485/Harmony
+
+❯ /clear 
+  ⎿  (no content)
+
+❯ I would like you to automatically watch this repository on GitHub for new 
+   PRs and review them automatically as they appear. How can I set up this  
+  sort of workflow?                                                         
+
+❯ Tool loaded. 
+
+⏺ Recalled 1 memory, searched for 2 patterns, read 2 files (ctrl+o to expand)
+
+❯ Tool loaded. 
+
+⏺ User answered Claude's questions:
+  ⎿  · Which GitHub Action approach would you prefer? → 
+     anthropics/claude-code-action (Recommended)
+     · What should the review formally do on GitHub? → Request changes or 
+     approve
+     · When should the review trigger? → On open + new commits (Recommended)
+     · What should the review focus on? → Security vulnerabilities, Project 
+     conventions, Code quality & style, Test coverage
+  ⎿  Initializing…
+  ⎿  Invalid tool parameters
+
+❯ Tool loaded. 
+
+⏺ Explore(Explore repo tech stack)
+  ⎿  Done (33 tool uses · 46.1k tokens · 43s)
+  (ctrl+o to expand)
+
+⏺ Now I have everything I need. Let me write the plan.
+
+⏺ Updated plan
+  ⎿  /plan to preview
+
+⏺ User approved Claude's plan
+  ⎿  Plan saved to: ~/.claude/plans/vivid-growing-crown.md · /plan to edit
+     Plan: Automated Claude PR Review Workflow
+
+     Context
+
+     Set up a GitHub Actions workflow that automatically reviews every
+     new/updated PR using anthropics/claude-code-action. The review should
+     submit a formal GitHub review (approve or request changes) covering code
+     quality, security, project conventions, and test coverage.
+
+     Approach
+
+     1. Add GitHub Secret
+
+     In the repo's GitHub Settings → Secrets and variables → Actions, add:
+     - ANTHROPIC_API_KEY — your Anthropic API key
+
+     GITHUB_TOKEN is provided automatically by Actions.
+
+     2. Create Workflow File
+
+     File: .github/workflows/claude-pr-review.yml
+
+     name: Claude PR Review
+
+     on:
+       pull_request:
+         types: [opened, synchronize]
+         branches: [main]
+
+     jobs:
+       review:
+         runs-on: ubuntu-latest
+         permissions:
+           contents: read
+           pull-requests: write
+         steps:
+           - uses: anthropics/claude-code-action@beta
+             with:
+               anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+               github_token: ${{ secrets.GITHUB_TOKEN }}
+               direct_prompt: |
+                 You are reviewing a pull request for the Harmony project — a 
+     search-engine-indexable
+                 chat application built with Next.js 16 (frontend) and Express +
+      tRPC 11 (backend),
+                 using TypeScript 5, Prisma 5 ORM, PostgreSQL 16, and Redis.
+
+                 Review this PR thoroughly against the following criteria:
+
+                 **Code Quality & Style**
+                 - TypeScript strict mode; no implicit `any`; unused vars/params
+      must be prefixed with `_`
+                 - Prettier formatting: 100-char line width, semicolons, single
+     quotes, trailing commas
+                 - ESLint 9 rules must be respected
+                 - Backend: camelCase for code, snake_case in DB (mapped via
+     Prisma `@map()`)
+                 - Frontend: React components in PascalCase, hooks prefixed
+     `use`
+
+                 **Security**
+                 - JWT tokens must not be stored insecurely or leaked in logs
+                 - Auth middleware must be applied to all protected tRPC/REST
+     routes
+                 - No raw SQL that could lead to injection — use Prisma query
+     builder
+                 - No secrets/credentials hardcoded
+
+                 **Project Conventions**
+                 - REST routes are for public/unauthenticated access (SEO
+     crawlers); tRPC is for
+                   authenticated admin operations — do not mix these
+                 - Prisma `ChannelVisibility` enum values (PUBLIC_INDEXABLE,
+     PUBLIC_NO_INDEX, PRIVATE)
+                   must not be renamed or altered
+                 - New DB fields must follow snake_case naming and be added to
+     `schema.prisma`
+                 - Keep Section 3 (Class Diagram) and Section 4 (List of
+     Classes) in docs in sync
+                   if architectural changes are made
+
+                 **Test Coverage**
+                 - Backend changes must include or update Jest tests in
+     `tests/**/*.test.ts`
+                 - Tests must be able to run against a real PostgreSQL + Redis
+     instance
+                 - Do not leave test files that import non-existent modules
+
+                 After your review, submit a formal GitHub PR review using the
+     `gh` CLI:
+                 - Use `gh pr review <PR_NUMBER> --approve -b "<summary>"` if
+     the PR is ready to merge
+                 - Use `gh pr review <PR_NUMBER> --request-changes -b "<detailed
+      feedback>"` if changes are needed
+                 - Include specific file:line references in your feedback
+                 - Do NOT leave nitpick-only comments; focus on issues that
+     matter
+
+     3. Workflow Behavior
+
+     - Triggers on every PR opened or updated targeting main
+     - Claude checks out the PR diff via the action's built-in GitHub context
+     - Claude posts a formal review (approve or request changes) — not just a
+     comment
+     - Runs on ubuntu-latest with only contents: read + pull-requests: write
+     permissions (least privilege)
+
+     Files to Create
+
+     - .github/workflows/claude-pr-review.yml (new file)
+
+     Files to Modify
+
+     None.
+
+     Verification
+
+     1. Open a test PR targeting main — the Claude PR Review workflow should
+     appear in the Checks section
+     2. Verify the workflow completes and a formal GitHub review
+     (approve/request changes) appears on the PR
+     3. Push a new commit to the open PR — verify the workflow re-runs
+     (synchronize event)
+     4. Check Actions logs to confirm the ANTHROPIC_API_KEY secret is being
+     consumed (no 401 errors)
+
+     Notes
+
+     - The anthropics/claude-code-action@beta tag is the current stable release
+     channel for this action
+     - If the repo has branch protection rules requiring reviews, this bot
+     review can satisfy that requirement — configure "Required approving
+     reviews" to accept reviews from GitHub Actions
+     - The action automatically handles diff fetching and GitHub context
+     injection; no manual git diff step is needed
+
+⏺ Write(.github/workflows/claude-pr-review.yml)
+  ⎿  Wrote 57 lines to .github/workflows/claude-pr-review.yml
+       1 name: Claude PR Review
+       2 
+       3 on:
+       4   pull_request:
+       5     types: [opened, synchronize]
+       6     branches: [main]
+       7 
+       8 jobs:
+       9   review:
+      10     runs-on: ubuntu-latest
+     … +47 lines (ctrl+o to expand)
+
+⏺ Done. One manual step required before it works:
+
+  Add your Anthropic API key as a GitHub secret:
+  1. Go to your repo on GitHub → Settings → Secrets and variables → Actions
+  2. Click "New repository secret"
+  3. Name: ANTHROPIC_API_KEY, Value: your key from console.anthropic.com
+
+  After that, every PR opened or updated against main will automatically get a
+  formal Claude review (approve or request changes) covering security, code
+  quality, test coverage, and Harmony-specific conventions.
+
+✻ Cogitated for 2m 44s
+
+❯ Great, create a new branch to push these changes to, commit the changes,  
+  push them, and open a PR.                                                 
+
+❯ Tool loaded. 
+
+⏺ Bash(git status && git log --oneline -5)
+  ⎿  On branch main
+     Your branch is up to date with 'origin/main'.
+     … +16 lines (ctrl+o to expand)
+
+⏺ Bash(git checkout -b feature/automated-claude-pr-review && git add
+      .github/workflows/claude-pr-review.yml && git commit -m "$(cat <<'EOF'
+      ci: add automated Claude PR…)
+  ⎿  Switched to a new branch 'feature/automated-claude-pr-review'
+     [feature/automated-claude-pr-review 9248285] ci: add automated Claude
+     PR review workflow
+     … +3 lines (ctrl+o to expand)
+
+⏺ Bash(git push -u origin feature/automated-claude-pr-review && gh pr create
+      --title "ci: add automated Claude PR review workflow" --body "$(cat
+      <<'EOF'
+      ## Summary…)
+  ⎿  remote:
+     remote: Create a pull request for 'feature/automated-claude-pr-review'
+      on GitHub by visiting:
+     … +10 lines (ctrl+o to expand)
+
+⏺ PR is open at https://github.com/acabrera04/Harmony/pull/137.
+
+  The uncommitted change warning is just the staged llm-logs file — nothing that
+   affects the workflow.
