@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { router, authedProcedure, withPermission } from '../init';
+import { router, withPermission } from '../init';
 import { channelService } from '../../services/channel.service';
 import { visibilityService } from '../../services/visibility.service';
 
@@ -12,9 +12,9 @@ export const channelRouter = router({
     .input(z.object({ serverId: z.string().uuid() }))
     .query(({ input }) => channelService.getChannels(input.serverId)),
 
-  /** Public channel lookup by slug — no membership required (slug is not secret). */
-  getChannel: authedProcedure
-    .input(z.object({ serverSlug: z.string(), channelSlug: z.string() }))
+  /** Requires channel:read — prevents leaking PRIVATE channel metadata to non-members. */
+  getChannel: withPermission('channel:read')
+    .input(z.object({ serverId: z.string().uuid(), serverSlug: z.string(), channelSlug: z.string() }))
     .query(({ input }) => channelService.getChannelBySlug(input.serverSlug, input.channelSlug)),
 
   createChannel: withPermission('channel:create')
@@ -64,6 +64,7 @@ export const channelRouter = router({
     .mutation(({ input, ctx }) =>
       visibilityService.setVisibility({
         channelId: input.channelId,
+        serverId: input.serverId,
         visibility: input.visibility,
         actorId: ctx.userId,
         ip: ctx.ip,

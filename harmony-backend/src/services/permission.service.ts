@@ -117,7 +117,7 @@ export const permissionService = {
    * Use this inside tRPC procedures that should reject unauthorized callers.
    */
   async requirePermission(userId: string, serverId: string, action: Action): Promise<void> {
-    const allowed = await this.checkPermission(userId, serverId, action);
+    const allowed = await permissionService.checkPermission(userId, serverId, action);
     if (!allowed) {
       throw new TRPCError({
         code: 'FORBIDDEN',
