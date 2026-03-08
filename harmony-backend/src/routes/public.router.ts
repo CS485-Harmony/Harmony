@@ -1,22 +1,14 @@
 import { Router, Request, Response } from 'express';
-import rateLimit from 'express-rate-limit';
 import { prisma } from '../db/prisma';
 import { ChannelVisibility } from '@prisma/client';
 import { cacheMiddleware } from '../middleware/cache.middleware';
 import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from '../services/cache.service';
+import { tokenBucketRateLimiter } from '../middleware/rate-limit.middleware';
 
 export const publicRouter = Router();
 
-// Guest rate limiter per §5.3: 60 req / 1 min per IP
-const publicLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests. Please try again later.' },
-});
-
-publicRouter.use(publicLimiter);
+// Token bucket rate limiting per §5.3: 100 req/min (human) / 1000 req/min (verified bots)
+publicRouter.use(tokenBucketRateLimiter);
 
 /**
  * GET /api/public/channels/:channelId/messages
