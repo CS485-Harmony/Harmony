@@ -210,6 +210,14 @@ classDiagram
         +userAgent: string
     }
 
+    class ServerMember {
+        <<entity>>
+        +userId: UUID
+        +serverId: UUID
+        +role: RoleType
+        +joinedAt: DateTime
+    }
+
     class GeneratedMetaTags {
         <<entity>>
         +id: UUID
@@ -235,6 +243,8 @@ classDiagram
     Message "1" --> "*" Attachment
     Channel "1" --> "*" AuditLogEntry
     Channel "1" --> "0..1" GeneratedMetaTags
+    Server "1" --> "*" ServerMember
+    User "1" --> "*" ServerMember
 ```
 
 > **Entity methods note:** `isPublic()` and `isIndexable()` are logical helpers shown in older diagrams. Because Prisma returns plain data objects, these **must not** be implemented as class methods on the entity. Implement them as utility functions in the service layer (e.g., `isPublicChannel(channel: Channel): boolean` in `visibility.service.ts`).
@@ -268,6 +278,23 @@ classDiagram
         PUBLIC_INDEXABLE
         PUBLIC_NO_INDEX
         PRIVATE
+    }
+
+    class RoleType {
+        <<enumeration>>
+        OWNER
+        ADMIN
+        MODERATOR
+        MEMBER
+        GUEST
+    }
+
+    class UserStatus {
+        <<enumeration>>
+        ONLINE
+        IDLE
+        DND
+        OFFLINE
     }
 
     class VisibilityChangeEvent {
@@ -516,9 +543,9 @@ classDiagram
     }
 
     class PermissionService {
-        +canManageChannel(userId, channelId) boolean
-        +isServerAdmin(userId, serverId) boolean
-        +getEffectivePermissions(userId, channelId) PermissionSet
+        +getMemberRole(userId, serverId) RoleType?
+        +checkPermission(userId, serverId, action) boolean
+        +requirePermission(userId, serverId, action) void
     }
 
     class AuditLogService {
@@ -714,12 +741,14 @@ classDiagram
 ```mermaid
 erDiagram
     servers ||--o{ channels : "has"
+    servers ||--o{ server_members : "has"
     channels ||--o{ messages : "contains"
     channels ||--o{ visibility_audit_log : "tracks"
     channels ||--o| generated_meta_tags : "has"
     messages }o--|| users : "authored by"
     messages ||--o{ attachments : "has"
     users ||--o{ refresh_tokens : "has"
+    users ||--o{ server_members : "member of"
 
     servers {
         UUID id PK
@@ -814,6 +843,13 @@ erDiagram
         TIMESTAMPTZ generated_at
         INTEGER schema_version
     }
+
+    server_members {
+        UUID user_id PK_FK
+        UUID server_id PK_FK
+        role_type role
+        TIMESTAMPTZ joined_at
+    }
 ```
 
 ### 4.2 Enum Definition
@@ -821,6 +857,8 @@ erDiagram
 ```sql
 CREATE TYPE channel_visibility AS ENUM ('PUBLIC_INDEXABLE', 'PUBLIC_NO_INDEX', 'PRIVATE');
 CREATE TYPE channel_type AS ENUM ('TEXT', 'VOICE', 'ANNOUNCEMENT');
+CREATE TYPE user_status AS ENUM ('ONLINE', 'IDLE', 'DND', 'OFFLINE');
+CREATE TYPE role_type AS ENUM ('OWNER', 'ADMIN', 'MODERATOR', 'MEMBER', 'GUEST');
 ```
 
 ### 4.3 Index Strategy (Canonical Set)

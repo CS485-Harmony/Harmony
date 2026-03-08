@@ -56,8 +56,10 @@ export function cacheMiddleware(options: CacheMiddlewareOptions) {
     // Intercept res.json to cache the handler's response
     const originalJson = res.json.bind(res);
     res.json = (body: unknown) => {
-      // Update cache with fresh data on successful responses
-      cacheService.set(key, body, options).catch(() => {});
+      // Only cache successful (2xx) responses — never cache errors
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        cacheService.set(key, body, options).catch(() => {});
+      }
 
       if (servedStale) {
         // Already sent stale response to client — just update cache, don't send again

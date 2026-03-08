@@ -41,6 +41,19 @@ enum ChannelType {
   @@map("channel_type")
 }
 
+/// Role a user holds within a server.
+/// Ordered from highest to lowest privilege:
+///   OWNER > ADMIN > MODERATOR > MEMBER > GUEST
+enum RoleType {
+  OWNER
+  ADMIN
+  MODERATOR
+  MEMBER
+  GUEST
+
+  @@map("role_type")
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 model User {
@@ -57,6 +70,7 @@ model User {
   messages           Message[]
   visibilityAuditLog VisibilityAuditLog[] @relation("AuditActor")
   refreshTokens      RefreshToken[]
+  serverMemberships  ServerMember[]
 
   @@map("users")
 }
@@ -86,11 +100,26 @@ model Server {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   channels Channel[]
+  members  ServerMember[]
 
   // idx_servers_slug is pinned via map: on the @unique above.
   // idx_servers_public (partial WHERE is_public = TRUE) is added in the
   // migration SQL directly — Prisma does not support partial indexes in schema DSL.
   @@map("servers")
+}
+
+model ServerMember {
+  userId    String   @map("user_id") @db.Uuid
+  serverId  String   @map("server_id") @db.Uuid
+  role      RoleType @default(MEMBER)
+  joinedAt  DateTime @default(now()) @map("joined_at") @db.Timestamptz
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@id([userId, serverId])
+  @@index([serverId], map: "idx_server_members_server")
+  @@map("server_members")
 }
 
 model Channel {

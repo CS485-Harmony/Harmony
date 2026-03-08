@@ -132,7 +132,7 @@ describe('channelService.getChannelBySlug', () => {
 
 describe('channelService.updateChannel', () => {
   it('updates name and topic', async () => {
-    const updated = await channelService.updateChannel(channelId, {
+    const updated = await channelService.updateChannel(channelId, serverId, {
       name: 'general-updated',
       topic: 'A new topic',
     });
@@ -141,14 +141,24 @@ describe('channelService.updateChannel', () => {
   });
 
   it('updates position', async () => {
-    const updated = await channelService.updateChannel(channelId, { position: 5 });
+    const updated = await channelService.updateChannel(channelId, serverId, { position: 5 });
     expect(updated.position).toBe(5);
   });
 
   it('throws NOT_FOUND for unknown channelId', async () => {
     await expect(
-      channelService.updateChannel('00000000-0000-0000-0000-000000000000', { name: 'x' }),
+      channelService.updateChannel('00000000-0000-0000-0000-000000000000', serverId, { name: 'x' }),
     ).rejects.toThrow(TRPCError);
+  });
+
+  it('throws NOT_FOUND when channelId belongs to a different server', async () => {
+    const otherServer = await prisma.server.create({
+      data: { name: 'Other Server', slug: `other-server-${Date.now()}`, isPublic: false },
+    });
+    await expect(
+      channelService.updateChannel(channelId, otherServer.id, { name: 'x' }),
+    ).rejects.toThrow(TRPCError);
+    await prisma.server.delete({ where: { id: otherServer.id } }).catch(() => {});
   });
 });
 
@@ -195,14 +205,32 @@ describe('channelService.deleteChannel', () => {
       type: 'TEXT',
       visibility: 'PRIVATE',
     });
-    await channelService.deleteChannel(channel.id);
+    await channelService.deleteChannel(channel.id, serverId);
     const found = await prisma.channel.findUnique({ where: { id: channel.id } });
     expect(found).toBeNull();
   });
 
   it('throws NOT_FOUND for already-deleted or unknown channel', async () => {
     await expect(
-      channelService.deleteChannel('00000000-0000-0000-0000-000000000000'),
+      channelService.deleteChannel('00000000-0000-0000-0000-000000000000', serverId),
     ).rejects.toThrow(TRPCError);
+  });
+
+  it('throws NOT_FOUND when channelId belongs to a different server', async () => {
+    const channel = await channelService.createChannel({
+      serverId,
+      name: 'cross-server-test',
+      slug: `cross-server-${Date.now()}`,
+      type: 'TEXT',
+      visibility: 'PRIVATE',
+    });
+    const otherServer = await prisma.server.create({
+      data: { name: 'Other Server 2', slug: `other-server2-${Date.now()}`, isPublic: false },
+    });
+    await expect(
+      channelService.deleteChannel(channel.id, otherServer.id),
+    ).rejects.toThrow(TRPCError);
+    await prisma.server.delete({ where: { id: otherServer.id } }).catch(() => {});
+    await channelService.deleteChannel(channel.id, serverId);
   });
 });

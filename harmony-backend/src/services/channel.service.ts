@@ -83,10 +83,10 @@ export const channelService = {
     return channel;
   },
 
-  async updateChannel(channelId: string, patch: UpdateChannelInput) {
+  async updateChannel(channelId: string, serverId: string, patch: UpdateChannelInput) {
     const channel = await prisma.channel.findUnique({ where: { id: channelId } });
-    if (!channel) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found' });
+    if (!channel || channel.serverId !== serverId) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
     }
 
     const updated = await prisma.channel.update({
@@ -105,10 +105,10 @@ export const channelService = {
     return updated;
   },
 
-  async deleteChannel(channelId: string) {
+  async deleteChannel(channelId: string, serverId: string) {
     const channel = await prisma.channel.findUnique({ where: { id: channelId } });
-    if (!channel) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found' });
+    if (!channel || channel.serverId !== serverId) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
     }
 
     await prisma.channel.delete({ where: { id: channelId } });
