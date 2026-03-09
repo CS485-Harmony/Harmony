@@ -218,6 +218,7 @@ export function HarmonyShell({
             <MessageInput
               channelId={currentChannel.id}
               channelName={currentChannel.name}
+              serverId={currentServer.id}
               isReadOnly={currentUser.role === 'guest'}
               onMessageSent={handleMessageSent}
             />
