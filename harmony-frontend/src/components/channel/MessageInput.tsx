@@ -9,7 +9,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
-import { sendMessage } from '@/services/messageService';
+import { sendMessageAction } from '@/app/actions/sendMessage';
 import type { Message } from '@/types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -23,6 +23,7 @@ const CHAR_WARN_THRESHOLD = 200;
 export interface MessageInputProps {
   channelId: string;
   channelName: string;
+  serverId: string;
   /** When true, replaces the input with a permission notice (guest / read-only views) */
   isReadOnly?: boolean;
   /** Called with the newly created message after a successful send */
@@ -32,6 +33,7 @@ export interface MessageInputProps {
 export function MessageInput({
   channelId,
   channelName,
+  serverId,
   isReadOnly = false,
   onMessageSent,
 }: MessageInputProps) {
@@ -62,7 +64,7 @@ export function MessageInput({
     setIsSending(true);
     setSendError(null);
     try {
-      const msg = await sendMessage(channelId, trimmed);
+      const msg = await sendMessageAction(channelId, trimmed, serverId);
       setValue('');
       onMessageSent?.(msg);
     } catch {
@@ -72,7 +74,7 @@ export function MessageInput({
       // Return focus to textarea after send
       textareaRef.current?.focus();
     }
-  }, [value, isSending, isReadOnly, channelId, onMessageSent]);
+  }, [value, isSending, isReadOnly, channelId, serverId, onMessageSent]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Enter sends; Shift+Enter inserts a newline
