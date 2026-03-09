@@ -16,13 +16,19 @@
 import { Prisma, VisibilityAuditLog } from '@prisma/client';
 import { prisma } from '../db/prisma';
 
+/** Max characters stored for User-Agent — matches the @db.VarChar(500) column. */
+const USER_AGENT_MAX_LEN = 500;
+
+/** Hard cap on `limit` to prevent unbounded queries (matches messageService pattern). */
+const AUDIT_LOG_MAX_LIMIT = 500;
+
 export interface LogVisibilityChangeInput {
   channelId: string;
   actorId: string;
   /** JSON snapshot of the old visibility state, e.g. `{ visibility: 'PRIVATE' }` */
-  oldValue: Record<string, unknown>;
+  oldValue: Prisma.InputJsonObject;
   /** JSON snapshot of the new visibility state, e.g. `{ visibility: 'PUBLIC_INDEXABLE' }` */
-  newValue: Record<string, unknown>;
+  newValue: Prisma.InputJsonObject;
   /** Caller's IP address — stored for compliance (IPv4 or IPv6). */
   ipAddress: string;
   /** HTTP User-Agent header value; defaults to empty string if not provided. */
@@ -61,10 +67,10 @@ export const auditLogService = {
         channelId: input.channelId,
         actorId: input.actorId,
         action: 'VISIBILITY_CHANGED',
-        oldValue: input.oldValue as Prisma.InputJsonValue,
-        newValue: input.newValue as Prisma.InputJsonValue,
+        oldValue: input.oldValue,
+        newValue: input.newValue,
         ipAddress: input.ipAddress,
-        userAgent: input.userAgent ?? '',
+        userAgent: (input.userAgent ?? '').slice(0, USER_AGENT_MAX_LEN),
       },
     });
   },
@@ -79,7 +85,9 @@ export const auditLogService = {
     channelId: string,
     options: GetAuditLogOptions = {},
   ): Promise<AuditLogPage> {
-    const { limit = 20, offset = 0, startDate } = options;
+    const { limit, offset, startDate } = options;
+    const clampedLimit = Math.min(Math.max(1, limit ?? 20), AUDIT_LOG_MAX_LIMIT);
+    const safeOffset = Math.max(0, Math.floor(offset ?? 0));
 
     const where: Prisma.VisibilityAuditLogWhereInput = {
       channelId,
@@ -90,8 +98,8 @@ export const auditLogService = {
       prisma.visibilityAuditLog.findMany({
         where,
         orderBy: { timestamp: 'desc' },
-        skip: offset,
-        take: limit,
+        skip: safeOffset,
+        take: clampedLimit,
       }),
       prisma.visibilityAuditLog.count({ where }),
     ]);

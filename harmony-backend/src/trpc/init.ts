@@ -6,6 +6,7 @@ import { permissionService, type Action } from '../services/permission.service';
 export interface TRPCContext {
   userId: string | null;
   ip: string;
+  userAgent: string;
 }
 
 export function createContext({ req }: { req: Request }): TRPCContext {
@@ -21,7 +22,7 @@ export function createContext({ req }: { req: Request }): TRPCContext {
     }
   }
 
-  return { userId, ip: req.ip ?? '' };
+  return { userId, ip: req.ip ?? '', userAgent: req.get('user-agent') ?? '' };
 }
 
 const t = initTRPC.context<TRPCContext>().create();

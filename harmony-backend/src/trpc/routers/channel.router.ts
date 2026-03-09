@@ -68,6 +68,7 @@ export const channelRouter = router({
         visibility: input.visibility,
         actorId: ctx.userId,
         ip: ctx.ip,
+        userAgent: ctx.userAgent,
       }),
     ),
 

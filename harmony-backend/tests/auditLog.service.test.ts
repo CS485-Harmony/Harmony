@@ -97,6 +97,11 @@ const makeLogInput = (overrides: Partial<LogVisibilityChangeInput> = {}): LogVis
 // ─── logVisibilityChange ──────────────────────────────────────────────────────
 
 describe('auditLogService.logVisibilityChange', () => {
+  afterEach(async () => {
+    // Clean up entries created by this suite so failures here don't leave stale rows
+    // that could affect other suites if outer afterAll cleanup fails.
+    await prisma.visibilityAuditLog.deleteMany({ where: { actorId: userId, channelId } });
+  });
   it('creates a VisibilityAuditLog entry with correct fields', async () => {
     const entry = await auditLogService.logVisibilityChange(makeLogInput());
 
