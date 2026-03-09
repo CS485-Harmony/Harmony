@@ -70,4 +70,9 @@ export const channelRouter = router({
         ip: ctx.ip,
       }),
     ),
+
+  /** Read a channel's visibility. Requires channel:read with serverId. */
+  getVisibility: withPermission('channel:read')
+    .input(z.object({ serverId: z.string().uuid(), channelId: z.string().uuid() }))
+    .query(({ input }) => visibilityService.getVisibility(input.channelId, input.serverId)),
 });

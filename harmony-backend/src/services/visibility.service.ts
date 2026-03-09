@@ -1,6 +1,10 @@
 /**
- * ChannelVisibilityService (M-B3) — owns the visibility state machine,
- * permission checks, and audit logging for channel visibility changes.
+ * ChannelVisibilityService (M-B3) — owns the visibility state machine
+ * and audit logging for channel visibility changes.
+ *
+ * Authorization is handled at the router level via `withPermission`
+ * middleware (RBAC from PR #141). This service no longer performs its
+ * own permission checks.
  *
  * Per §6.3: the channel UPDATE and audit log INSERT are wrapped in a single
  * Prisma $transaction. After a successful commit, a VISIBILITY_CHANGED event
@@ -31,6 +35,23 @@ export interface VisibilityChangeResult {
 }
 
 export const visibilityService = {
+  /**
+   * Get the current visibility of a channel.
+   *
+   * Validates that the channel belongs to the given server to prevent
+   * cross-server channel probing.
+   */
+  async getVisibility(channelId: string, serverId: string): Promise<ChannelVisibility> {
+    const channel = await prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { visibility: true, serverId: true },
+    });
+    if (!channel || channel.serverId !== serverId) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
+    }
+    return channel.visibility;
+  },
+
   /**
    * Change a channel's visibility.
    *
@@ -65,6 +86,9 @@ export const visibilityService = {
           // §6.3: set indexedAt only when transitioning TO PUBLIC_INDEXABLE (not on no-op updates)
           ...(visibility === ChannelVisibility.PUBLIC_INDEXABLE &&
             current.visibility !== ChannelVisibility.PUBLIC_INDEXABLE && { indexedAt: new Date() }),
+          // §5.2: clear indexedAt when transitioning TO PRIVATE
+          ...(visibility === ChannelVisibility.PRIVATE &&
+            current.visibility !== ChannelVisibility.PRIVATE && { indexedAt: null }),
         },
       });
 
