@@ -65,6 +65,7 @@ export interface MemberJoinedPayload {
 export interface MemberLeftPayload {
   userId: string;
   serverId: string;
+  reason: 'LEFT' | 'KICKED';
   timestamp: string;
 }
 

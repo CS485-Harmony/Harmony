@@ -3,16 +3,6 @@ import { TRPCError } from '@trpc/server';
 import { prisma } from '../db/prisma';
 import { channelService } from './channel.service';
 
-// Late import to avoid circular dependency (serverMember imports serverService)
-let _addOwner: ((userId: string, serverId: string) => Promise<unknown>) | null = null;
-async function getAddOwner() {
-  if (!_addOwner) {
-    const { serverMemberService } = await import('./serverMember.service');
-    _addOwner = serverMemberService.addOwner;
-  }
-  return _addOwner;
-}
-
 export function generateSlug(name: string): string {
   return name
     .toLowerCase()
@@ -90,8 +80,14 @@ export const serverService = {
       prisma.server.create({ data: { ...input, slug: s } }),
     );
     await channelService.createDefaultChannel(server.id);
-    const addOwner = await getAddOwner();
-    await addOwner(input.ownerId, server.id);
+    // Add the owner as an OWNER member (inlined to avoid circular dependency)
+    await prisma.serverMember.create({
+      data: { userId: input.ownerId, serverId: server.id, role: 'OWNER' },
+    });
+    await prisma.server.update({
+      where: { id: server.id },
+      data: { memberCount: { increment: 1 } },
+    });
     return server;
   },
 

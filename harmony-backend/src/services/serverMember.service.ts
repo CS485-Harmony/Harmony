@@ -1,7 +1,6 @@
 import { Prisma, RoleType, ServerMember } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { prisma } from '../db/prisma';
-import { serverService } from './server.service';
 import { eventBus, EventChannels } from '../events/eventBus';
 
 export interface ServerMemberWithUser {
@@ -29,11 +28,16 @@ export const serverMemberService = {
    * Add the server owner as an OWNER member. Called when a server is created.
    */
   async addOwner(userId: string, serverId: string): Promise<ServerMember> {
-    const member = await prisma.serverMember.create({
-      data: { userId, serverId, role: 'OWNER' },
+    return prisma.$transaction(async (tx) => {
+      const member = await tx.serverMember.create({
+        data: { userId, serverId, role: 'OWNER' },
+      });
+      await tx.server.update({
+        where: { id: serverId },
+        data: { memberCount: { increment: 1 } },
+      });
+      return member;
     });
-    await serverService.incrementMemberCount(serverId);
-    return member;
   },
 
   /**
@@ -100,26 +104,31 @@ export const serverMemberService = {
     void eventBus.publish(EventChannels.MEMBER_LEFT, {
       userId,
       serverId,
+      reason: 'LEFT',
       timestamp: new Date().toISOString(),
     });
   },
 
   /**
    * List all members of a server with user profile info.
+   * Sorted by role hierarchy (OWNER first) then join date.
    */
   async getServerMembers(serverId: string): Promise<ServerMemberWithUser[]> {
     const server = await prisma.server.findUnique({ where: { id: serverId }, select: { id: true } });
     if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
 
-    return prisma.serverMember.findMany({
+    const members = await prisma.serverMember.findMany({
       where: { serverId },
       include: {
         user: {
           select: { id: true, username: true, displayName: true, avatarUrl: true },
         },
       },
-      orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
+      orderBy: { joinedAt: 'asc' },
     });
+
+    // Sort by role hierarchy (Prisma enum ordering is alphabetical, not semantic)
+    return members.sort((a, b) => roleRank(a.role) - roleRank(b.role));
   },
 
   /**
@@ -193,6 +202,7 @@ export const serverMemberService = {
     void eventBus.publish(EventChannels.MEMBER_LEFT, {
       userId: targetUserId,
       serverId,
+      reason: 'KICKED',
       timestamp: new Date().toISOString(),
     });
   },
