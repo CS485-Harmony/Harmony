@@ -3,6 +3,7 @@ name: Discord Forum PR Thread
 on:
   pull_request:
     types: [opened]
+  workflow_dispatch:
 
 jobs:
   create-forum-post:

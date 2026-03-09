@@ -9,6 +9,7 @@ on:
       - "harmony-backend/prisma/**"
       - "harmony-frontend/src/**"
       - "docs/**"
+  workflow_dispatch:
 jobs:
   review:
     runs-on: ubuntu-latest
