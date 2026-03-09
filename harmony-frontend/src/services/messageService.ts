@@ -36,15 +36,19 @@ function toFrontendMessage(raw: Record<string, unknown>): Message {
 /**
  * Returns a page of messages for a channel.
  * Uses the public REST endpoint for PUBLIC_INDEXABLE channels.
- * Falls back to tRPC for authenticated access.
+ * Falls back to tRPC for authenticated access (pass options.serverId).
+ *
+ * Errors propagate to the caller — the UI is responsible for rendering
+ * failure state so users can distinguish a fetch error from an empty channel.
  */
 export async function getMessages(
   channelId: string,
   page = 1,
   options?: { serverId?: string },
 ): Promise<{ messages: Message[]; hasMore: boolean }> {
+  // Try public endpoint first (works for PUBLIC_INDEXABLE channels).
+  // A non-2xx response throws, which we catch only to attempt the tRPC fallback.
   try {
-    // Try public endpoint first (works for PUBLIC_INDEXABLE channels)
     const data = await publicGet<{
       messages: Record<string, unknown>[];
       page: number;
@@ -59,26 +63,23 @@ export async function getMessages(
     }
     return { messages: [], hasMore: false };
   } catch {
-    // If public endpoint fails (e.g., non-public channel), try tRPC
-    if (options?.serverId) {
-      try {
-        const data = await trpcQuery<{
-          messages: Record<string, unknown>[];
-          nextCursor?: string;
-        }>('message.getMessages', {
-          serverId: options.serverId,
-          channelId,
-          limit: 50,
-        });
-        return {
-          messages: (data?.messages ?? []).map(toFrontendMessage),
-          hasMore: !!data?.nextCursor,
-        };
-      } catch (trpcError) {
-        console.error('[messageService.getMessages] tRPC fallback failed:', trpcError);
-      }
-    }
-    return { messages: [], hasMore: false };
+    // Public endpoint unavailable or channel is not PUBLIC_INDEXABLE — try tRPC.
+    // If serverId is not provided we cannot authenticate, so re-throw.
+    if (!options?.serverId) throw new Error('getMessages: channel is not publicly accessible and no serverId was provided');
+
+    // tRPC errors propagate to the caller.
+    const data = await trpcQuery<{
+      messages: Record<string, unknown>[];
+      nextCursor?: string;
+    }>('message.getMessages', {
+      serverId: options.serverId,
+      channelId,
+      limit: 50,
+    });
+    return {
+      messages: (data?.messages ?? []).map(toFrontendMessage),
+      hasMore: !!data?.nextCursor,
+    };
   }
 }
 
