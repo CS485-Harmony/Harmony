@@ -63,7 +63,10 @@ export function createApp() {
       router: appRouter,
       createContext,
       onError({ error }) {
-        console.error('tRPC error:', error);
+        // Only log unexpected server errors; auth/validation errors (4xx) are routine
+        if (error.code === 'INTERNAL_SERVER_ERROR') {
+          console.error('tRPC error:', error);
+        }
       },
     }),
   );
