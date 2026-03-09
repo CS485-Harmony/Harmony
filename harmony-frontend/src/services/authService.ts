@@ -49,7 +49,10 @@ function mapBackendUser(b: BackendUser): User {
     displayName: b.displayName ?? b.username,
     avatar: b.avatarUrl ?? undefined,
     status: mapStatus(b.status),
-    // Role is server-scoped in the backend; default to 'member' for auth context.
+    // Roles are server-scoped in the backend (stored in ServerMember, not User).
+    // The global User object has no role field; use 'member' as a safe default.
+    // UI that needs to check admin/owner status must compare user.id to
+    // the server's ownerId or fetch server membership separately.
     role: 'member',
   };
 }

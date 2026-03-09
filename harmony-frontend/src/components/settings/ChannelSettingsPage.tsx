@@ -256,11 +256,12 @@ function LoadingScreen() {
 export interface ChannelSettingsPageProps {
   channel: Channel;
   serverSlug: string;
+  serverOwnerId?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ChannelSettingsPage({ channel, serverSlug }: ChannelSettingsPageProps) {
+export function ChannelSettingsPage({ channel, serverSlug, serverOwnerId }: ChannelSettingsPageProps) {
   const { isAdmin, isLoading, isAuthenticated } = useAuth();
   const router = useRouter();
   const [activeSection, setActiveSection] = useState<Section>('overview');
@@ -281,13 +282,13 @@ export function ChannelSettingsPage({ channel, serverSlug }: ChannelSettingsPage
 
   useEffect(() => {
     if (isLoading) return;
-    if (!isAuthenticated || !isAdmin()) {
+    if (!isAuthenticated || !isAdmin(serverOwnerId)) {
       router.replace(backHref);
     }
-  }, [isLoading, isAuthenticated, isAdmin, router, backHref]);
+  }, [isLoading, isAuthenticated, isAdmin, router, backHref, serverOwnerId]);
 
   if (isLoading) return <LoadingScreen />;
-  if (!isAuthenticated || !isAdmin()) return <LoadingScreen />;
+  if (!isAuthenticated || !isAdmin(serverOwnerId)) return <LoadingScreen />;
 
   return (
     <div className={cn('flex h-screen overflow-hidden', BG.base)}>
@@ -392,7 +393,7 @@ export function ChannelSettingsPage({ channel, serverSlug }: ChannelSettingsPage
               serverSlug={serverSlug}
               channelSlug={channel.slug}
               initialVisibility={channel.visibility}
-              disabled={!isAdmin()}
+              disabled={!isAdmin(serverOwnerId)}
             />
           )}
         </div>

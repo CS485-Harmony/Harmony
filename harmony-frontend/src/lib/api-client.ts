@@ -43,7 +43,7 @@ export function getRefreshToken(): string | null {
 // ─── tRPC HTTP helpers ────────────────────────────────────────────────────────
 // tRPC v11 HTTP wire format (no transformer):
 //   Query  : GET  /trpc/<procedure>            (no input = omit query param)
-//   Mutation: POST /trpc/<procedure>   body: {"json": <input>}
+//   Mutation: POST /trpc/<procedure>   body: <input as JSON>
 //   Response: {"result": {"data": <output>}}
 
 export interface TrpcResponse<T> {
@@ -129,8 +129,7 @@ class ApiClient {
           } catch {
             clearTokens();
             notifyRefreshQueue(null);
-            // Redirect to login only on explicit navigation requests (not API calls)
-            if (typeof window !== 'undefined' && !originalRequest.url?.startsWith('/trpc')) {
+            if (typeof window !== 'undefined') {
               window.location.href = '/auth/login';
             }
             return Promise.reject(error);
@@ -174,7 +173,7 @@ class ApiClient {
   async trpcMutation<T>(procedure: string, input?: unknown): Promise<T> {
     const res = await this.client.post<TrpcResponse<T>>(
       `/trpc/${procedure}`,
-      { json: input ?? null },
+      input ?? null,
     );
     return res.data.result.data;
   }

@@ -286,7 +286,7 @@ export function ServerSettingsPage({ server, serverSlug }: ServerSettingsPagePro
   const backHref = `/channels/${serverSlug}`;
 
   if (isLoading) return <LoadingScreen />;
-  if (!isAuthenticated || !isAdmin()) {
+  if (!isAuthenticated || !isAdmin(server.ownerId)) {
     router.replace(backHref);
     return <LoadingScreen />;
   }

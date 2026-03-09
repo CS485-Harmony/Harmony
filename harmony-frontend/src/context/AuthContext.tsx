@@ -15,7 +15,14 @@ export interface AuthContextValue {
   register: (email: string, username: string, displayName: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (patch: Partial<Pick<User, 'displayName' | 'status'>>) => Promise<void>;
-  isAdmin: () => boolean;
+  /**
+   * Returns true if the current user has admin-level access.
+   * Pass `serverOwnerId` to check ownership of a specific server — this is the
+   * reliable path since User.role is not populated from the backend.
+   * Without `serverOwnerId`, falls back to checking User.role (always 'member'
+   * until a global-role endpoint is added).
+   */
+  isAdmin: (serverOwnerId?: string) => boolean;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -69,8 +76,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const isAdmin = useCallback(() => {
-    return user?.role === 'owner' || user?.role === 'admin';
+  const isAdmin = useCallback((serverOwnerId?: string) => {
+    if (!user) return false;
+    if (serverOwnerId) return user.id === serverOwnerId;
+    return user.role === 'owner' || user.role === 'admin';
   }, [user]);
 
   const value: AuthContextValue = {

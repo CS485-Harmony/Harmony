@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { getChannel } from '@/services/channelService';
+import { getServer } from '@/services/serverService';
 import { ChannelSettingsPage } from '@/components/settings/ChannelSettingsPage';
 
 interface PageProps {
@@ -9,8 +10,17 @@ interface PageProps {
 export default async function SettingsPage({ params }: PageProps) {
   const { serverSlug, channelSlug } = await params;
 
-  const channel = await getChannel(serverSlug, channelSlug);
+  const [channel, server] = await Promise.all([
+    getChannel(serverSlug, channelSlug),
+    getServer(serverSlug),
+  ]);
   if (!channel) notFound();
 
-  return <ChannelSettingsPage channel={channel} serverSlug={serverSlug} />;
+  return (
+    <ChannelSettingsPage
+      channel={channel}
+      serverSlug={serverSlug}
+      serverOwnerId={server?.ownerId}
+    />
+  );
 }
