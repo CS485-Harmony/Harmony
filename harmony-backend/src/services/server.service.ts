@@ -81,13 +81,15 @@ export const serverService = {
     );
     await channelService.createDefaultChannel(server.id);
     // Add the owner as an OWNER member (inlined to avoid circular dependency)
-    await prisma.serverMember.create({
-      data: { userId: input.ownerId, serverId: server.id, role: 'OWNER' },
-    });
-    await prisma.server.update({
-      where: { id: server.id },
-      data: { memberCount: { increment: 1 } },
-    });
+    await prisma.$transaction([
+      prisma.serverMember.create({
+        data: { userId: input.ownerId, serverId: server.id, role: 'OWNER' },
+      }),
+      prisma.server.update({
+        where: { id: server.id },
+        data: { memberCount: { increment: 1 } },
+      }),
+    ]);
     return server;
   },
 
