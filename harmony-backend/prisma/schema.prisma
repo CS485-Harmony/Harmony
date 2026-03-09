@@ -157,6 +157,8 @@ model Message {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
   editedAt  DateTime? @map("edited_at") @db.Timestamptz
   isDeleted Boolean   @default(false) @map("is_deleted")
+  pinned    Boolean   @default(false) @map("pinned")
+  pinnedAt  DateTime? @map("pinned_at") @db.Timestamptz
 
   channel     Channel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
   author      User        @relation(fields: [authorId], references: [id])

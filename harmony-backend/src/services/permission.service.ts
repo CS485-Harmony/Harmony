@@ -22,7 +22,8 @@ export type MessageAction =
   | 'message:create'
   | 'message:update_own'
   | 'message:delete_own'
-  | 'message:delete_any';
+  | 'message:delete_any'
+  | 'message:pin';
 
 export type SettingsAction = 'settings:read' | 'settings:update';
 
@@ -33,11 +34,7 @@ export type Action = ServerAction | ChannelAction | MessageAction | SettingsActi
 // Higher-privilege roles include all permissions of lower-privilege roles plus
 // their own additions (accumulated below).
 
-const GUEST_PERMISSIONS = new Set<Action>([
-  'server:read',
-  'channel:read',
-  'message:read',
-]);
+const GUEST_PERMISSIONS = new Set<Action>(['server:read', 'channel:read', 'message:read']);
 
 const MEMBER_PERMISSIONS = new Set<Action>([
   ...GUEST_PERMISSIONS,
@@ -49,6 +46,7 @@ const MEMBER_PERMISSIONS = new Set<Action>([
 const MODERATOR_PERMISSIONS = new Set<Action>([
   ...MEMBER_PERMISSIONS,
   'message:delete_any',
+  'message:pin',
 ]);
 
 const ADMIN_PERMISSIONS = new Set<Action>([
@@ -63,10 +61,7 @@ const ADMIN_PERMISSIONS = new Set<Action>([
   'server:manage_members',
 ]);
 
-const OWNER_PERMISSIONS = new Set<Action>([
-  ...ADMIN_PERMISSIONS,
-  'server:delete',
-]);
+const OWNER_PERMISSIONS = new Set<Action>([...ADMIN_PERMISSIONS, 'server:delete']);
 
 const ROLE_PERMISSIONS: Record<RoleType, Set<Action>> = {
   OWNER: OWNER_PERMISSIONS,
