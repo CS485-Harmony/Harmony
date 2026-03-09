@@ -28,7 +28,7 @@ const testRouter = router({
 const createCaller = createCallerFactory(testRouter);
 
 function callerAs(userId: string | null): ReturnType<typeof createCaller> {
-  const ctx: TRPCContext = { userId, ip: '127.0.0.1' };
+  const ctx: TRPCContext = { userId, ip: '127.0.0.1', userAgent: 'test-agent' };
   return createCaller(ctx);
 }
 
