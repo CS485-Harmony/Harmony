@@ -6,7 +6,7 @@
  */
 
 import { notFound } from 'next/navigation';
-import { getServer, getServerMembers } from '@/services/serverService';
+import { getServer } from '@/services/serverService';
 import { getChannel } from '@/services/channelService';
 import { getMessages } from '@/services/messageService';
 import { AuthRedirect } from '@/components/channel/AuthRedirect';
@@ -91,16 +91,16 @@ export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannel
   if (!server || !channel) notFound();
 
   const isPrivate = channel.visibility === ChannelVisibility.PRIVATE;
-  const [members, { messages }] = await Promise.all([
-    getServerMembers(server.id),
-    isPrivate ? Promise.resolve({ messages: [] }) : getMessages(channel.id),
-  ]);
+  const { messages } = isPrivate
+    ? { messages: [] }
+    : await getMessages(channel.id);
   const sortedMessages = [...messages].reverse();
+  const memberCount = server.memberCount ?? 0;
 
   return (
     <div className='flex h-screen flex-col overflow-hidden bg-[#36393f] font-sans'>
       <AuthRedirect to={`/channels/${serverSlug}/${channelSlug}`} />
-      <GuestHeader server={server} memberCount={members.length} />
+      <GuestHeader server={server} memberCount={memberCount} />
 
       <VisibilityGuard visibility={channel.visibility} isLoading={false}>
         <div className='flex flex-1 flex-col overflow-hidden'>
@@ -108,7 +108,7 @@ export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannel
 
           <div className='flex flex-1 flex-col overflow-hidden'>
             <MessageList key={channel.id} channel={channel} messages={sortedMessages} />
-            <GuestPromoBanner serverName={server.name} memberCount={members.length} />
+            <GuestPromoBanner serverName={server.name} memberCount={memberCount} />
           </div>
         </div>
       </VisibilityGuard>

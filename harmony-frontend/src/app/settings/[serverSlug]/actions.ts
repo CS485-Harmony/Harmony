@@ -3,7 +3,6 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { updateServer, deleteServer, getServer } from '@/services/serverService';
-import { getChannels, deleteChannel } from '@/services/channelService';
 import type { Server } from '@/types';
 
 export async function saveServerSettings(
@@ -15,9 +14,6 @@ export async function saveServerSettings(
   if (!server) {
     throw new Error('Server not found');
   }
-  // TODO (#71): This action has no server-side auth check. Anyone who can call
-  // it can mutate server data. Enforce a server-verifiable session + role check
-  // before this reaches production.
 
   // Build an explicit whitelist so callers cannot sneak in extra fields
   const sanitizedPatch: Partial<Pick<Server, 'name' | 'description' | 'icon'>> = {};
@@ -38,7 +34,8 @@ export async function saveServerSettings(
     sanitizedPatch.icon = patch.icon.trim();
   }
 
-  await updateServer(serverSlug, sanitizedPatch);
+  // The backend updateServer takes the server ID, not slug
+  await updateServer(server.id, sanitizedPatch);
 
   revalidatePath(`/channels/${serverSlug}`, 'layout');
   revalidatePath(`/c/${serverSlug}`, 'layout');
@@ -51,13 +48,9 @@ export async function deleteServerAction(serverSlug: string): Promise<void> {
   if (!server) {
     throw new Error('Server not found');
   }
-  // TODO (#71): No server-side auth check — add role enforcement before production.
 
-  await deleteServer(serverSlug);
-
-  // Cascade-delete all channels belonging to this server to avoid orphaned records
-  const channels = await getChannels(server.id);
-  await Promise.all(channels.map(c => deleteChannel(c.id)));
+  // The backend deleteServer takes the server ID and handles cascade deletion
+  await deleteServer(server.id);
 
   revalidatePath('/channels', 'layout');
   revalidatePath('/c', 'layout');

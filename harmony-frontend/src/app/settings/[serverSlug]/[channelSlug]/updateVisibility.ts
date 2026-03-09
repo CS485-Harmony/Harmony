@@ -2,7 +2,7 @@
 
 /**
  * Server Action: updateChannelVisibility (Issue #30 — VisibilityToggle)
- * Resolves channel by route params, updates visibility in-memory, and
+ * Resolves channel by route params, updates visibility via the tRPC API, and
  * revalidates all affected routes so guests and admins see fresh data.
  * Mirrors the pattern from actions.ts (saveChannelSettings).
  */
@@ -10,6 +10,7 @@
 import { revalidatePath } from 'next/cache';
 import { ChannelVisibility } from '@/types';
 import { updateVisibility, getChannel } from '@/services/channelService';
+import { getServer } from '@/services/serverService';
 
 export async function updateChannelVisibility(
   serverSlug: string,
@@ -27,11 +28,13 @@ export async function updateChannelVisibility(
     throw new Error('Channel not found');
   }
 
-  // TODO (#71): This action has no server-side auth check. Anyone who can call
-  // it can mutate channel visibility. Enforce a server-verifiable session + role
-  // check before this reaches production. (Same gap exists in actions.ts.)
+  // Resolve server to get serverId for the API call
+  const server = await getServer(serverSlug);
+  if (!server) {
+    throw new Error('Server not found');
+  }
 
-  await updateVisibility(channel.id, visibility);
+  await updateVisibility(channel.id, visibility, server.id);
 
   // Invalidate all route segments that render channel visibility data.
   revalidatePath(`/c/${serverSlug}`, 'layout');

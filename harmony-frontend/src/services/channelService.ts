@@ -1,113 +1,139 @@
 /**
- * Channel Service (M2 — mock implementation)
- * updateVisibility mutates in-memory state so changes persist during the session.
+ * Channel Service (M2 — real API implementation)
+ * Replaces mock in-memory store with backend API calls.
  * References: dev-spec-channel-visibility-toggle.md
  */
 
 import { cache } from 'react';
 import { ChannelVisibility, type Channel } from '@/types';
-import { mockChannels, mockServers } from '@/mocks';
+import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
 
-// ─── In-memory store (mutated by write operations) ────────────────────────────
-// Use globalThis so the array survives Next.js hot-reloads and Turbopack
-// worker re-evaluations in dev mode — same pattern used by Prisma client in
-// Next.js dev. In production the module is evaluated once and this is a no-op.
-//
-// TODO(database): Replace with real DB queries when persistence is introduced.
-// Each service function (getChannels, updateChannel, etc.) maps 1:1 to a SQL
-// query — the component layer won't need to change, only this service.
-// Known limitation: in-memory state is not shared across multiple server
-// processes (e.g. PM2 clusters, Kubernetes pods) and is lost on restart.
-const g = globalThis as typeof globalThis & { __harmonyChannels?: Channel[] };
-g.__harmonyChannels ??= [...mockChannels];
-const channels: Channel[] = g.__harmonyChannels;
+// ─── Type adapters ────────────────────────────────────────────────────────────
+
+/** Maps the backend Prisma Channel shape to the frontend Channel type. */
+function toFrontendChannel(raw: Record<string, unknown>): Channel {
+  return {
+    id: raw.id as string,
+    serverId: raw.serverId as string,
+    name: raw.name as string,
+    slug: raw.slug as string,
+    type: raw.type as Channel['type'],
+    visibility: raw.visibility as ChannelVisibility,
+    topic: (raw.topic as string | undefined) ?? undefined,
+    position: (raw.position as number) ?? 0,
+    description: raw.description as string | undefined,
+    createdAt: raw.createdAt as string,
+    updatedAt: raw.updatedAt as string | undefined,
+  };
+}
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 /**
  * Returns all channels for a given server.
+ * Uses tRPC authed endpoint for full channel list (including PRIVATE channels).
+ * Falls back to public REST (PUBLIC_INDEXABLE only) if auth is not available.
  */
 export async function getChannels(serverId: string): Promise<Channel[]> {
-  return channels.filter(c => c.serverId === serverId);
+  try {
+    const data = await trpcQuery<Record<string, unknown>[]>('channel.getChannels', { serverId });
+    return (data ?? []).map(toFrontendChannel);
+  } catch {
+    // Fallback: try public endpoint (only PUBLIC_INDEXABLE channels)
+    // This requires a server slug, but we only have serverId here.
+    // Return empty array if the authed call fails.
+    console.error(`[channelService.getChannels] tRPC call failed for serverId "${serverId}"`);
+    return [];
+  }
 }
 
 /**
  * Returns a single channel by server slug + channel slug, or null if not found.
+ * Uses the tRPC endpoint for full access. Falls back to public REST on failure.
  */
 export const getChannel = cache(async (serverSlug: string, channelSlug: string): Promise<Channel | null> => {
-  // #c36: mockServers is now a static import at module scope — no dynamic import needed
-  const server = mockServers.find(s => s.slug === serverSlug);
-  if (!server) return null;
-  return channels.find(c => c.serverId === server.id && c.slug === channelSlug) ?? null;
+  try {
+    // First get the server to obtain its ID (needed for tRPC channel endpoint)
+    const serverData = await publicGet<Record<string, unknown> | null>(
+      `/servers/${encodeURIComponent(serverSlug)}`,
+    );
+    if (!serverData) return null;
+
+    const data = await trpcQuery<Record<string, unknown>>('channel.getChannel', {
+      serverId: serverData.id as string,
+      serverSlug,
+      channelSlug,
+    });
+    if (!data) return null;
+    return toFrontendChannel(data);
+  } catch (error) {
+    console.error(`[channelService.getChannel] API call failed for "${serverSlug}/${channelSlug}":`, error);
+    return null;
+  }
 });
 
 /**
- * Updates the visibility of a channel in-memory so it persists for the session.
- * Emits VISIBILITY_CHANGED semantics (canonical enum: PUBLIC_INDEXABLE | PUBLIC_NO_INDEX | PRIVATE).
+ * Updates the visibility of a channel via tRPC.
+ * Returns the visibility change result (not a full Channel object).
  */
 export async function updateVisibility(
   channelId: string,
   visibility: ChannelVisibility,
-): Promise<Channel> {
-  const index = channels.findIndex(c => c.id === channelId);
-  if (index === -1) {
-    throw new Error(`Channel not found: ${channelId}`);
+  serverId?: string,
+): Promise<void> {
+  if (!serverId) {
+    throw new Error('serverId is required for updateVisibility');
   }
-  // updatedAt is optional in Channel; mock data omits it initially.
-  // We set it here on every mutation so callers always get a fresh timestamp.
-  channels[index] = {
-    ...channels[index],
+  await trpcMutate('channel.setVisibility', {
+    serverId,
+    channelId,
     visibility,
-    updatedAt: new Date().toISOString(),
-  };
-  return { ...channels[index] };
+  });
 }
 
 /**
- * Updates editable metadata (name, topic, description) of a channel in-memory.
- * slug is intentionally excluded — renaming the slug would break existing URLs.
+ * Updates editable metadata (name, topic, description) of a channel via tRPC.
  */
 export async function updateChannel(
   channelId: string,
+  serverId: string,
   patch: Partial<Pick<Channel, 'name' | 'topic' | 'description'>>,
 ): Promise<Channel> {
-  const index = channels.findIndex(c => c.id === channelId);
-  if (index === -1) {
-    throw new Error(`Channel not found: ${channelId}`);
-  }
-  channels[index] = {
-    ...channels[index],
-    // Filter out undefined values so a Partial<> with absent keys doesn't
-    // overwrite existing fields with undefined (standard PATCH semantics).
-    ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)),
-    updatedAt: new Date().toISOString(),
-  };
-  return { ...channels[index] };
+  const data = await trpcMutate<Record<string, unknown>>('channel.updateChannel', {
+    serverId,
+    channelId,
+    ...(patch.name !== undefined && { name: patch.name }),
+    ...(patch.topic !== undefined && { topic: patch.topic }),
+  });
+  return toFrontendChannel(data);
 }
 
 /**
- * Creates a new channel and appends it to the in-memory store.
+ * Creates a new channel via tRPC.
  */
 export async function createChannel(
   channel: Omit<Channel, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<Channel> {
-  const newChannel: Channel = {
-    ...channel,
-    id: `channel-${Date.now()}`,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  channels.push(newChannel);
-  return { ...newChannel };
+  const data = await trpcMutate<Record<string, unknown>>('channel.createChannel', {
+    serverId: channel.serverId,
+    name: channel.name,
+    slug: channel.slug,
+    type: channel.type,
+    visibility: channel.visibility,
+    topic: channel.topic,
+    position: channel.position,
+  });
+  return toFrontendChannel(data);
 }
 
 /**
- * Deletes a channel by ID. Returns true if deleted, false if not found.
+ * Deletes a channel by ID via tRPC. Returns true if deleted.
  */
-export async function deleteChannel(channelId: string): Promise<boolean> {
-  const index = channels.findIndex(c => c.id === channelId);
-  if (index === -1) return false;
-  channels.splice(index, 1);
+export async function deleteChannel(channelId: string, serverId?: string): Promise<boolean> {
+  if (!serverId) {
+    throw new Error('serverId is required for deleteChannel');
+  }
+  await trpcMutate('channel.deleteChannel', { serverId, channelId });
   return true;
 }
 

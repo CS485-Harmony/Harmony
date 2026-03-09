@@ -208,7 +208,7 @@ export function HarmonyShell({
               onMessageSent={handleMessageSent}
             />
             {!isAuthLoading && !isAuthenticated && (
-              <GuestPromoBanner serverName={currentServer.name} memberCount={members.length} />
+              <GuestPromoBanner serverName={currentServer.name} memberCount={currentServer.memberCount ?? members.length} />
             )}
           </div>
           <MembersSidebar

@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { getServers, getServerMembers } from '@/services/serverService';
+import { getServers } from '@/services/serverService';
 import { getChannels } from '@/services/channelService';
 import { getMessages } from '@/services/messageService';
 import { HarmonyShell } from '@/components/layout/HarmonyShell';
@@ -36,7 +36,9 @@ export async function ChannelPageContent({
   const { messages } = await getMessages(channel.id);
   const sortedMessages = [...messages].reverse();
 
-  const members = await getServerMembers(server.id);
+  // TODO: Wire to real getServerMembers endpoint when backend implements it.
+  // For now, pass an empty array — the HarmonyShell uses server.memberCount for display.
+  const members: import('@/types').User[] = [];
 
   const shell = (
     <HarmonyShell

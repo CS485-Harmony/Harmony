@@ -2,8 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createServer } from '@/services/serverService';
-import { createChannel } from '@/services/channelService';
-import { ChannelType, ChannelVisibility } from '@/types';
+import { getChannels } from '@/services/channelService';
 import type { Server, Channel } from '@/types';
 
 export async function createServerAction(
@@ -25,15 +24,16 @@ export async function createServerAction(
     throw new Error('Invalid server description');
   }
 
+  // The backend createServer auto-creates a default "general" channel
   const server = await createServer({ name: trimmed, description: sanitizedDescription });
-  const defaultChannel = await createChannel({
-    serverId: server.id,
-    name: 'general',
-    slug: 'general',
-    type: ChannelType.TEXT,
-    visibility: ChannelVisibility.PRIVATE,
-    position: 0,
-  });
+
+  // Fetch the default channel created by the backend
+  const channels = await getChannels(server.id);
+  const defaultChannel = channels.find(c => c.slug === 'general') ?? channels[0];
+
+  if (!defaultChannel) {
+    throw new Error('Server created but no default channel found');
+  }
 
   revalidatePath('/channels', 'layout');
   revalidatePath('/c', 'layout');

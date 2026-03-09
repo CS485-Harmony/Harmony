@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { updateChannel, getChannel } from '@/services/channelService';
+import { getServer } from '@/services/serverService';
 import type { Channel } from '@/types';
 
 export async function saveChannelSettings(
@@ -14,9 +15,12 @@ export async function saveChannelSettings(
   if (!channel) {
     throw new Error('Channel not found');
   }
-  // TODO (#71): This action has no server-side auth check. Anyone who can call
-  // it can mutate channel data. Enforce a server-verifiable session + role check
-  // before this reaches production.
+
+  // Resolve server to get serverId for the API call
+  const server = await getServer(serverSlug);
+  if (!server) {
+    throw new Error('Server not found');
+  }
 
   // Build an explicit whitelist so callers cannot sneak in extra fields
   // (e.g. serverId, visibility) even though TS types restrict them at compile time.
@@ -37,7 +41,8 @@ export async function saveChannelSettings(
     sanitizedPatch.description = patch.description;
   }
 
-  await updateChannel(channel.id, sanitizedPatch);
+  // The backend updateChannel requires channelId and serverId
+  await updateChannel(channel.id, server.id, sanitizedPatch);
 
   // Invalidate at layout level so sidebars (channel lists) across all pages
   // under the server segment also receive fresh data after a rename.
