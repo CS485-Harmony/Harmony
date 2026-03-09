@@ -19,6 +19,7 @@ let serverId: string;
 let userId: string;
 let textChannelId: string;
 let voiceChannelId: string;
+let otherServerId: string | null = null;
 
 const makeInput = (
   channelId: string,
@@ -79,6 +80,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (otherServerId) {
+    await prisma.server.delete({ where: { id: otherServerId } }).catch((err) => {
+      console.error('Cleanup: failed to delete other test server:', err);
+    });
+  }
   if (serverId) {
     await prisma.server.delete({ where: { id: serverId } }).catch((err) => {
       console.error('Cleanup: failed to delete test server:', err);
@@ -97,13 +103,19 @@ afterAll(async () => {
 
 describe('visibilityService.getVisibility', () => {
   it('returns the current visibility of a channel', async () => {
-    const visibility = await visibilityService.getVisibility(textChannelId);
+    const visibility = await visibilityService.getVisibility(textChannelId, serverId);
     expect(visibility).toBe(ChannelVisibility.PRIVATE);
   });
 
   it('throws NOT_FOUND for unknown channelId', async () => {
     await expect(
-      visibilityService.getVisibility('00000000-0000-0000-0000-000000000000'),
+      visibilityService.getVisibility('00000000-0000-0000-0000-000000000000', serverId),
+    ).rejects.toThrow(TRPCError);
+  });
+
+  it('throws NOT_FOUND when channelId does not belong to serverId', async () => {
+    await expect(
+      visibilityService.getVisibility(textChannelId, '00000000-0000-0000-0000-000000000000'),
     ).rejects.toThrow(TRPCError);
   });
 });
@@ -187,6 +199,7 @@ describe('visibilityService.setVisibility — state transitions', () => {
 
     const channel = await prisma.channel.findUnique({ where: { id: textChannelId } });
     expect(channel!.visibility).toBe(ChannelVisibility.PUBLIC_NO_INDEX);
+    expect(channel!.indexedAt).toEqual(knownDate);
   });
 
   // S3 → S1: PUBLIC_INDEXABLE → PRIVATE (clears indexedAt)
@@ -214,7 +227,11 @@ describe('visibilityService.setVisibility — state transitions', () => {
 
   // S2 → S1: PUBLIC_NO_INDEX → PRIVATE
   it('PUBLIC_NO_INDEX → PRIVATE: clears indexedAt', async () => {
-    await resetChannel(textChannelId, ChannelVisibility.PUBLIC_NO_INDEX);
+    // Set indexedAt to a non-null value so we can verify it gets cleared
+    await prisma.channel.update({
+      where: { id: textChannelId },
+      data: { visibility: ChannelVisibility.PUBLIC_NO_INDEX, indexedAt: new Date('2026-01-01T00:00:00Z') },
+    });
 
     const result = await visibilityService.setVisibility(
       makeInput(textChannelId, ChannelVisibility.PRIVATE),
@@ -223,6 +240,9 @@ describe('visibilityService.setVisibility — state transitions', () => {
     expect(result.success).toBe(true);
     expect(result.oldVisibility).toBe(ChannelVisibility.PUBLIC_NO_INDEX);
     expect(result.newVisibility).toBe(ChannelVisibility.PRIVATE);
+
+    const channel = await prisma.channel.findUnique({ where: { id: textChannelId } });
+    expect(channel!.indexedAt).toBeNull();
   });
 
   // No-op: same visibility
@@ -285,6 +305,7 @@ describe('visibilityService.setVisibility — error cases', () => {
         isPublic: false,
       },
     });
+    otherServerId = otherServer.id;
 
     const input: SetVisibilityInput = {
       channelId: textChannelId,
@@ -295,11 +316,6 @@ describe('visibilityService.setVisibility — error cases', () => {
     };
 
     await expect(visibilityService.setVisibility(input)).rejects.toThrow(TRPCError);
-
-    // Cleanup
-    await prisma.server.delete({ where: { id: otherServer.id } }).catch((err) => {
-      console.error('Cleanup: failed to delete other test server:', err);
-    });
   });
 });
 

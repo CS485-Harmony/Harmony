@@ -37,13 +37,18 @@ export interface VisibilityChangeResult {
 export const visibilityService = {
   /**
    * Get the current visibility of a channel.
+   *
+   * Validates that the channel belongs to the given server to prevent
+   * cross-server channel probing.
    */
-  async getVisibility(channelId: string): Promise<ChannelVisibility> {
+  async getVisibility(channelId: string, serverId: string): Promise<ChannelVisibility> {
     const channel = await prisma.channel.findUnique({
       where: { id: channelId },
-      select: { visibility: true },
+      select: { visibility: true, serverId: true },
     });
-    if (!channel) throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found' });
+    if (!channel || channel.serverId !== serverId) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
+    }
     return channel.visibility;
   },
 
