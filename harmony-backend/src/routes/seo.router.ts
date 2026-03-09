@@ -12,8 +12,7 @@ export const seoRouter = Router();
 
 /**
  * GET /robots.txt
- * Instructs crawlers to allow /c/ routes (public channel pages)
- * and points to per-server sitemaps.
+ * Instructs crawlers to allow /c/ routes (public channel pages).
  */
 seoRouter.get('/robots.txt', (_req: Request, res: Response) => {
   const body = [
@@ -21,8 +20,6 @@ seoRouter.get('/robots.txt', (_req: Request, res: Response) => {
     'Allow: /c/',
     'Disallow: /api/',
     'Disallow: /trpc/',
-    '',
-    '# Per-server sitemaps are available at /sitemap/{serverSlug}.xml',
   ].join('\n');
 
   res.set('Content-Type', 'text/plain');

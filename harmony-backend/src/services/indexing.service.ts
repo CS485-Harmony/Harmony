@@ -22,10 +22,8 @@ export const CacheKeys_Sitemap = {
 
 export const indexingService = {
   /**
-   * Add a channel to the sitemap by setting its visibility to PUBLIC_INDEXABLE.
-   * In practice this is a read-side concern — the channel already has its
-   * visibility set by the visibility service. This method ensures the sitemap
-   * cache is invalidated so the channel appears on next generation.
+   * Invalidate the sitemap cache for the channel's server so the channel
+   * appears in the next generated sitemap.
    */
   async addToSitemap(channelId: string): Promise<void> {
     const channel = await prisma.channel.findUnique({
@@ -112,7 +110,7 @@ function buildSitemapXml(
   const urls = channels
     .map(
       (ch) =>
-        `  <url>\n    <loc>${escapeXml(BASE_URL)}/c/${escapeXml(serverSlug)}/${escapeXml(ch.slug)}</loc>\n    <lastmod>${ch.updatedAt.toISOString()}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.7</priority>\n  </url>`,
+        `  <url>\n    <loc>${escapeXml(BASE_URL)}/c/${encodeURIComponent(serverSlug)}/${encodeURIComponent(ch.slug)}</loc>\n    <lastmod>${ch.updatedAt.toISOString()}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.7</priority>\n  </url>`,
     )
     .join('\n');
 

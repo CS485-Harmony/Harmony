@@ -11,6 +11,7 @@
 import { ChannelVisibility, ChannelType } from '@prisma/client';
 import { prisma } from '../src/db/prisma';
 import { indexingService } from '../src/services/indexing.service';
+import { cacheService } from '../src/services/cache.service';
 import { createApp } from '../src/app';
 import request from 'supertest';
 
@@ -118,18 +119,28 @@ describe('indexingService.generateSitemap', () => {
 });
 
 describe('indexingService.onVisibilityChanged', () => {
+  let invalidateSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    invalidateSpy = jest.spyOn(cacheService, 'invalidate');
+  });
+
+  afterEach(() => {
+    invalidateSpy.mockRestore();
+  });
+
   it('invalidates sitemap cache when channel becomes PUBLIC_INDEXABLE', async () => {
-    // First generate to populate cache
     await indexingService.generateSitemap(serverSlug);
 
-    // Simulate visibility change
     await indexingService.onVisibilityChanged({
       channelId: privateChannelId,
       oldVisibility: 'PRIVATE',
       newVisibility: 'PUBLIC_INDEXABLE',
     });
 
-    // No error thrown — cache invalidation succeeded
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.stringContaining('sitemap:'),
+    );
   });
 
   it('invalidates sitemap cache when channel leaves PUBLIC_INDEXABLE', async () => {
@@ -140,15 +151,20 @@ describe('indexingService.onVisibilityChanged', () => {
       oldVisibility: 'PUBLIC_INDEXABLE',
       newVisibility: 'PRIVATE',
     });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.stringContaining('sitemap:'),
+    );
   });
 
-  it('does nothing when visibility change does not involve PUBLIC_INDEXABLE', async () => {
-    // PRIVATE -> PUBLIC_NO_INDEX should not trigger sitemap update
+  it('does not invalidate cache when visibility change does not involve PUBLIC_INDEXABLE', async () => {
     await indexingService.onVisibilityChanged({
       channelId: privateChannelId,
       oldVisibility: 'PRIVATE',
       newVisibility: 'PUBLIC_NO_INDEX',
     });
+
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 });
 
