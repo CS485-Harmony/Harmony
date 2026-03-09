@@ -94,7 +94,7 @@ describe('serverService.createServer', () => {
     expect(server!.slug).toBe('my-test-server');
     expect(server!.ownerId).toBe(ownerUserId);
     expect(server!.isPublic).toBe(true);
-    expect(server!.memberCount).toBe(0);
+    expect(server!.memberCount).toBe(1); // owner auto-added as member
   });
 
   it('rejects a name that generates an empty slug', async () => {
@@ -170,10 +170,16 @@ describe('serverService.updateServer', () => {
 describe('serverService.incrementMemberCount / decrementMemberCount', () => {
   it('increments member count', async () => {
     const updated = await serverService.incrementMemberCount(createdServerId);
-    expect(updated.memberCount).toBe(1);
+    // Starts at 1 (owner auto-added), so after increment → 2
+    expect(updated.memberCount).toBe(2);
   });
 
   it('decrements member count', async () => {
+    const updated = await serverService.decrementMemberCount(createdServerId);
+    expect(updated.memberCount).toBe(1);
+  });
+
+  it('decrements member count to zero', async () => {
     const updated = await serverService.decrementMemberCount(createdServerId);
     expect(updated.memberCount).toBe(0);
   });
