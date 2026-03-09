@@ -107,7 +107,6 @@ function OverviewSection({
       await saveChannelSettings(serverSlug, channel.slug, {
         name: trimmedName,
         topic: topic.trim(),
-        description: description.trim(),
       });
       if (currentChannelIdRef.current !== savedForChannelId || saveCounterRef.current !== thisToken)
         return;
