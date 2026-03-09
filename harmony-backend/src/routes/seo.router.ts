@@ -13,6 +13,10 @@ export const seoRouter = Router();
 /**
  * GET /robots.txt
  * Instructs crawlers to allow /c/ routes (public channel pages).
+ *
+ * NOTE: A machine-readable `Sitemap:` directive requires a sitemap index
+ * endpoint (e.g. /sitemap-index.xml) that aggregates per-server sitemaps.
+ * This is tracked as a follow-up — see issue #107 comments.
  */
 seoRouter.get('/robots.txt', (_req: Request, res: Response) => {
   const body = [

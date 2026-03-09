@@ -12,6 +12,7 @@
 import { ChannelVisibility } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { cacheService, sanitizeKeySegment } from './cache.service';
+import type { VisibilityChangedPayload } from '../events/eventTypes';
 
 const SITEMAP_CACHE_TTL = 300; // 5 minutes
 const BASE_URL = process.env.BASE_URL ?? 'https://harmony.chat';
@@ -56,7 +57,7 @@ export const indexingService = {
 
   /**
    * Generate a sitemap XML string for all PUBLIC_INDEXABLE channels in a server.
-   * Results are cached for SITEMAP_CACHE_TTL seconds.
+   * Uses stale-while-revalidate caching via getOrRevalidate.
    */
   async generateSitemap(serverSlug: string): Promise<string | null> {
     const server = await prisma.server.findUnique({
@@ -68,38 +69,32 @@ export const indexingService = {
 
     const cacheKey = CacheKeys_Sitemap.serverSitemap(serverSlug);
 
-    const cached = await cacheService.get<string>(cacheKey);
-    if (cached && !cacheService.isStale(cached, SITEMAP_CACHE_TTL)) {
-      return cached.data;
-    }
-
-    const channels = await prisma.channel.findMany({
-      where: {
-        serverId: server.id,
-        visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    return cacheService.getOrRevalidate(
+      cacheKey,
+      async () => {
+        const channels = await prisma.channel.findMany({
+          where: {
+            serverId: server.id,
+            visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+          },
+          orderBy: { position: 'asc' },
+          select: {
+            slug: true,
+            updatedAt: true,
+          },
+        });
+        return buildSitemapXml(server.slug, channels);
       },
-      orderBy: { position: 'asc' },
-      select: {
-        slug: true,
-        updatedAt: true,
-      },
-    });
-
-    const xml = buildSitemapXml(server.slug, channels);
-
-    await cacheService.set(cacheKey, xml, { ttl: SITEMAP_CACHE_TTL });
-
-    return xml;
+      { ttl: SITEMAP_CACHE_TTL },
+    );
   },
 
   /**
    * Handle a visibility change event — update sitemap accordingly.
    */
-  async onVisibilityChanged(payload: {
-    channelId: string;
-    oldVisibility: string;
-    newVisibility: string;
-  }): Promise<void> {
+  async onVisibilityChanged(
+    payload: Pick<VisibilityChangedPayload, 'channelId' | 'oldVisibility' | 'newVisibility'>,
+  ): Promise<void> {
     if (payload.newVisibility === 'PUBLIC_INDEXABLE') {
       await this.addToSitemap(payload.channelId);
     } else if (payload.oldVisibility === 'PUBLIC_INDEXABLE') {
