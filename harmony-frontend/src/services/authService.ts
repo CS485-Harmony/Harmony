@@ -154,8 +154,13 @@ export function setCurrentUser(_user: User | null): void {
   // Token-based auth: no client-side user state to set here.
 }
 
-/** Returns true if an access token or refresh token is present. */
+/**
+ * Returns true if the current session resolves to a valid user.
+ * Calls getCurrentUser() so it handles token refresh transparently —
+ * a stale or revoked refresh token will return false rather than a false positive.
+ */
 export async function isAuthenticated(): Promise<boolean> {
-  return getAccessToken() !== null || getRefreshToken() !== null;
+  const user = await getCurrentUser();
+  return user !== null;
 }
 
