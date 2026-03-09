@@ -1,20 +1,20 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { router, authedProcedure, publicProcedure } from '../init';
+import { router, authedProcedure } from '../init';
 import { serverService } from '../../services/server.service';
 
 export const serverRouter = router({
-  getServers: publicProcedure
+  getServers: authedProcedure
     .input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional())
     .query(async ({ input }) => {
       return serverService.getPublicServers(input?.limit);
     }),
 
-  getServer: publicProcedure
+  getServer: authedProcedure
     .input(z.object({ slug: z.string().min(1) }))
     .query(async ({ input }) => {
       const server = await serverService.getServer(input.slug);
-      if (!server || !server.isPublic) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
+      if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
       return server;
     }),
 

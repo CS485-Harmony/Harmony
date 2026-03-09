@@ -1,6 +1,7 @@
 import { Server, Prisma } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { prisma } from '../db/prisma';
+import { channelService } from './channel.service';
 
 export function generateSlug(name: string): string {
   return name
@@ -16,13 +17,13 @@ async function generateUniqueSlug(name: string): Promise<string> {
   const base = generateSlug(name);
   if (!base) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot generate slug from name' });
 
+  const MAX_ATTEMPTS = 10;
   let candidate = base;
-  let suffix = 1;
-  while ((await prisma.server.count({ where: { slug: candidate } })) > 0) {
+  for (let suffix = 1; suffix <= MAX_ATTEMPTS; suffix++) {
+    if ((await prisma.server.count({ where: { slug: candidate } })) === 0) return candidate;
     candidate = `${base}-${suffix}`;
-    suffix++;
   }
-  return candidate;
+  throw new TRPCError({ code: 'CONFLICT', message: 'Unable to generate a unique slug' });
 }
 
 /**
@@ -75,9 +76,11 @@ export const serverService = {
     ownerId: string;
   }): Promise<Server> {
     const slug = await generateUniqueSlug(input.name);
-    return withSlugRetry(input.name, slug, (s) =>
+    const server = await withSlugRetry(input.name, slug, (s) =>
       prisma.server.create({ data: { ...input, slug: s } }),
     );
+    await channelService.createDefaultChannel(server.id);
+    return server;
   },
 
   async updateServer(
