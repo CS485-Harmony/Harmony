@@ -45,6 +45,7 @@ beforeAll(async () => {
     data: {
       name: `Test Server ${ts}`,
       slug: `test-server-${ts}`,
+      ownerId: userIds['OWNER'],
     },
   });
   serverId = server.id;

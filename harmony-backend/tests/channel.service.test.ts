@@ -169,7 +169,7 @@ describe('channelService.updateChannel', () => {
 
   it('throws NOT_FOUND when channelId belongs to a different server', async () => {
     const otherServer = await prisma.server.create({
-      data: { name: 'Other Server', slug: `other-server-${Date.now()}`, isPublic: false },
+      data: { name: 'Other Server', slug: `other-server-${Date.now()}`, isPublic: false, ownerId: userId },
     });
     await expect(
       channelService.updateChannel(channelId, otherServer.id, { name: 'x' }),
@@ -242,7 +242,7 @@ describe('channelService.deleteChannel', () => {
       visibility: 'PRIVATE',
     });
     const otherServer = await prisma.server.create({
-      data: { name: 'Other Server 2', slug: `other-server2-${Date.now()}`, isPublic: false },
+      data: { name: 'Other Server 2', slug: `other-server2-${Date.now()}`, isPublic: false, ownerId: userId },
     });
     await expect(
       channelService.deleteChannel(channel.id, otherServer.id),

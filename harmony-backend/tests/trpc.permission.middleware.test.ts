@@ -63,7 +63,7 @@ beforeAll(async () => {
   memberId = member.id;
 
   const server = await prisma.server.create({
-    data: { name: `MW Server ${ts}`, slug: `mw-server-${ts}` },
+    data: { name: `MW Server ${ts}`, slug: `mw-server-${ts}`, ownerId },
   });
   serverId = server.id;
 

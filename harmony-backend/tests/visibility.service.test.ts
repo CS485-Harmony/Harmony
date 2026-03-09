@@ -50,6 +50,7 @@ beforeAll(async () => {
       name: 'Visibility Test Server',
       slug: `vis-test-${Date.now()}`,
       isPublic: false,
+      ownerId: userId,
     },
   });
   serverId = server.id;
@@ -303,6 +304,7 @@ describe('visibilityService.setVisibility — error cases', () => {
         name: 'Other Server',
         slug: `other-server-${Date.now()}`,
         isPublic: false,
+        ownerId: userId,
       },
     });
     otherServerId = otherServer.id;

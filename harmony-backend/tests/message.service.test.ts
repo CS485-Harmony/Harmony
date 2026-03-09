@@ -33,6 +33,7 @@ beforeAll(async () => {
       name: 'Message Test Server',
       slug: `msg-test-${Date.now()}`,
       isPublic: false,
+      ownerId: authorId,
     },
   });
   serverId = server.id;
@@ -120,7 +121,7 @@ describe('messageService.sendMessage', () => {
 
   it('throws NOT_FOUND when channelId does not belong to serverId (cross-server bypass)', async () => {
     const otherServer = await prisma.server.create({
-      data: { name: 'Other Server', slug: `other-srv-${Date.now()}`, isPublic: false },
+      data: { name: 'Other Server', slug: `other-srv-${Date.now()}`, isPublic: false, ownerId: authorId },
     });
     const otherChannel = await prisma.channel.create({
       data: {
@@ -365,7 +366,7 @@ describe('messageService.pinMessage / unpinMessage', () => {
 
   it('throws NOT_FOUND when messageId does not belong to serverId', async () => {
     const otherServer = await prisma.server.create({
-      data: { name: 'Pin Test Server', slug: `pin-srv-${Date.now()}`, isPublic: false },
+      data: { name: 'Pin Test Server', slug: `pin-srv-${Date.now()}`, isPublic: false, ownerId: authorId },
     });
 
     await expect(
