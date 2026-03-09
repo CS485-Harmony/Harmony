@@ -43,7 +43,7 @@ seoRouter.get('/sitemap/:serverSlug.xml', async (req: Request, res: Response) =>
     }
 
     res.set('Content-Type', 'application/xml');
-    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Cache-Control', 'public, max-age=3600');
     res.send(xml);
   } catch (err) {
     console.error('Sitemap generation error:', err);

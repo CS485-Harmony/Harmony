@@ -36,8 +36,8 @@ export const indexingService = {
   },
 
   /**
-   * Remove a channel from the sitemap. Invalidates the cached sitemap
-   * so it no longer includes the channel on next generation.
+   * Remove a channel from the sitemap. Clears indexed_at and invalidates
+   * the cached sitemap so the channel no longer appears on next generation.
    */
   async removeFromSitemap(channelId: string): Promise<void> {
     const channel = await prisma.channel.findUnique({
@@ -45,6 +45,11 @@ export const indexingService = {
       select: { serverId: true, server: { select: { slug: true } } },
     });
     if (!channel) return;
+
+    await prisma.channel.update({
+      where: { id: channelId },
+      data: { indexedAt: null },
+    });
 
     await cacheService.invalidate(CacheKeys_Sitemap.serverSitemap(channel.server.slug));
   },
