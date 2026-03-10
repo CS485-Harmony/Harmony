@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { router, authedProcedure } from '../init';
+import { router, authedProcedure, withPermission } from '../init';
 import { serverService } from '../../services/server.service';
 
 export const serverRouter = router({
@@ -50,5 +50,11 @@ export const serverRouter = router({
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       return serverService.deleteServer(input.id, ctx.userId);
+    }),
+
+  getMembers: withPermission('server:read')
+    .input(z.object({ serverId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return serverService.getMembers(input.serverId);
     }),
 });

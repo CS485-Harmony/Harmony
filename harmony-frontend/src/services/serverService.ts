@@ -56,16 +56,45 @@ export const getServer = cache(async (slug: string): Promise<Server | null> => {
   }
 });
 
+/** Maps a backend ServerMember+User record to the frontend User type. */
+function toFrontendMember(raw: Record<string, unknown>): User {
+  const user = raw.user as Record<string, unknown>;
+  const roleMap: Record<string, User['role']> = {
+    OWNER: 'owner',
+    ADMIN: 'admin',
+    MODERATOR: 'moderator',
+    MEMBER: 'member',
+    GUEST: 'guest',
+  };
+  const statusMap: Record<string, User['status']> = {
+    ONLINE: 'online',
+    IDLE: 'idle',
+    DND: 'dnd',
+    OFFLINE: 'offline',
+  };
+  return {
+    id: user.id as string,
+    username: user.username as string,
+    displayName: (user.displayName as string | undefined) ?? undefined,
+    avatar: (user.avatarUrl as string | null) ?? undefined,
+    status: statusMap[user.status as string] ?? 'offline',
+    role: roleMap[raw.role as string] ?? 'member',
+  };
+}
+
 /**
- * Returns all members (users) of a server by server ID.
- * TODO: Wire to a real backend endpoint when getServerMembers is implemented.
- * Currently the backend has no member list endpoint, so we return the memberCount
- * from the server and an empty array. The UI should show memberCount from server data.
+ * Returns all members of a server by server ID.
+ * Calls the authenticated tRPC `server.getMembers` endpoint.
+ * Returns [] if the request fails (e.g. unauthenticated callers on guest views).
  */
-export async function getServerMembers(_serverId: string): Promise<User[]> {
-  // The backend does not yet expose a getServerMembers endpoint.
-  // Return an empty array; callers should use server.memberCount for display.
-  return [];
+export async function getServerMembers(serverId: string): Promise<User[]> {
+  try {
+    const data = await trpcQuery<Record<string, unknown>[]>('server.getMembers', { serverId });
+    return (data ?? []).map(toFrontendMember);
+  } catch (error) {
+    console.warn('[serverService.getServerMembers] failed, returning []:', error);
+    return [];
+  }
 }
 
 /**

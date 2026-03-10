@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { getServers } from '@/services/serverService';
+import { getServers, getServerMembers } from '@/services/serverService';
 import { getChannels } from '@/services/channelService';
 import { getMessages } from '@/services/messageService';
 import { HarmonyShell } from '@/components/layout/HarmonyShell';
@@ -33,12 +33,11 @@ export async function ChannelPageContent({
   ).flat();
 
   // Service returns newest-first (both public and tRPC paths); reverse for chronological display
-  const { messages } = await getMessages(channel.id, 1, { serverId: server.id });
+  const [{ messages }, members] = await Promise.all([
+    getMessages(channel.id, 1, { serverId: server.id }),
+    getServerMembers(server.id),
+  ]);
   const sortedMessages = [...messages].reverse();
-
-  // TODO: Wire to real getServerMembers endpoint when backend implements it.
-  // For now, pass an empty array — the HarmonyShell uses server.memberCount for display.
-  const members: import('@/types').User[] = [];
 
   const shell = (
     <HarmonyShell

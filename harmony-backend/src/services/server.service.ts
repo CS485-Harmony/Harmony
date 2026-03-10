@@ -3,6 +3,29 @@ import { TRPCError } from '@trpc/server';
 import { prisma } from '../db/prisma';
 import { channelService } from './channel.service';
 
+// Role hierarchy for sorting: lower rank = higher privilege
+const ROLE_RANK: Record<string, number> = {
+  OWNER: 0,
+  ADMIN: 1,
+  MODERATOR: 2,
+  MEMBER: 3,
+  GUEST: 4,
+};
+
+export interface ServerMemberWithUser {
+  userId: string;
+  serverId: string;
+  role: string;
+  joinedAt: Date;
+  user: {
+    id: string;
+    username: string;
+    displayName: string;
+    avatarUrl: string | null;
+    status: string;
+  };
+}
+
 export function generateSlug(name: string): string {
   return name
     .toLowerCase()
@@ -126,5 +149,23 @@ export const serverService = {
       where: { id },
       data: { memberCount: { decrement: 1 } },
     });
+  },
+
+  async getMembers(serverId: string): Promise<ServerMemberWithUser[]> {
+    const members = await prisma.serverMember.findMany({
+      where: { serverId },
+      include: {
+        user: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true, status: true },
+        },
+      },
+    });
+    return members
+      .map(m => ({ ...m, role: m.role as string }))
+      .sort(
+        (a, b) =>
+          (ROLE_RANK[a.role] ?? 99) - (ROLE_RANK[b.role] ?? 99) ||
+          a.joinedAt.getTime() - b.joinedAt.getTime(),
+      );
   },
 };
