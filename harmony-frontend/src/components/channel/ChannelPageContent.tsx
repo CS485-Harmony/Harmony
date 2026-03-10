@@ -37,10 +37,11 @@ export async function ChannelPageContent({
   ).flat();
 
   // Service returns newest-first; reverse for chronological display
-  const { messages } = await getMessages(channel.id);
+  const [{ messages }, members] = await Promise.all([
+    getMessages(channel.id),
+    getServerMembers(server.id),
+  ]);
   const sortedMessages = [...messages].reverse();
-
-  const members = await getServerMembers(server.id);
 
   const shell = (
     <HarmonyShell
