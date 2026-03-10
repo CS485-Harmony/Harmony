@@ -5,7 +5,7 @@ This file provides context and guidelines for AI coding agents (GitHub Copilot, 
 ## Harmony is a **search engine indexable chat application** @README.md .
 
 ## Agent Workflow Guidelines
-Before starting any task, read and follow the rules in @WORKFLOW.md 
+Before starting any development task, read and follow the rules in @WORKFLOW.md 
 It defines workflow orchestration, task management, and core principles all agents must follow.
 
 Always check for lint or build errors before committing code.
@@ -13,6 +13,7 @@ Always check for lint or build errors before committing code.
 ### Specs/Docs
 - No build/test commands for specifications
 - Jest/Playwright/Lighthouse referenced in specs are design intent for future implementation
+- Specs and architecture documents are located in @docs/
 
 ## Key repository conventions
 - Dev specs use a strict numbered structure (`1`–`13`; SEO spec also has `14. Acceptance Criteria`).
@@ -21,3 +22,8 @@ Always check for lint or build errors before committing code.
 - Preserve canonical visibility enum values exactly: `PUBLIC_INDEXABLE`, `PUBLIC_NO_INDEX`, `PRIVATE`.
 
 - Always verify tests are running successfully in both the backend and the frontend before pushing changes
+
+### Role-Specific Behaviors
+
+#### PR Reviews 
+IF your current task involves conducting a code review or reviewing a Pull Request, THEN you MUST read and strictly adhere to the guidelines defined in `@.github/PR_REVIEW.md`. Do not begin the review until you have parsed this file.
