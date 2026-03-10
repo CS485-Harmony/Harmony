@@ -13,9 +13,9 @@ import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
 /** Maps the backend Prisma Server shape to the frontend Server type. */
 function toFrontendServer(raw: Record<string, unknown>): Server {
   // Warn on missing required fields to catch backend shape mismatches early.
-  if (typeof raw.id !== 'string') console.warn('[toFrontendServer] missing or non-string "id"', raw);
-  if (typeof raw.slug !== 'string') console.warn('[toFrontendServer] missing or non-string "slug"', raw);
-  if (typeof raw.createdAt !== 'string') console.warn('[toFrontendServer] missing or non-string "createdAt"', raw);
+  if (typeof raw.id !== 'string') console.warn('[toFrontendServer] missing or non-string "id"');
+  if (typeof raw.slug !== 'string') console.warn('[toFrontendServer] missing or non-string "slug"');
+  if (typeof raw.createdAt !== 'string') console.warn('[toFrontendServer] missing or non-string "createdAt"');
   return {
     id: raw.id as string,
     name: raw.name as string,

@@ -13,10 +13,10 @@ import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
 /** Maps the backend Prisma Channel shape to the frontend Channel type. */
 function toFrontendChannel(raw: Record<string, unknown>): Channel {
   // Warn on missing required fields to catch backend shape mismatches early.
-  if (typeof raw.id !== 'string') console.warn('[toFrontendChannel] missing or non-string "id"', raw);
-  if (typeof raw.serverId !== 'string') console.warn('[toFrontendChannel] missing or non-string "serverId"', raw);
-  if (typeof raw.slug !== 'string') console.warn('[toFrontendChannel] missing or non-string "slug"', raw);
-  if (typeof raw.createdAt !== 'string') console.warn('[toFrontendChannel] missing or non-string "createdAt"', raw);
+  if (typeof raw.id !== 'string') console.warn('[toFrontendChannel] missing or non-string "id"');
+  if (typeof raw.serverId !== 'string') console.warn('[toFrontendChannel] missing or non-string "serverId"');
+  if (typeof raw.slug !== 'string') console.warn('[toFrontendChannel] missing or non-string "slug"');
+  if (typeof raw.createdAt !== 'string') console.warn('[toFrontendChannel] missing or non-string "createdAt"');
   return {
     id: raw.id as string,
     serverId: raw.serverId as string,

@@ -81,8 +81,9 @@ export async function createChannelAction(input: CreateChannelInput): Promise<Ch
     revalidatePath(`/channels/${input.serverSlug}`, 'layout');
     revalidatePath(`/c/${input.serverSlug}`, 'layout');
     revalidatePath(`/settings/${input.serverSlug}`, 'layout');
-  } catch {
-    // Revalidation failure is non-fatal
+  } catch (err) {
+    // Revalidation failure is non-fatal but log so stale-cache issues are diagnosable.
+    console.error('[createChannelAction] revalidatePath failed:', err instanceof Error ? err.message : err);
   }
 
   return newChannel;

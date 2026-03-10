@@ -36,14 +36,21 @@ async function getAuthToken(): Promise<string | undefined> {
  * Return type is `T | null` to make 404 handling explicit at call sites.
  */
 export async function publicGet<T>(path: string): Promise<T | null> {
-  const res = await fetch(`${BASE}/api/public${path}`, {
-    next: { revalidate: 60 }, // ISR: revalidate every 60s
-  });
-  if (!res.ok) {
-    if (res.status === 404) return null;
-    throw new Error(`Public API error: ${res.status} ${res.statusText}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(`${BASE}/api/public${path}`, {
+      next: { revalidate: 60 }, // ISR: revalidate every 60s
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      if (res.status === 404) return null;
+      throw new Error(`Public API error: ${res.status}`);
+    }
+    return res.json() as Promise<T>;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return res.json() as Promise<T>;
 }
 
 // ─── tRPC HTTP helpers ────────────────────────────────────────────────────────
@@ -67,18 +74,28 @@ export async function trpcQuery<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(url.toString(), {
-    headers,
-    next: { revalidate: 30 },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      headers,
+      next: { revalidate: 30 },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`tRPC query error [${procedure}]: ${res.status} — ${body}`);
+    throw new Error(`tRPC query error [${procedure}]: ${res.status} — ${body.slice(0, 200)}`);
   }
 
   const json = await res.json();
-  return json.result?.data as T;
+  const data = json.result?.data;
+  if (data === undefined) throw new Error(`tRPC query [${procedure}]: response missing result.data`);
+  return data as T;
 }
 
 /**
@@ -96,17 +113,27 @@ export async function trpcMutate<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE}/trpc/${procedure}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(input ?? {}),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/trpc/${procedure}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(input ?? {}),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`tRPC mutation error [${procedure}]: ${res.status} — ${body}`);
+    throw new Error(`tRPC mutation error [${procedure}]: ${res.status} — ${body.slice(0, 200)}`);
   }
 
   const json = await res.json();
-  return json.result?.data as T;
+  const data = json.result?.data;
+  if (data === undefined) throw new Error(`tRPC mutation [${procedure}]: response missing result.data`);
+  return data as T;
 }
