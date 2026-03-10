@@ -4,6 +4,7 @@ import { createContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from '@/types';
 import * as authService from '@/services/authService';
+import { setSessionCookie, clearSessionCookie } from '@/app/actions/session';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,12 +38,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // On mount: try to restore session via the refresh token (if present).
   // The api-client will transparently use the stored refresh token to get
-  // a fresh access token if needed.
+  // a fresh access token if needed. If a user is restored, also refresh the
+  // httpOnly middleware cookie so server-side route protection stays active.
   useEffect(() => {
     authService
       .getCurrentUser()
-      .then(restored => {
-        if (restored) setUser(restored);
+      .then(async restored => {
+        if (restored) {
+          setUser(restored);
+          // Re-set the httpOnly cookie so middleware can continue protecting
+          // routes without requiring a full re-login.
+          await setSessionCookie({ sub: restored.id, username: restored.username, role: restored.role });
+        }
       })
       .catch(() => {
         // No valid session — stay logged out
@@ -53,12 +60,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const loggedInUser = await authService.login(email, password);
     setUser(loggedInUser);
+    // Set httpOnly session cookie so middleware can protect routes server-side.
+    // When #113 lands with real JWT, this call is replaced by the backend
+    // setting the cookie via Set-Cookie on the /api/auth/login response.
+    await setSessionCookie({ sub: loggedInUser.id, username: loggedInUser.username, role: loggedInUser.role });
   }, []);
 
   const register = useCallback(
     async (email: string, username: string, displayName: string, password: string) => {
       const newUser = await authService.register(email, username, displayName, password);
       setUser(newUser);
+      await setSessionCookie({ sub: newUser.id, username: newUser.username, role: newUser.role });
     },
     [],
   );
@@ -66,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     await authService.logout();
     setUser(null);
+    await clearSessionCookie();
   }, []);
 
   const updateUser = useCallback(
@@ -95,4 +108,3 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-
