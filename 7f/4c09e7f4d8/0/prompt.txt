@@ -1,0 +1,1 @@
+Complete issue #116 for me in a new worktree. When you are done, use the agent-browser skill to test to ensure that it works correctly.

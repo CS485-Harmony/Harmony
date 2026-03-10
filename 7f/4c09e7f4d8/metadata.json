@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "7f4c09e7f4d8",
+  "strategy": "manual-commit",
+  "branch": "misc/pr-review-file",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".github/PR_REVIEW.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/7f/4c09e7f4d8/0/metadata.json",
+      "transcript": "/7f/4c09e7f4d8/0/full.jsonl",
+      "content_hash": "/7f/4c09e7f4d8/0/content_hash.txt",
+      "prompt": "/7f/4c09e7f4d8/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 21,
+    "cache_creation_tokens": 60183,
+    "cache_read_tokens": 791655,
+    "output_tokens": 10233,
+    "api_call_count": 19
+  }
+}

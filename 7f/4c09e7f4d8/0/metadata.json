@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "7f4c09e7f4d8",
+  "session_id": "d61330db-d4a6-4875-bd79-661a7cc65211",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-10T21:49:16.514006Z",
+  "branch": "misc/pr-review-file",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".github/PR_REVIEW.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "b8858c38b86f",
+  "token_usage": {
+    "input_tokens": 21,
+    "cache_creation_tokens": 60183,
+    "cache_read_tokens": 791655,
+    "output_tokens": 10233,
+    "api_call_count": 19
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-10T21:49:16.383444Z",
+    "agent_lines": 3,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 3,
+    "agent_percentage": 100
+  }
+}
