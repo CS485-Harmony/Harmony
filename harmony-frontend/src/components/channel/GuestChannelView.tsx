@@ -6,7 +6,11 @@
  */
 
 import { notFound } from 'next/navigation';
-import { fetchPublicServer, fetchPublicChannel, fetchPublicMessages } from '@/services/publicApiService';
+import {
+  fetchPublicServer,
+  fetchPublicChannel,
+  fetchPublicMessages,
+} from '@/services/publicApiService';
 import { AuthRedirect } from '@/components/channel/AuthRedirect';
 import { VisibilityGuard } from '@/components/channel/VisibilityGuard';
 import { MessageList } from '@/components/channel/MessageList';
@@ -14,9 +18,11 @@ import { GuestPromoBanner } from '@/components/channel/GuestPromoBanner';
 import { ChannelVisibility } from '@/types';
 import type { Server, Channel } from '@/types';
 
+type PublicServer = Omit<Server, 'ownerId'>;
+
 // ─── Guest Header ─────────────────────────────────────────────────────────────
 
-function GuestHeader({ server, memberCount }: { server: Server; memberCount: number }) {
+function GuestHeader({ server, memberCount }: { server: PublicServer; memberCount: number }) {
   return (
     <header className='flex h-14 shrink-0 items-center gap-3 border-b border-black/20 bg-[#2f3136] px-4'>
       {/* Harmony logo wordmark */}

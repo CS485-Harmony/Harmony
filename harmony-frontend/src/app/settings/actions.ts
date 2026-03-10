@@ -1,6 +1,6 @@
 'use server';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+import { API_CONFIG } from '@/lib/constants';
 
 /**
  * Returns true if the channel at the given slugs is publicly accessible to
@@ -16,7 +16,7 @@ export async function isChannelGuestAccessible(
 ): Promise<boolean> {
   try {
     const res = await fetch(
-      `${API_BASE}/api/public/servers/${encodeURIComponent(serverSlug)}/channels/${encodeURIComponent(channelSlug)}`,
+      `${API_CONFIG.BASE_URL}/api/public/servers/${encodeURIComponent(serverSlug)}/channels/${encodeURIComponent(channelSlug)}`,
       { cache: 'no-store' },
     );
     // 200 = accessible (PUBLIC_INDEXABLE or PUBLIC_NO_INDEX)

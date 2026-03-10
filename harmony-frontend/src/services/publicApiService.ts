@@ -8,8 +8,9 @@
 import { cache } from 'react';
 import type { Server, Channel, Message } from '@/types';
 import { ChannelType, ChannelVisibility } from '@/types';
+import { API_CONFIG } from '@/lib/constants';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+type PublicServer = Omit<Server, 'ownerId'>;
 
 // ─── Response shapes from the backend ─────────────────────────────────────────
 
@@ -31,7 +32,6 @@ interface PublicChannelResponse {
   type: string;
   visibility: string;
   topic?: string | null;
-  description?: string | null;
   position: number;
   createdAt: string;
 }
@@ -81,18 +81,22 @@ function mapChannelVisibility(visibility: string): ChannelVisibility {
  * Returns null on any error or if the server is not found (404).
  * Deduplicated within a single render pass via React `cache`.
  */
-export const fetchPublicServer = cache(async (serverSlug: string): Promise<Server | null> => {
+export const fetchPublicServer = cache(async (serverSlug: string): Promise<PublicServer | null> => {
   try {
-    const res = await fetch(`${API_BASE}/api/public/servers/${encodeURIComponent(serverSlug)}`);
+    const res = await fetch(
+      `${API_CONFIG.BASE_URL}/api/public/servers/${encodeURIComponent(serverSlug)}`,
+      {
+        next: { revalidate: 60 },
+      },
+    );
     if (!res.ok) return null;
 
     const data: PublicServerResponse = await res.json();
-    const server: Server = {
+    const server: PublicServer = {
       id: data.id,
       name: data.name,
       slug: data.slug,
       icon: data.iconUrl,
-      ownerId: '',
       description: data.description,
       memberCount: data.memberCount,
       createdAt: data.createdAt,
@@ -117,7 +121,8 @@ export const fetchPublicChannel = cache(
   ): Promise<{ channel: Channel; isPrivate: false } | { isPrivate: true } | null> => {
     try {
       const res = await fetch(
-        `${API_BASE}/api/public/servers/${encodeURIComponent(serverSlug)}/channels/${encodeURIComponent(channelSlug)}`,
+        `${API_CONFIG.BASE_URL}/api/public/servers/${encodeURIComponent(serverSlug)}/channels/${encodeURIComponent(channelSlug)}`,
+        { next: { revalidate: 60 } },
       );
 
       if (res.status === 404) return null;
@@ -133,7 +138,6 @@ export const fetchPublicChannel = cache(
         type: mapChannelType(data.type),
         visibility: mapChannelVisibility(data.visibility),
         topic: data.topic ?? undefined,
-        description: data.description ?? undefined,
         position: data.position,
         createdAt: data.createdAt,
       };
@@ -154,12 +158,12 @@ export async function fetchPublicMessages(
 ): Promise<{ messages: Message[]; hasMore: boolean }> {
   try {
     const res = await fetch(
-      `${API_BASE}/api/public/channels/${encodeURIComponent(channelId)}/messages?page=${page}`,
+      `${API_CONFIG.BASE_URL}/api/public/channels/${encodeURIComponent(channelId)}/messages?page=${page}`,
     );
     if (!res.ok) return { messages: [], hasMore: false };
 
     const data: PublicMessagesApiResponse = await res.json();
-    const messages: Message[] = data.messages.map((m) => ({
+    const messages: Message[] = data.messages.map(m => ({
       id: m.id,
       channelId,
       authorId: m.author.id,

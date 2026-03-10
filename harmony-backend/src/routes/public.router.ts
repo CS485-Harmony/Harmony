@@ -254,7 +254,6 @@ publicRouter.get(
           type: true,
           visibility: true,
           topic: true,
-          description: true,
           position: true,
           createdAt: true,
         },
