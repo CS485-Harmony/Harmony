@@ -46,9 +46,9 @@ jest.mock('../src/services/cache.service', () => {
       get: jest.fn().mockResolvedValue(null),
       set: jest.fn().mockResolvedValue(undefined),
       isStale: jest.fn().mockReturnValue(false),
-      getOrRevalidate: jest.fn().mockImplementation(
-        async (_key: string, fetcher: () => Promise<unknown>) => fetcher(),
-      ),
+      getOrRevalidate: jest
+        .fn()
+        .mockImplementation(async (_key: string, fetcher: () => Promise<unknown>) => fetcher()),
     },
     // Re-export constants that the router imports
     CacheKeys: {
@@ -141,7 +141,13 @@ describe('GET /api/public/servers/:serverSlug/channels', () => {
   it('returns 200 with PUBLIC_INDEXABLE channels when the server exists', async () => {
     mockPrisma.server.findUnique.mockResolvedValue({ id: SERVER.id });
     mockPrisma.channel.findMany.mockResolvedValue([
-      { id: CHANNEL.id, name: CHANNEL.name, slug: CHANNEL.slug, type: CHANNEL.type, topic: CHANNEL.topic },
+      {
+        id: CHANNEL.id,
+        name: CHANNEL.name,
+        slug: CHANNEL.slug,
+        type: CHANNEL.type,
+        topic: CHANNEL.topic,
+      },
     ]);
 
     const res = await request(app).get(`/api/public/servers/${SERVER.slug}/channels`);
@@ -150,6 +156,11 @@ describe('GET /api/public/servers/:serverSlug/channels', () => {
     expect(res.body).toHaveProperty('channels');
     expect(res.body.channels).toHaveLength(1);
     expect(res.body.channels[0]).toMatchObject({ id: CHANNEL.id, name: CHANNEL.name });
+    expect(mockPrisma.channel.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ visibility: ChannelVisibility.PUBLIC_INDEXABLE }),
+      }),
+    );
   });
 
   it('returns 200 with an empty array when the server has no public channels', async () => {
@@ -205,6 +216,24 @@ describe('GET /api/public/channels/:channelId/messages', () => {
     expect(res.body).toHaveProperty('page', 3);
   });
 
+  it('clamps invalid ?page values to 1', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([]);
+
+    const zeroPage = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages?page=0`);
+    expect(zeroPage.status).toBe(200);
+    expect(zeroPage.body).toHaveProperty('page', 1);
+
+    _clearBucketsForTesting();
+
+    const negPage = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages?page=-5`);
+    expect(negPage.status).toBe(200);
+    expect(negPage.body).toHaveProperty('page', 1);
+  });
+
   it('returns 404 when the channel does not exist', async () => {
     mockPrisma.channel.findUnique.mockResolvedValue(null);
 
@@ -249,24 +278,32 @@ describe('GET /api/public/channels/:channelId/messages/:messageId', () => {
     });
     mockPrisma.message.findFirst.mockResolvedValue(MESSAGE);
 
-    const res = await request(app).get(
-      `/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`,
-    );
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: MESSAGE.id, content: MESSAGE.content });
     expect(res.body.author).toMatchObject({ username: 'alice' });
   });
 
-  it('returns 404 when the channel is not PUBLIC_INDEXABLE', async () => {
+  it('returns 404 when the channel is PRIVATE', async () => {
     mockPrisma.channel.findUnique.mockResolvedValue({
       id: CHANNEL.id,
       visibility: ChannelVisibility.PRIVATE,
     });
 
-    const res = await request(app).get(
-      `/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`,
-    );
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty('error');
+  });
+
+  it('returns 404 when the channel is PUBLIC_NO_INDEX', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_NO_INDEX,
+    });
+
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`);
 
     expect(res.status).toBe(404);
     expect(res.body).toHaveProperty('error');
