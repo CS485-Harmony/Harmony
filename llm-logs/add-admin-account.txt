@@ -1,0 +1,790 @@
+ ▐▛███▜▌   Claude Code v2.1.72
+▝▜█████▛▘  Opus 4.6 · Claude Pro
+  ▘▘ ▝▝    ~/dev/school/cs485/Harmony
+
+❯ /clear                                                                        
+  ⎿  (no content)
+
+❯ /review PR181 using the agent-reviews skill                                   
+
+⏺ Let me gather the PR details and review guidelines.
+
+⏺ Bash(gh pr view 181 --json
+      title,body,author,baseRefName,headRefName,files,additions,deletions)
+  ⎿  {
+       "additions": 109,
+       "author": {
+     … +61 lines (ctrl+o to expand)
+
+⏺ Bash(gh pr diff 181)
+  ⎿  diff --git a/harmony-backend/src/routes/auth.router.ts b/harmony-backe
+     nd/src/routes/auth.router.ts
+     index 91d2ed7..035bd9d 100644
+     … +308 lines (ctrl+o to expand)
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Let me check a few more things before writing the review.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Bash(gh pr view 181 --json comments,reviews --jq '.reviews[].body,
+      .comments[].body' 2>/dev/null | head -50)
+  ⎿  ## Pull request overview
+
+     This PR fixes frontend authentication persistence for server-side requ
+     … +42 lines (ctrl+o to expand)
+
+⏺ Searched for 3 patterns, read 2 files (ctrl+o to expand)
+
+⏺ Good. Now I have enough context to write the review. Let me submit it.
+
+⏺ Bash(gh pr review 181 --approve --body "$(cat <<'EOF'
+      ## PR Review Checklist…)
+  ⎿  Error: Exit code 1
+     failed to create review: GraphQL: Review Can not approve your own pull 
+     request (addPullRequestReview)
+
+⏺ Can't approve your own PR. Let me submit as a comment-only review instead.
+
+⏺ Bash(gh pr review 181 --comment --body "$(cat <<'EOF'
+      ## PR Review Checklist…)
+  ⎿  (No output)
+
+⏺ Review submitted on PR #181. Here's the summary:
+
+  All 8 review checklist items pass. The PR looks good — clean fixes for real
+  bugs with appropriate scope.
+
+  Key findings:
+  - Auth cookie: Correctly stores the real JWT; middleware already handles JWT
+  format. The 7-day maxAge vs 15m token TTL is fine since AuthContext refreshes
+  the cookie on every load.
+  - Auto-join: Best-effort pattern is correct — registration won't break if the
+  default server is missing.
+  - getUserErrorMessage: Well-structured error cascade with proper fallbacks.
+  - Admin UI: Correct fix — server.ownerId comparison replaces the broken
+  hardcoded role check.
+  - One non-blocking note: middleware.ts has a stale comment about #113 that
+  could be cleaned up in a follow-up.
+
+✻ Cogitated for 1m 3s
+
+❯ Since the site isn't being deployed yet, add a temporary admin override       
+login. Something like username:'admin' password:'admin' that can see all        
+servers, edit channels, etc.                                                    
+  ⎿  Found 4 new diagnostic issues in 4 files (ctrl+o to expand)
+
+⏺ Explore(Explore auth flow and admin checks)
+  ⎿  Done (29 tool uses · 81.1k tokens · 52s)
+  (ctrl+o to expand)
+
+⏺ Let me look at the key files I need to modify.
+
+⏺ Read 3 files (ctrl+o to expand)
+
+⏺ Now let me check the frontend auth service and context to understand how the
+  user object flows.
+
+⏺ Read 5 files (ctrl+o to expand)
+
+⏺ Let me check the user router to understand the getCurrentUser response.
+
+⏺ Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+⏺ Now let me check the server tRPC router to see how servers are fetched.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ I have a clear picture now. Here's my approach: add a dev-only admin login
+  bypass on the backend with a cached system admin check, and propagate an
+  isSystemAdmin flag to the frontend so the admin user gets full access
+  everywhere.
+
+  Let me implement this.
+
+⏺ Write(harmony-backend/src/lib/admin.utils.ts)
+  ⎿  Wrote 31 lines to harmony-backend/src/lib/admin.utils.ts
+      1 /**
+      2  * Temporary dev-only system admin utilities.
+      3  *
+      4  * The admin override lets a developer log in as admin@harmony.de
+        v / admin
+      5  * and bypass all permission and ownership checks. Remove this fi
+        le before
+      6  * deploying to production.
+      7  */
+      8 
+      9 import { prisma } from '../db/prisma';
+     … +21 lines (ctrl+o to expand)
+
+⏺ Now update the auth service to handle admin login:
+
+⏺ Update(harmony-backend/src/services/auth.service.ts)
+  ⎿  Added 1 line
+       5  import { prisma } from '../db/prisma';
+       6  import { TRPCError } from '@trpc/server';
+       7  import { serverMemberService } from './serverMember.service';
+       8 +import { ADMIN_EMAIL } from '../lib/admin.utils';              
+       9  
+      10  const BCRYPT_ROUNDS = 12;
+      11  // Dummy hash used to equalise bcrypt timing when the email is 
+          not found
+
+⏺ Now add the admin login logic. I'll add it at the top of the login method:
+
+⏺ Update(harmony-backend/src/services/auth.service.ts)
+  ⎿  Added 11 lines
+      136    },
+      137  
+      138    async login(email: string, password: string): Promise<AuthTo
+           kens> {
+      139 +    // ── Dev-only admin override ────────────────────────────
+          +────────────────                                              
+      140 +    // Login as admin@harmony.dev / admin to get a system-admi
+          +n account that                                                
+      141 +    // bypasses all permission and ownership checks. Remove be
+          +fore production.                                              
+      142 +    if (email === ADMIN_EMAIL && password === 'admin') {      
+      143 +      const admin = await this._ensureAdminUser();            
+      144 +      const accessToken = signAccessToken(admin.id);          
+      145 +      const refreshToken = signRefreshToken(admin.id);        
+      146 +      await storeRefreshToken(admin.id, refreshToken);        
+      147 +      return { accessToken, refreshToken };                   
+      148 +    }                                                         
+      149 +                                                              
+      150      const user = await prisma.user.findUnique({ where: { email
+            } });
+      151      if (!user) {
+      152        // Equalise timing so unknown emails are indistinguishab
+           le from wrong passwords
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now add the _ensureAdminUser helper method at the end of the authService
+  object:
+
+⏺ Update(harmony-backend/src/services/auth.service.ts)
+  ⎿  Added 31 lines
+      209        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'In
+           valid or expired access token' });
+      210      }
+      211    },
+      212 +                                                              
+      213 +  /**                                                         
+      214 +   * Upserts the dev admin user and ensures they are an OWNER 
+          +member of every                                               
+      215 +   * existing server. Called on admin login only.             
+      216 +   */                                                         
+      217 +  async _ensureAdminUser() {                                  
+      218 +    const passwordHash = await bcrypt.hash('admin', BCRYPT_ROU
+          +NDS);                                                         
+      219 +                                                              
+      220 +    const admin = await prisma.user.upsert({                  
+      221 +      where: { email: ADMIN_EMAIL },                          
+      222 +      update: { passwordHash },                               
+      223 +      create: {                                               
+      224 +        email: ADMIN_EMAIL,                                   
+      225 +        username: 'admin',                                    
+      226 +        displayName: 'System Admin',                          
+      227 +        passwordHash,                                         
+      228 +      },                                                      
+      229 +    });                                                       
+      230 +                                                              
+      231 +    // Auto-join every server as OWNER so the admin can access
+          + everything.                                                  
+      232 +    const servers = await prisma.server.findMany({ select: { i
+          +d: true } });                                                 
+      233 +    for (const server of servers) {                           
+      234 +      await prisma.serverMember.upsert({                      
+      235 +        where: { userId_serverId: { userId: admin.id, serverId
+          +: server.id } },                                              
+      236 +        update: { role: 'OWNER' },                            
+      237 +        create: { userId: admin.id, serverId: server.id, role:
+          + 'OWNER' },                                                   
+      238 +      });                                                     
+      239 +    }                                                         
+      240 +                                                              
+      241 +    return admin;                                             
+      242 +  },                                                          
+      243  };
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ The this reference won't work in an object literal. Let me fix this by
+  extracting the helper:
+
+⏺ Update(harmony-backend/src/services/auth.service.ts)
+  ⎿  Added 33 lines
+       82    });
+       83  }
+       84  
+       85 +// ─── Dev admin bootstrap ───────────────────────────────────
+          +───────────────────                                           
+       86 +                                                              
+       87 +/**                                                           
+       88 + * Upserts the dev admin user and ensures they are an OWNER me
+          +mber of every                                                 
+       89 + * existing server. Called on admin login only.               
+       90 + */                                                           
+       91 +async function ensureAdminUser() {                            
+       92 +  const passwordHash = await bcrypt.hash('admin', BCRYPT_ROUND
+          +S);                                                           
+       93 +                                                              
+       94 +  const admin = await prisma.user.upsert({                    
+       95 +    where: { email: ADMIN_EMAIL },                            
+       96 +    update: { passwordHash },                                 
+       97 +    create: {                                                 
+       98 +      email: ADMIN_EMAIL,                                     
+       99 +      username: 'admin',                                      
+      100 +      displayName: 'System Admin',                            
+      101 +      passwordHash,                                           
+      102 +    },                                                        
+      103 +  });                                                         
+      104 +                                                              
+      105 +  // Auto-join every server as OWNER so the admin can access e
+          +verything.                                                    
+      106 +  const servers = await prisma.server.findMany({ select: { id:
+          + true } });                                                   
+      107 +  for (const server of servers) {                             
+      108 +    await prisma.serverMember.upsert({                        
+      109 +      where: { userId_serverId: { userId: admin.id, serverId: 
+          +server.id } },                                                
+      110 +      update: { role: 'OWNER' },                              
+      111 +      create: { userId: admin.id, serverId: server.id, role: '
+          +OWNER' },                                                     
+      112 +    });                                                       
+      113 +  }                                                           
+      114 +                                                              
+      115 +  return admin;                                               
+      116 +}                                                             
+      117 +                                                              
+      118  // ─── Auth service ──────────────────────────────────────────
+           ───────────────────
+      119  
+      120  export const authService = {
+
+⏺ Now fix the login method to call the standalone function and remove the
+  duplicate method:
+
+⏺ Update(harmony-backend/src/services/auth.service.ts)
+  ⎿  Added 1 line, removed 1 line
+      173      // Login as admin@harmony.dev / admin to get a system-admi
+           n account that
+      174      // bypasses all permission and ownership checks. Remove be
+           fore production.
+      175      if (email === ADMIN_EMAIL && password === 'admin') {
+      176 -      const admin = await this._ensureAdminUser();            
+      176 +      const admin = await ensureAdminUser();                  
+      177        const accessToken = signAccessToken(admin.id);
+      178        const refreshToken = signRefreshToken(admin.id);
+      179        await storeRefreshToken(admin.id, refreshToken);
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now remove the duplicate _ensureAdminUser method from the authService object:
+
+⏺ Update(harmony-backend/src/services/auth.service.ts)
+  ⎿  Removed 30 lines
+      243      }
+      244    },
+      245  
+      246 -  /**                                                         
+      247 -   * Upserts the dev admin user and ensures they are an OWNER 
+          -member of every                                               
+      248 -   * existing server. Called on admin login only.             
+      249 -   */                                                         
+      250 -  async _ensureAdminUser() {                                  
+      251 -    const passwordHash = await bcrypt.hash('admin', BCRYPT_ROU
+          -NDS);                                                         
+      252 -                                                              
+      253 -    const admin = await prisma.user.upsert({                  
+      254 -      where: { email: ADMIN_EMAIL },                          
+      255 -      update: { passwordHash },                               
+      256 -      create: {                                               
+      257 -        email: ADMIN_EMAIL,                                   
+      258 -        username: 'admin',                                    
+      259 -        displayName: 'System Admin',                          
+      260 -        passwordHash,                                         
+      261 -      },                                                      
+      262 -    });                                                       
+      263 -                                                              
+      264 -    // Auto-join every server as OWNER so the admin can access
+          - everything.                                                  
+      265 -    const servers = await prisma.server.findMany({ select: { i
+          -d: true } });                                                 
+      266 -    for (const server of servers) {                           
+      267 -      await prisma.serverMember.upsert({                      
+      268 -        where: { userId_serverId: { userId: admin.id, serverId
+          -: server.id } },                                              
+      269 -        update: { role: 'OWNER' },                            
+      270 -        create: { userId: admin.id, serverId: server.id, role:
+          - 'OWNER' },                                                   
+      271 -      });                                                     
+      272 -    }                                                         
+      273 -                                                              
+      274 -    return admin;                                             
+      275 -  },                                                          
+      246  };
+
+⏺ Now update the permission service to bypass for system admin:
+
+⏺ Update(harmony-backend/src/services/permission.service.ts)
+  ⎿  Added 1 line
+      1  import { RoleType } from '@prisma/client';
+      2  import { TRPCError } from '@trpc/server';
+      3  import { prisma } from '../db/prisma';
+      4 +import { isSystemAdmin } from '../lib/admin.utils';             
+      5  
+      6  // ─── Action types ────────────────────────────────────────────
+         ─────────────────
+      7  
+
+⏺ Update(harmony-backend/src/services/permission.service.ts)
+  ⎿  Added 3 lines
+       94     * Returns `false` (does not throw) when the user is not a m
+           ember at all.
+       95     */
+       96    async checkPermission(userId: string, serverId: string, acti
+           on: Action): Promise<boolean> {
+       97 +    // Dev admin bypass — remove before production            
+       98 +    if (await isSystemAdmin(userId)) return true;             
+       99 +                                                              
+      100      const server = await prisma.server.findUnique({
+      101        where: { id: serverId },
+      102        select: { id: true },
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now update the server service to bypass ownership checks for admin:
+
+⏺ Update(harmony-backend/src/services/server.service.ts)
+  ⎿  Added 1 line
+      3  import { prisma } from '../db/prisma';
+      4  import { channelService } from './channel.service';
+      5  import { serverMemberService } from './serverMember.service';
+      6 +import { isSystemAdmin } from '../lib/admin.utils';             
+      7  
+      8  // Role hierarchy for sorting: lower rank = higher privilege
+      9  const ROLE_RANK: Record<string, number> = {
+
+⏺ Now add getAllServers and bypass ownership in update/delete:
+
+⏺ Update(harmony-backend/src/services/server.service.ts)
+  ⎿  Added 8 lines
+       89      });
+       90    },
+       91  
+       92 +  /** Dev admin: returns all servers regardless of visibility.
+          + */                                                           
+       93 +  async getAllServers(limit = 50): Promise<Server[]> {        
+       94 +    return prisma.server.findMany({                           
+       95 +      orderBy: { createdAt: 'desc' },                         
+       96 +      take: Math.min(limit, 100),                             
+       97 +    });                                                       
+       98 +  },                                                          
+       99 +                                                              
+      100    async getServer(slug: string): Promise<Server | null> {
+      101      return prisma.server.findUnique({ where: { slug } });
+      102    },
+  ⎿  Found 3 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Now bypass ownership checks in updateServer and deleteServer:
+
+⏺ Update(harmony-backend/src/services/server.service.ts)
+  ⎿  Added 1 line, removed 1 line
+      124    ): Promise<Server> {
+      125      const server = await prisma.server.findUnique({ where: { i
+           d } });
+      126      if (!server) throw new TRPCError({ code: 'NOT_FOUND', mess
+           age: 'Server not found' });
+      127 -    if (server.ownerId !== actorId)                           
+      127 +    if (server.ownerId !== actorId && !(await isSystemAdmin(ac
+          +torId)))                                                      
+      128        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only 
+           the server owner can update' });
+      129  
+      130      if (data.name && data.name !== server.name) {
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-backend/src/services/server.service.ts)
+  ⎿  Added 1 line, removed 1 line
+      139    async deleteServer(id: string, actorId: string): Promise<Ser
+           ver> {
+      140      const server = await prisma.server.findUnique({ where: { i
+           d } });
+      141      if (!server) throw new TRPCError({ code: 'NOT_FOUND', mess
+           age: 'Server not found' });
+      142 -    if (server.ownerId !== actorId)                           
+      142 +    if (server.ownerId !== actorId && !(await isSystemAdmin(ac
+          +torId)))                                                      
+      143        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only 
+           the server owner can delete' });
+      144      return prisma.server.delete({ where: { id } });
+      145    },
+
+⏺ Now update the server router to return all servers for admin:
+
+⏺ Update(harmony-backend/src/trpc/routers/server.router.ts)
+  ⎿  Added 5 lines, removed 1 line
+       2  import { TRPCError } from '@trpc/server';
+       3  import { router, authedProcedure, withPermission } from '../ini
+          t';
+       4  import { serverService } from '../../services/server.service';
+       5 +import { isSystemAdmin } from '../../lib/admin.utils';         
+       6  
+       7  export const serverRouter = router({
+       8    getServers: authedProcedure
+       9      .input(z.object({ limit: z.number().int().min(1).max(100).o
+          ptional() }).optional())
+       9 -    .query(async ({ input }) => {                              
+      10 +    .query(async ({ input, ctx }) => {                         
+      11 +      if (await isSystemAdmin(ctx.userId)) {                   
+      12 +        return serverService.getAllServers(input?.limit);      
+      13 +      }                                                        
+      14        return serverService.getPublicServers(input?.limit);
+      15      }),
+      16  
+
+⏺ Now update user.service.ts to include isSystemAdmin in the getCurrentUser
+  response:
+
+⏺ Update(harmony-backend/src/services/user.service.ts)
+  ⎿  Added 1 line
+      1  import { TRPCError } from '@trpc/server';
+      2  import { Prisma, UserStatus } from '@prisma/client';
+      3  import { prisma } from '../db/prisma';
+      4 +import { isSystemAdmin } from '../lib/admin.utils';             
+      5  
+      6  export interface UpdateUserInput {
+      7    displayName?: string;
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-backend/src/services/user.service.ts)
+  ⎿  Added 4 lines, removed 1 line
+      82      if (!user) {
+      83        throw new TRPCError({ code: 'NOT_FOUND', message: 'User n
+          ot found' });
+      84      }
+      85 -    return user;                                               
+      85 +    return {                                                   
+      86 +      ...user,                                                 
+      87 +      isSystemAdmin: await isSystemAdmin(userId),              
+      88 +    };                                                         
+      89    },
+      90  
+      91    async updateUser(userId: string, patch: UpdateUserInput) {
+  ⎿  Found 3 new diagnostic issues in 2 files (ctrl+o to expand)
+
+⏺ I see there are TS errors about ownerId in server.service.ts. Let me check
+  what's happening there — it seems like server queries might have a select that
+   excludes ownerId.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ The TS errors look like they might be stale diagnostics —
+  prisma.server.findUnique without a select returns the full Server model which
+  includes ownerId. These errors likely come from a different diagnostic check.
+  Let me verify the server model definitely has ownerId:
+
+  The schema clearly has ownerId on the Server model (line 101). These
+  diagnostics are likely stale/incorrect from the TS server. Let me proceed with
+   the frontend changes.
+
+  Now update the frontend to handle isSystemAdmin:
+
+⏺ Update(harmony-frontend/src/types/user.ts)
+  ⎿  Added 2 lines
+      14    avatar?: string;
+      15    status: UserStatus;
+      16    role: UserRole;
+      17 +  /** True when logged in as the dev system admin (admin@harmon
+         +y.dev). */                                                     
+      18 +  isSystemAdmin?: boolean;                                     
+      19  }
+
+⏺ Update the frontend auth service to map the isSystemAdmin flag:
+
+⏺ Update(harmony-frontend/src/services/authService.ts)
+  ⎿  Added 2 lines
+      33    /** Backend enum values are uppercase: ONLINE | IDLE | DND | 
+          OFFLINE */
+      34    status: 'ONLINE' | 'IDLE' | 'DND' | 'OFFLINE';
+      35    createdAt: string;
+      36 +  /** Present when logged in as the dev system admin. */       
+      37 +  isSystemAdmin?: boolean;                                     
+      38  }
+      39  
+      40  // ─── Mapping helpers ────────────────────────────────────────
+          ──────────────────
+
+⏺ Update(harmony-frontend/src/services/authService.ts)
+  ⎿  Added 2 lines, removed 1 line
+      55      // The global User object has no role field; use 'member' a
+          s a safe default.
+      56      // UI that needs to check admin/owner status must compare u
+          ser.id to
+      57      // the server's ownerId or fetch server membership separate
+          ly.
+      58 -    role: 'member',                                            
+      58 +    role: b.isSystemAdmin ? 'owner' : 'member',                
+      59 +    isSystemAdmin: b.isSystemAdmin ?? false,                   
+      60    };
+      61  }
+      62  
+
+⏺ Now update AuthContext.tsx so isAdmin() always returns true for the system
+  admin:
+
+⏺ Update(harmony-frontend/src/context/AuthContext.tsx)
+  ⎿  Added 2 lines
+      92  
+      93    const isAdmin = useCallback((serverOwnerId?: string) => {
+      94      if (!user) return false;
+      95 +    // Dev system admin bypasses all ownership checks          
+      96 +    if (user.isSystemAdmin) return true;                       
+      97      if (serverOwnerId) return user.id === serverOwnerId;
+      98      return user.role === 'owner' || user.role === 'admin';
+      99    }, [user]);
+
+⏺ Now let me also check how the login page works — the user said
+  "username:'admin' password:'admin'" but the login form uses email. Let me
+  check the login page to see if it accepts username or email.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Login uses email. The user will log in with admin@harmony.dev / admin. That's
+  fine — the username admin just becomes their display name.
+
+  Now let me also handle the login validation — the frontend login schema
+  requires a valid email. The backend login schema requires email: 
+  z.string().email(). Since admin@harmony.dev is a valid email, this is fine.
+
+  Let me also handle the case where the login form type is email — the HTML
+  input might validate. Let me also check if the backend login route validates
+  before calling the service:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Good, admin@harmony.dev is a valid email so it passes the schema. Now let me
+  run the build to check for errors.
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-backend && npx tsc
+      --noEmit 2>&1 | head -30)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +5 lines (ctrl+o to expand)
+
+⏺ Bash(npx tsc --noEmit 2>&1 | tail -30)
+  ⎿  (No output)
+
+⏺ Backend compiles clean. Now check the frontend:
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-frontend && npx tsc
+      --noEmit 2>&1 | tail -30)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +5 lines (ctrl+o to expand)
+
+⏺ Both compile clean. Let me run the backend tests:
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-backend && npx jest
+      2>&1 | tail -30)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +22 lines (ctrl+o to expand)
+  ⎿  (timeout 30s)
+
+⏺ All 325 tests pass. Let me also run the frontend tests:
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-frontend && npx jest
+      2>&1 | tail -20)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +20 lines (ctrl+o to expand)
+  ⎿  (timeout 30s)
+
+⏺ No frontend tests exist. Everything is clean. Let me also check the lint:
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-backend && npx eslint
+      src/lib/admin.utils.ts src/services/auth.service.ts
+      src/services/permission.service.ts s…)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +5 lines (ctrl+o to expand)
+
+⏺ No lint errors. Here's a summary of all the changes:
+
+  Summary
+
+  Login credentials: admin@harmony.dev / admin
+
+  Backend changes:
+
+  1. harmony-backend/src/lib/admin.utils.ts (new) — Exports ADMIN_EMAIL constant
+   and isSystemAdmin(userId) helper with in-memory caching to avoid repeated DB
+  lookups.
+  2. harmony-backend/src/services/auth.service.ts — On login with
+  admin@harmony.dev / admin, upserts the admin user and auto-joins them as OWNER
+   on every existing server.
+  3. harmony-backend/src/services/permission.service.ts — checkPermission()
+  bypasses all permission checks for the system admin.
+  4. harmony-backend/src/services/server.service.ts — updateServer() and
+  deleteServer() bypass ownership checks for admin. New getAllServers() returns
+  all servers (including private).
+  5. harmony-backend/src/trpc/routers/server.router.ts — getServers returns all
+  servers for admin, public-only for everyone else.
+  6. harmony-backend/src/services/user.service.ts — getCurrentUser() includes
+  isSystemAdmin: true/false in the response.
+
+  Frontend changes:
+
+  7. harmony-frontend/src/types/user.ts — Added optional isSystemAdmin field to
+  User type.
+  8. harmony-frontend/src/services/authService.ts — Maps isSystemAdmin from
+  backend; sets role: 'owner' for admin users.
+  9. harmony-frontend/src/context/AuthContext.tsx — isAdmin() returns true
+  unconditionally for system admin users, bypassing the serverOwnerId check.
+
+  All 325 backend tests pass. Both frontend and backend compile cleanly with no
+  lint errors.
+
+✻ Worked for 5m 40s
+
+❯ I seem to be logged into the admin account, but I still don't see the admin   
+utilities (server settings, etc.)                                               
+
+⏺ Let me trace how the admin UI visibility works to find the gap.
+
+⏺ Explore(Trace admin UI visibility checks)
+  ⎿  Done (13 tool uses · 58.6k tokens · 20s)
+  (ctrl+o to expand)
+
+⏺ Found it. Two components check currentUser.id === server.ownerId directly
+  instead of using the isAdmin() context function, so the system admin bypass
+  never applies.
+
+⏺ Read 2 files (ctrl+o to expand)
+
+⏺ Both are doing direct user.id === server.ownerId comparisons. I need to check
+  if these components have access to useAuth() or if they receive props.
+
+⏺ Searched for 2 patterns (ctrl+o to expand)
+
+⏺ HarmonyShell has useAuth() available, and ChannelSidebar receives currentUser
+  as a prop (which now has isSystemAdmin on it).
+
+  Fix 1 — HarmonyShell: use isAdmin() from auth context.
+  Fix 2 — ChannelSidebar: check currentUser.isSystemAdmin in the local isAdmin
+  variable.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ HarmonyShell destructures useAuth() but doesn't pull isAdmin. Let me fix both:
+
+⏺ Update(harmony-frontend/src/components/layout/HarmonyShell.tsx)
+  ⎿  Added 1 line, removed 1 line
+      109    const [isCreateChannelOpen, setIsCreateChannelOpen] = useSta
+           te(false);
+      110    const [createChannelDefaultType, setCreateChannelDefaultType
+           ] = useState<ChannelType>(ChannelType.TEXT);
+      111  
+      112 -  const { user: authUser, isAuthenticated, isLoading: isAuthLo
+          -ading } = useAuth();                                          
+      112 +  const { user: authUser, isAuthenticated, isLoading: isAuthLo
+          +ading, isAdmin: checkIsAdmin } = useAuth();                   
+      113  
+      114    // Fallback for guest/unauthenticated view
+      115    const currentUser: User = authUser ?? {
+
+⏺ Update(harmony-frontend/src/components/layout/HarmonyShell.tsx)
+  ⎿  Added 1 line, removed 1 line
+      200          <TopBar
+      201            channel={currentChannel}
+      202            serverSlug={currentServer.slug}
+      203 -          isAdmin={currentUser.id === currentServer.ownerId}  
+      203 +          isAdmin={checkIsAdmin(currentServer.ownerId)}       
+      204            isMembersOpen={isMembersOpen}
+      205            onMembersToggle={() => setIsMembersOpen(!isMembersOp
+           en)}
+      206            onSearchOpen={() => setIsSearchOpen(true)}
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now fix ChannelSidebar:
+
+⏺ Update(harmony-frontend/src/components/channel/ChannelSidebar.tsx)
+  ⎿  Added 1 line, removed 1 line
+      175    const [voiceCollapsed, setVoiceCollapsed] = useState(false);
+      176  
+      177    const isAdmin =
+      178 -    isAuthenticated && currentUser.id === server.ownerId;     
+      178 +    isAuthenticated && (currentUser.isSystemAdmin || currentUs
+          +er.id === server.ownerId);                                    
+      179  
+      180    const textChannels = channels.filter(
+      181      c =>
+
+⏺ Let me type-check the frontend to make sure everything compiles:
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-frontend && npx tsc
+      --noEmit 2>&1 | tail -10)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +5 lines (ctrl+o to expand)
+
+⏺ Compiles clean. The fix was in two places:
+
+  1. HarmonyShell.tsx:203 — Was passing currentUser.id === currentServer.ownerId
+   directly to TopBar. Now uses checkIsAdmin(currentServer.ownerId) which goes
+  through the AuthContext and respects the system admin bypass.
+  2. ChannelSidebar.tsx:177 — Was checking currentUser.id === server.ownerId.
+  Now also checks currentUser.isSystemAdmin so the admin user sees the settings
+  gear and channel create buttons.
+
+✻ Worked for 1m 7s
+
+❯ push these changes and update the PR                                          
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony && git status)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +19 lines (ctrl+o to expand)
+
+⏺ Bash(git diff --stat)
+  ⎿   harmony-backend/src/services/auth.service.ts       | 46 +++++++++++++
+     +++++++++
+      harmony-backend/src/services/permission.service.ts |  4 ++
+     … +9 lines (ctrl+o to expand)
+
+⏺ Bash(git log --oneline -5)
+  ⎿  289bc14 chore:llm-logs
+     0739af2 fix: use server ownerId for admin UI checks instead of hardcod
+     ed user role
+     … +5 lines (ctrl+o to expand)
+
+⏺ Bash(git add harmony-backend/src/lib/admin.utils.ts
+      harmony-backend/src/services/auth.service.ts
+      harmony-backend/src/services/permission.service.ts harmony-backend/s…)
+  ⎿  [fix/auth-cookie-and-auto-join ddba51a] feat: add temporary dev admin
+     override login (admin@harmony.dev / admin)
+      11 files changed, 113 insertions(+), 8 deletions(-)
+      create mode 100644 harmony-backend/src/lib/admin.utils.ts
+
+⏺ Bash(git push)
+  ⎿  To github.com:acabrera04/Harmony.git
+        0739af2..ddba51a  fix/auth-cookie-and-auto-join -> fix/auth-cookie-
+     and-auto-join
+
+⏺ Now update the PR description to include the new feature:
+
+⏺ Bash(gh pr edit 181 --body "$(cat <<'EOF'
+      ## Summary…)
+  ⎿  https://github.com/acabrera04/Harmony/pull/181
+
+⏺ Pushed and PR updated. The new commit adds the dev admin override, and the PR
+  description now includes the admin feature and its test plan items.
+
+✻ Baked for 40s
