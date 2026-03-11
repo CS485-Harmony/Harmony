@@ -33,6 +33,8 @@ interface BackendUser {
   /** Backend enum values are uppercase: ONLINE | IDLE | DND | OFFLINE */
   status: 'ONLINE' | 'IDLE' | 'DND' | 'OFFLINE';
   createdAt: string;
+  /** Present when logged in as the dev system admin. */
+  isSystemAdmin?: boolean;
 }
 
 // ─── Mapping helpers ──────────────────────────────────────────────────────────
@@ -53,7 +55,8 @@ function mapBackendUser(b: BackendUser): User {
     // The global User object has no role field; use 'member' as a safe default.
     // UI that needs to check admin/owner status must compare user.id to
     // the server's ownerId or fetch server membership separately.
-    role: 'member',
+    role: b.isSystemAdmin ? 'owner' : 'member',
+    isSystemAdmin: b.isSystemAdmin ?? false,
   };
 }
 

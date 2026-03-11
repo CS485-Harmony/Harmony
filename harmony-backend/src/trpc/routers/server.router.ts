@@ -2,11 +2,15 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, withPermission } from '../init';
 import { serverService } from '../../services/server.service';
+import { isSystemAdmin } from '../../lib/admin.utils';
 
 export const serverRouter = router({
   getServers: authedProcedure
     .input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional())
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (await isSystemAdmin(ctx.userId)) {
+        return serverService.getAllServers(input?.limit);
+      }
       return serverService.getPublicServers(input?.limit);
     }),
 

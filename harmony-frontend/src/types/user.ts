@@ -14,4 +14,6 @@ export interface User {
   avatar?: string;
   status: UserStatus;
   role: UserRole;
+  /** True when logged in as the dev system admin (admin@harmony.dev). */
+  isSystemAdmin?: boolean;
 }

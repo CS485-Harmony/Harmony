@@ -109,7 +109,7 @@ export function HarmonyShell({
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
   const [createChannelDefaultType, setCreateChannelDefaultType] = useState<ChannelType>(ChannelType.TEXT);
 
-  const { user: authUser, isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const { user: authUser, isAuthenticated, isLoading: isAuthLoading, isAdmin: checkIsAdmin } = useAuth();
 
   // Fallback for guest/unauthenticated view
   const currentUser: User = authUser ?? {
@@ -200,7 +200,7 @@ export function HarmonyShell({
         <TopBar
           channel={currentChannel}
           serverSlug={currentServer.slug}
-          isAdmin={currentUser.id === currentServer.ownerId}
+          isAdmin={checkIsAdmin(currentServer.ownerId)}
           isMembersOpen={isMembersOpen}
           onMembersToggle={() => setIsMembersOpen(!isMembersOpen)}
           onSearchOpen={() => setIsSearchOpen(true)}

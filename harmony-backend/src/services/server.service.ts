@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { prisma } from '../db/prisma';
 import { channelService } from './channel.service';
 import { serverMemberService } from './serverMember.service';
+import { isSystemAdmin } from '../lib/admin.utils';
 
 // Role hierarchy for sorting: lower rank = higher privilege
 const ROLE_RANK: Record<string, number> = {
@@ -88,6 +89,14 @@ export const serverService = {
     });
   },
 
+  /** Dev admin: returns all servers regardless of visibility. */
+  async getAllServers(limit = 50): Promise<Server[]> {
+    return prisma.server.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 100),
+    });
+  },
+
   async getServer(slug: string): Promise<Server | null> {
     return prisma.server.findUnique({ where: { slug } });
   },
@@ -115,7 +124,7 @@ export const serverService = {
   ): Promise<Server> {
     const server = await prisma.server.findUnique({ where: { id } });
     if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
-    if (server.ownerId !== actorId)
+    if (server.ownerId !== actorId && !(await isSystemAdmin(actorId)))
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the server owner can update' });
 
     if (data.name && data.name !== server.name) {
@@ -130,7 +139,7 @@ export const serverService = {
   async deleteServer(id: string, actorId: string): Promise<Server> {
     const server = await prisma.server.findUnique({ where: { id } });
     if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
-    if (server.ownerId !== actorId)
+    if (server.ownerId !== actorId && !(await isSystemAdmin(actorId)))
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the server owner can delete' });
     return prisma.server.delete({ where: { id } });
   },

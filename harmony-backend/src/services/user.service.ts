@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { Prisma, UserStatus } from '@prisma/client';
 import { prisma } from '../db/prisma';
+import { isSystemAdmin } from '../lib/admin.utils';
 
 export interface UpdateUserInput {
   displayName?: string;
@@ -81,7 +82,10 @@ export const userService = {
     if (!user) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
     }
-    return user;
+    return {
+      ...user,
+      isSystemAdmin: await isSystemAdmin(userId),
+    };
   },
 
   async updateUser(userId: string, patch: UpdateUserInput) {

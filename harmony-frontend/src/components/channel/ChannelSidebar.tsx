@@ -175,7 +175,7 @@ export function ChannelSidebar({
   const [voiceCollapsed, setVoiceCollapsed] = useState(false);
 
   const isAdmin =
-    isAuthenticated && currentUser.id === server.ownerId;
+    isAuthenticated && (currentUser.isSystemAdmin || currentUser.id === server.ownerId);
 
   const textChannels = channels.filter(
     c =>

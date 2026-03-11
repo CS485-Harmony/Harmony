@@ -1,6 +1,7 @@
 import { RoleType } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { prisma } from '../db/prisma';
+import { isSystemAdmin } from '../lib/admin.utils';
 
 // ─── Action types ─────────────────────────────────────────────────────────────
 
@@ -93,6 +94,9 @@ export const permissionService = {
    * Returns `false` (does not throw) when the user is not a member at all.
    */
   async checkPermission(userId: string, serverId: string, action: Action): Promise<boolean> {
+    // Dev admin bypass — remove before production
+    if (await isSystemAdmin(userId)) return true;
+
     const server = await prisma.server.findUnique({
       where: { id: serverId },
       select: { id: true },

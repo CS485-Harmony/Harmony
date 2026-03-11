@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { TRPCError } from '@trpc/server';
 import { serverMemberService } from './serverMember.service';
+import { ADMIN_EMAIL } from '../lib/admin.utils';
 
 const BCRYPT_ROUNDS = 12;
 // Dummy hash used to equalise bcrypt timing when the email is not found
@@ -81,6 +82,39 @@ async function storeRefreshToken(userId: string, rawToken: string): Promise<void
   });
 }
 
+// ─── Dev admin bootstrap ──────────────────────────────────────────────────────
+
+/**
+ * Upserts the dev admin user and ensures they are an OWNER member of every
+ * existing server. Called on admin login only.
+ */
+async function ensureAdminUser() {
+  const passwordHash = await bcrypt.hash('admin', BCRYPT_ROUNDS);
+
+  const admin = await prisma.user.upsert({
+    where: { email: ADMIN_EMAIL },
+    update: { passwordHash },
+    create: {
+      email: ADMIN_EMAIL,
+      username: 'admin',
+      displayName: 'System Admin',
+      passwordHash,
+    },
+  });
+
+  // Auto-join every server as OWNER so the admin can access everything.
+  const servers = await prisma.server.findMany({ select: { id: true } });
+  for (const server of servers) {
+    await prisma.serverMember.upsert({
+      where: { userId_serverId: { userId: admin.id, serverId: server.id } },
+      update: { role: 'OWNER' },
+      create: { userId: admin.id, serverId: server.id, role: 'OWNER' },
+    });
+  }
+
+  return admin;
+}
+
 // ─── Auth service ─────────────────────────────────────────────────────────────
 
 export const authService = {
@@ -135,6 +169,17 @@ export const authService = {
   },
 
   async login(email: string, password: string): Promise<AuthTokens> {
+    // ── Dev-only admin override ────────────────────────────────────────────
+    // Login as admin@harmony.dev / admin to get a system-admin account that
+    // bypasses all permission and ownership checks. Remove before production.
+    if (email === ADMIN_EMAIL && password === 'admin') {
+      const admin = await ensureAdminUser();
+      const accessToken = signAccessToken(admin.id);
+      const refreshToken = signRefreshToken(admin.id);
+      await storeRefreshToken(admin.id, refreshToken);
+      return { accessToken, refreshToken };
+    }
+
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
       // Equalise timing so unknown emails are indistinguishable from wrong passwords
@@ -197,4 +242,5 @@ export const authService = {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid or expired access token' });
     }
   },
+
 };

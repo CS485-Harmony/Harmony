@@ -92,6 +92,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isAdmin = useCallback((serverOwnerId?: string) => {
     if (!user) return false;
+    // Dev system admin bypasses all ownership checks
+    if (user.isSystemAdmin) return true;
     if (serverOwnerId) return user.id === serverOwnerId;
     return user.role === 'owner' || user.role === 'admin';
   }, [user]);
