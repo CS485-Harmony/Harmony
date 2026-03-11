@@ -44,6 +44,12 @@ jest.mock('../src/db/prisma', () => ({
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    server: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    serverMember: {
+      create: jest.fn(),
+    },
   },
 }));
 
