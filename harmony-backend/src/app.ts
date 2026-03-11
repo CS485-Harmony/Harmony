@@ -21,7 +21,7 @@ const loginLimiter = rateLimit({
 
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 5,
+  max: 1000, // TODO: reduce to 5 for production (temporarily raised for dev/testing)
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many registration attempts. Please try again later.' },
@@ -85,7 +85,8 @@ export function createApp() {
     const isCorsError = err instanceof CorsError;
     const status = isCorsError ? 403 : 500;
     const message = isCorsError ? err.message : 'Internal server error';
-    if (!isCorsError) console.error('Unhandled error:', process.env.NODE_ENV === 'production' ? err.message : err);
+    if (!isCorsError)
+      console.error('Unhandled error:', process.env.NODE_ENV === 'production' ? err.message : err);
     res.status(status).json({ error: message });
   });
 
