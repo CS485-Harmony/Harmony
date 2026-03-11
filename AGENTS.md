@@ -26,6 +26,9 @@ Always check for lint or build errors before committing code.
 
 ### Role-Specific Behaviors
 
-#### PR Reviews 
+#### PR Reviews
 IF your current task involves conducting a code review or reviewing a Pull Request, THEN you MUST read and strictly adhere to the guidelines defined in `@.github/PR_REVIEW.md`. Do not begin the review until you have parsed this file.
+
+#### Addressing Open PRs
+IF your current task involves addressing review comments or requested changes on an open PR (e.g. "babysit PRs", "get PR into approvable state"), THEN use the `agent-reviews` skill if it is available.
 
