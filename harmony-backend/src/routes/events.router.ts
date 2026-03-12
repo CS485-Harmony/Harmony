@@ -1,17 +1,22 @@
 /**
  * SSE Router — Issue #180
  *
- * GET /api/events/channel/:channelId
+ * GET /api/events/channel/:channelId?token=<accessToken>
  *
- * Streams real-time message events to connected clients using Server-Sent Events.
- * No auth required — channel data is already restricted by server-level access.
- * Subscribes to MESSAGE_CREATED, MESSAGE_EDITED, MESSAGE_DELETED Redis channels,
- * filters by channelId, fetches full message from DB for created/edited events,
- * and sends typed SSE frames.
+ * Streams real-time message events to authenticated, authorised clients using
+ * Server-Sent Events.
+ *
+ * Auth: the browser's native EventSource API cannot send custom headers, so the
+ * access token is accepted via a `?token=` query parameter instead of the
+ * Authorization header. The token is validated identically to requireAuth.
+ *
+ * Authorisation: verifies the authenticated user is a member of the server that
+ * owns the requested channel, preventing access to PRIVATE channels by non-members.
  */
 
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db/prisma';
+import { authService } from '../services/auth.service';
 import { eventBus, EventChannels } from '../events/eventBus';
 import type {
   MessageCreatedPayload,
@@ -58,6 +63,41 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
 
   if (!isValidChannelId(channelId)) {
     res.status(400).json({ error: 'Invalid channelId: must be a UUID' });
+    return;
+  }
+
+  // ── Auth — accept token via query param (EventSource cannot send headers) ──
+  const token = typeof req.query.token === 'string' ? req.query.token : null;
+  if (!token) {
+    res.status(401).json({ error: 'Missing token query parameter' });
+    return;
+  }
+
+  let userId: string;
+  try {
+    const payload = authService.verifyAccessToken(token);
+    userId = payload.sub;
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired access token' });
+    return;
+  }
+
+  // ── Authorisation — verify user is a member of the channel's server ───────
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: { serverId: true },
+  });
+  if (!channel) {
+    res.status(404).json({ error: 'Channel not found' });
+    return;
+  }
+
+  const membership = await prisma.serverMember.findFirst({
+    where: { userId, serverId: channel.serverId },
+    select: { userId: true },
+  });
+  if (!membership) {
+    res.status(403).json({ error: 'You are not a member of this server' });
     return;
   }
 
