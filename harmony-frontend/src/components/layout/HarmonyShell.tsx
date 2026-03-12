@@ -146,7 +146,10 @@ export function HarmonyShell({
   );
 
   const handleMessageSent = useCallback((msg: Message) => {
-    setLocalMessages(prev => [...prev, msg]);
+    // Dedup: the SSE event for the sender's own message can arrive before the tRPC
+    // response (Redis pub/sub on the same backend + established SSE connection beats
+    // the HTTP round-trip). Without this check, the message would be added twice.
+    setLocalMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
   }, []);
 
   // ── Real-time SSE handlers ────────────────────────────────────────────────

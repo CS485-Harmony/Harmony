@@ -97,8 +97,23 @@ export function useChannelEvents({
     es.addEventListener('message:edited', handleEdited);
     es.addEventListener('message:deleted', handleDeleted);
 
-    es.onopen = () => setIsConnected(true);
-    es.onerror = () => setIsConnected(false);
+    // Track whether the connection ever opened successfully.
+    // If onerror fires before onopen it's a permanent failure (4xx/5xx from the
+    // server or a network error before the stream started) — close immediately
+    // instead of letting EventSource retry with a stale/invalid token.
+    let everOpened = false;
+
+    es.onopen = () => {
+      everOpened = true;
+      setIsConnected(true);
+    };
+    es.onerror = () => {
+      setIsConnected(false);
+      if (!everOpened) {
+        // Never successfully opened — likely a 401/403. Stop retrying.
+        es.close();
+      }
+    };
 
     return () => {
       es.removeEventListener('message:created', handleCreated);
