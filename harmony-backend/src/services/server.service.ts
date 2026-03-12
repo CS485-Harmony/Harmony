@@ -40,7 +40,8 @@ export function generateSlug(name: string): string {
 
 async function generateUniqueSlug(name: string): Promise<string> {
   const base = generateSlug(name);
-  if (!base) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot generate slug from name' });
+  if (!base)
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot generate slug from name' });
 
   const MAX_ATTEMPTS = 10;
   let candidate = base;
@@ -95,6 +96,17 @@ export const serverService = {
       orderBy: { createdAt: 'desc' },
       take: Math.min(limit, 100),
     });
+  },
+
+  /** Returns only the servers the given user is a member of. */
+  async getMemberServers(userId: string, limit = 50): Promise<Server[]> {
+    const memberships = await prisma.serverMember.findMany({
+      where: { userId },
+      include: { server: true },
+      orderBy: { joinedAt: 'asc' },
+      take: Math.min(limit, 100),
+    });
+    return memberships.map((m) => m.server);
   },
 
   async getServer(slug: string): Promise<Server | null> {
@@ -172,7 +184,7 @@ export const serverService = {
       },
     });
     return members
-      .map(m => ({ ...m, role: m.role as string }))
+      .map((m) => ({ ...m, role: m.role as string }))
       .sort(
         (a, b) =>
           (ROLE_RANK[a.role] ?? 99) - (ROLE_RANK[b.role] ?? 99) ||

@@ -99,12 +99,21 @@ export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannel
   // Check if the authenticated user is a member of this server.
   // Only redirect members to the full /channels/ view; non-members stay here
   // so we don't create a redirect loop (ChannelPageContent → /c/ → /channels/ → loop).
+  //
+  // Error handling:
+  //   - Success  → confirmed member; redirect to /channels/
+  //   - 403      → confirmed non-member (valid token, no ServerMember row); stay on guest view
+  //   - 401/other → expired/invalid token; membership unknown — still render AuthRedirect so
+  //                 the client can redirect after the token is refreshed client-side.
+  //                 If the user turns out not to be a member, ChannelPageContent will redirect
+  //                 back here with a valid token and we'll get a 403, stopping any loop.
   let isMember = false;
   try {
     await getChannels(server.id);
     isMember = true;
-  } catch {
-    isMember = false;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    isMember = !msg.includes(': 403 ');
   }
 
   if (channelResult.isPrivate) {

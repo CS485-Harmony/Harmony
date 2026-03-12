@@ -11,7 +11,7 @@ export const serverRouter = router({
       if (await isSystemAdmin(ctx.userId)) {
         return serverService.getAllServers(input?.limit);
       }
-      return serverService.getPublicServers(input?.limit);
+      return serverService.getMemberServers(ctx.userId, input?.limit);
     }),
 
   getServer: authedProcedure
