@@ -13,7 +13,10 @@ import http from 'http';
 import request from 'supertest';
 import { createApp } from '../src/app';
 import { eventBus } from '../src/events/eventBus';
+import { prisma } from '../src/db/prisma';
 import type { Express } from 'express';
+
+const VALID_TOKEN = 'valid-token';
 
 // ─── Mock eventBus ─────────────────────────────────────────────────────────────
 
@@ -29,12 +32,21 @@ jest.mock('../src/events/eventBus', () => ({
   },
 }));
 
+// ─── Mock authService ──────────────────────────────────────────────────────────
+
+jest.mock('../src/services/auth.service', () => ({
+  authService: {
+    verifyAccessToken: jest.fn(() => ({ sub: 'test-user-id' })),
+  },
+}));
+
 // ─── Mock Prisma ───────────────────────────────────────────────────────────────
 
 jest.mock('../src/db/prisma', () => ({
   prisma: {
     message: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
     channel: { findUnique: jest.fn() },
+    serverMember: { findFirst: jest.fn() },
   },
 }));
 
@@ -120,35 +132,39 @@ afterAll((done) => {
 beforeEach(() => {
   jest.clearAllMocks();
   mockSubscribe.mockReturnValue({ unsubscribe: jest.fn(), ready: Promise.resolve() });
+  // Default prisma mocks for auth path through SSE endpoint
+  (prisma.channel.findUnique as jest.Mock).mockResolvedValue({ serverId: 'test-server-id' });
+  (prisma.serverMember.findFirst as jest.Mock).mockResolvedValue({ userId: 'test-user-id' });
 });
 
 // ─── SSE headers ──────────────────────────────────────────────────────────────
 
 describe('GET /api/events/channel/:channelId — SSE headers', () => {
   const VALID_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440001';
+  const sseUrl = (id: string) => `/api/events/channel/${id}?token=${VALID_TOKEN}`;
 
   it('sets Content-Type: text/event-stream', async () => {
-    const { headers } = await sseGet(server, `/api/events/channel/${VALID_CHANNEL_ID}`);
+    const { headers } = await sseGet(server, sseUrl(VALID_CHANNEL_ID));
     expect(headers['content-type']).toMatch(/text\/event-stream/);
   });
 
   it('sets Cache-Control: no-cache', async () => {
-    const { headers } = await sseGet(server, `/api/events/channel/${VALID_CHANNEL_ID}`);
+    const { headers } = await sseGet(server, sseUrl(VALID_CHANNEL_ID));
     expect(headers['cache-control']).toBe('no-cache');
   });
 
   it('sets Connection: keep-alive', async () => {
-    const { headers } = await sseGet(server, `/api/events/channel/${VALID_CHANNEL_ID}`);
+    const { headers } = await sseGet(server, sseUrl(VALID_CHANNEL_ID));
     expect(headers['connection']).toBe('keep-alive');
   });
 
   it('sets X-Accel-Buffering: no', async () => {
-    const { headers } = await sseGet(server, `/api/events/channel/${VALID_CHANNEL_ID}`);
+    const { headers } = await sseGet(server, sseUrl(VALID_CHANNEL_ID));
     expect(headers['x-accel-buffering']).toBe('no');
   });
 
   it('subscribes to all three MESSAGE event channels', async () => {
-    await sseGet(server, `/api/events/channel/${VALID_CHANNEL_ID}`);
+    await sseGet(server, sseUrl(VALID_CHANNEL_ID));
 
     const subscribedChannels = (mockSubscribe.mock.calls as unknown[][]).map((c) => c[0]);
     expect(subscribedChannels).toContain('harmony:MESSAGE_CREATED');
@@ -178,7 +194,7 @@ describe('GET /api/events/channel/:channelId — input validation', () => {
   it('accepts a valid UUID-formatted channelId and returns 200', async () => {
     const { statusCode } = await sseGet(
       server,
-      '/api/events/channel/550e8400-e29b-41d4-a716-446655440001',
+      `/api/events/channel/550e8400-e29b-41d4-a716-446655440001?token=${VALID_TOKEN}`,
     );
     expect(statusCode).toBe(200);
   });

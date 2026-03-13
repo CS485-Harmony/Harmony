@@ -11,6 +11,12 @@ import { renderHook, act } from '@testing-library/react';
 import { useChannelEvents } from '../hooks/useChannelEvents';
 import type { Message } from '../types/message';
 
+// ─── Mock api-client ──────────────────────────────────────────────────────────
+
+jest.mock('../lib/api-client', () => ({
+  getAccessToken: jest.fn(() => 'mock-token'),
+}));
+
 // ─── Mock EventSource ─────────────────────────────────────────────────────────
 
 type EventSourceHandler = (event: MessageEvent) => void;
@@ -43,7 +49,7 @@ const MockEventSource = jest.fn().mockImplementation((url: string) => {
       const list = handlers.get(type) ?? [];
       handlers.set(
         type,
-        list.filter((h) => h !== handler),
+        list.filter(h => h !== handler),
       );
     }),
     close: jest.fn(),
@@ -52,7 +58,7 @@ const MockEventSource = jest.fn().mockImplementation((url: string) => {
 
     simulateEvent(type: string, data: unknown) {
       const event = new MessageEvent(type, { data: JSON.stringify(data) });
-      (handlers.get(type) ?? []).forEach((h) => h(event));
+      (handlers.get(type) ?? []).forEach(h => h(event));
     },
 
     simulateOpen() {
@@ -121,7 +127,7 @@ describe('useChannelEvents — connection', () => {
     );
 
     expect(MockEventSource).toHaveBeenCalledWith(
-      `${API_URL}/api/events/channel/${CHANNEL_ID}`,
+      `${API_URL}/api/events/channel/${CHANNEL_ID}?token=mock-token`,
     );
   });
 
@@ -199,7 +205,11 @@ describe('useChannelEvents — event handling', () => {
 
   it('calls onMessageEdited with parsed message on message:edited event', () => {
     const onMessageEdited = jest.fn();
-    const editedMessage = { ...MOCK_MESSAGE, content: 'edited', editedAt: '2024-01-01T01:00:00.000Z' };
+    const editedMessage = {
+      ...MOCK_MESSAGE,
+      content: 'edited',
+      editedAt: '2024-01-01T01:00:00.000Z',
+    };
 
     renderHook(() =>
       useChannelEvents({
@@ -248,9 +258,9 @@ describe('useChannelEvents — event handling', () => {
       }),
     );
 
-    const addedTypes = (mockEventSourceInstance!.addEventListener.mock.calls as [string, unknown][]).map(
-      ([type]) => type,
-    );
+    const addedTypes = (
+      mockEventSourceInstance!.addEventListener.mock.calls as [string, unknown][]
+    ).map(([type]) => type);
     expect(addedTypes).toContain('message:created');
     expect(addedTypes).toContain('message:edited');
     expect(addedTypes).toContain('message:deleted');
