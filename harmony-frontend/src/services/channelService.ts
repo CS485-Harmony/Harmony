@@ -162,6 +162,39 @@ export async function createChannel(
   return toFrontendChannel(data);
 }
 
+export interface AuditLogEntry {
+  id: string;
+  channelId: string;
+  actorId: string;
+  action: string;
+  oldValue: Record<string, unknown>;
+  newValue: Record<string, unknown>;
+  timestamp: string;
+  ipAddress: string;
+  userAgent: string;
+}
+
+export interface AuditLogPage {
+  entries: AuditLogEntry[];
+  total: number;
+}
+
+/**
+ * Fetches paginated visibility audit log for a channel via tRPC.
+ */
+export async function getAuditLog(
+  serverId: string,
+  channelId: string,
+  options: { limit?: number; offset?: number; startDate?: string } = {},
+): Promise<AuditLogPage> {
+  const data = await trpcQuery<AuditLogPage>('channel.getAuditLog', {
+    serverId,
+    channelId,
+    ...options,
+  });
+  return data;
+}
+
 /**
  * Deletes a channel by ID via tRPC. Returns true if deleted.
  */

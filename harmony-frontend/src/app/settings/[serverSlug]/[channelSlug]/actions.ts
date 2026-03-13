@@ -8,9 +8,10 @@
  */
 
 import { revalidatePath } from 'next/cache';
-import { updateChannel, getChannel } from '@/services/channelService';
+import { updateChannel, getChannel, getAuditLog } from '@/services/channelService';
 import { getServer } from '@/services/serverService';
 import type { Channel } from '@/types';
+import type { AuditLogPage } from '@/services/channelService';
 
 export async function saveChannelSettings(
   serverSlug: string,
@@ -54,4 +55,16 @@ export async function saveChannelSettings(
   revalidatePath(`/channels/${serverSlug}`, 'layout');
   revalidatePath(`/c/${serverSlug}`, 'layout');
   revalidatePath(`/settings/${serverSlug}`, 'layout');
+}
+
+/**
+ * Server action: fetch paginated audit log for a channel.
+ * Called from the client-side VisibilitySection to display audit history.
+ */
+export async function fetchAuditLog(
+  serverId: string,
+  channelId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<AuditLogPage> {
+  return getAuditLog(serverId, channelId, options);
 }
