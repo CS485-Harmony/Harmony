@@ -290,6 +290,7 @@ function VisibilitySection({
       });
       if (requestTokenRef.current !== token) return; // stale — discard
       setAuditLog(page);
+      setAuditOffset(offset); // commit offset only after a successful load — keeps range text in sync with displayed entries
     } catch (err) {
       if (requestTokenRef.current !== token) return;
       setAuditError(getUserErrorMessage(err, 'Failed to load audit log.'));
@@ -305,20 +306,15 @@ function VisibilitySection({
   }, [loadAuditLog]);
 
   function handlePrev() {
-    const newOffset = Math.max(0, auditOffset - AUDIT_PAGE_SIZE);
-    setAuditOffset(newOffset);
-    void loadAuditLog(newOffset);
+    void loadAuditLog(Math.max(0, auditOffset - AUDIT_PAGE_SIZE));
   }
 
   function handleNext() {
-    const newOffset = auditOffset + AUDIT_PAGE_SIZE;
-    setAuditOffset(newOffset);
-    void loadAuditLog(newOffset);
+    void loadAuditLog(auditOffset + AUDIT_PAGE_SIZE);
   }
 
   // Reset to page 0 and reload after a visibility change.
   function handleVisibilityChanged() {
-    setAuditOffset(0);
     void loadAuditLog(0);
   }
 

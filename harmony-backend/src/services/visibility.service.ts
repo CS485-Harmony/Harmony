@@ -32,7 +32,8 @@ export interface VisibilityChangeResult {
   channelId: string;
   oldVisibility: ChannelVisibility;
   newVisibility: ChannelVisibility;
-  auditLogId: string;
+  /** Null when the request was a no-op (visibility unchanged — no audit entry created). */
+  auditLogId: string | null;
 }
 
 export const visibilityService = {
@@ -119,7 +120,7 @@ export const visibilityService = {
         channelId,
         oldVisibility: result.oldVisibility,
         newVisibility: visibility,
-        auditLogId: '',
+        auditLogId: null,
       };
     }
 
