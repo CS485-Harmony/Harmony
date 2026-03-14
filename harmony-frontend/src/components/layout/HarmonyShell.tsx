@@ -32,6 +32,19 @@ const BG = {
   primary: 'bg-[#36393f]',
 };
 
+// ─── useSyncExternalStore helpers — module-level so references are stable ─────
+// React re-subscribes whenever the subscribe function reference changes. Inline
+// arrow functions create a new reference every render, causing the MediaQueryList
+// listener to be torn down and re-added on every message receive / state update.
+
+const subscribeToViewport = (cb: () => void) => {
+  const mql = window.matchMedia('(min-width: 640px)');
+  mql.addEventListener('change', cb);
+  return () => mql.removeEventListener('change', cb);
+};
+const getViewportSnapshot = () => window.matchMedia('(min-width: 640px)').matches;
+const getServerViewportSnapshot = () => false;
+
 // ─── Main Shell ───────────────────────────────────────────────────────────────
 
 export interface HarmonyShellProps {
@@ -69,13 +82,9 @@ export function HarmonyShell({
   // useSyncExternalStore: SSR returns false (getServerSnapshot), client returns live viewport.
   // No useEffect setState needed — avoids both hydration mismatch and the linter rule.
   const isDesktopViewport = useSyncExternalStore(
-    cb => {
-      const mql = window.matchMedia('(min-width: 640px)');
-      mql.addEventListener('change', cb);
-      return () => mql.removeEventListener('change', cb);
-    },
-    () => window.matchMedia('(min-width: 640px)').matches,
-    () => false,
+    subscribeToViewport,
+    getViewportSnapshot,
+    getServerViewportSnapshot,
   );
 
   const isMembersOpen = membersOverride !== null ? membersOverride : isDesktopViewport;
