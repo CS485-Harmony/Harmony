@@ -19,6 +19,7 @@ import { GuestPromoBanner } from '@/components/channel/GuestPromoBanner';
 import { CreateChannelModal } from '@/components/channel/CreateChannelModal';
 import { useAuth } from '@/hooks/useAuth';
 import { useChannelEvents } from '@/hooks/useChannelEvents';
+import { useServerEvents } from '@/hooks/useServerEvents';
 import { ChannelType } from '@/types';
 import { useRouter } from 'next/navigation';
 import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
@@ -172,6 +173,45 @@ export function HarmonyShell({
     onMessageCreated: handleRealTimeCreated,
     onMessageEdited: handleRealTimeEdited,
     onMessageDeleted: handleRealTimeDeleted,
+    enabled: isAuthenticated,
+  });
+
+  // ── Real-time channel list updates ────────────────────────────────────────
+
+  const handleChannelCreated = useCallback((channel: Channel) => {
+    setLocalChannels(prev => {
+      // Dedup: ignore if already in list (e.g. added optimistically by the creator)
+      if (prev.some(c => c.id === channel.id)) return prev;
+      // Insert before VOICE channels so text/announcement channels stay grouped
+      const insertIdx =
+        channel.type === ChannelType.VOICE
+          ? prev.length
+          : prev.findIndex(c => c.type === ChannelType.VOICE);
+      const at = insertIdx === -1 ? prev.length : insertIdx;
+      return [...prev.slice(0, at), channel, ...prev.slice(at)];
+    });
+  }, []);
+
+  const handleChannelUpdated = useCallback((channel: Channel) => {
+    setLocalChannels(prev => prev.map(c => (c.id === channel.id ? channel : c)));
+  }, []);
+
+  const handleChannelDeleted = useCallback(
+    (channelId: string) => {
+      setLocalChannels(prev => prev.filter(c => c.id !== channelId));
+      // Navigate away if the deleted channel is the one currently viewed
+      if (channelId === currentChannel.id) {
+        router.push(`${basePath}/${currentServer.slug}`);
+      }
+    },
+    [currentChannel.id, currentServer.slug, basePath, router],
+  );
+
+  useServerEvents({
+    serverId: currentServer.id,
+    onChannelCreated: handleChannelCreated,
+    onChannelUpdated: handleChannelUpdated,
+    onChannelDeleted: handleChannelDeleted,
     enabled: isAuthenticated,
   });
 
