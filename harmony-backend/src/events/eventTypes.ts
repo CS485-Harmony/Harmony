@@ -13,6 +13,9 @@ export const EventChannels = {
   META_TAGS_UPDATED: 'harmony:META_TAGS_UPDATED',
   MEMBER_JOINED: 'harmony:MEMBER_JOINED',
   MEMBER_LEFT: 'harmony:MEMBER_LEFT',
+  USER_JOINED_VOICE: 'harmony:USER_JOINED_VOICE',
+  USER_LEFT_VOICE: 'harmony:USER_LEFT_VOICE',
+  VOICE_STATE_CHANGED: 'harmony:VOICE_STATE_CHANGED',
 } as const;
 
 export type EventChannelName = (typeof EventChannels)[keyof typeof EventChannels];
@@ -69,6 +72,26 @@ export interface MemberLeftPayload {
   timestamp: string;
 }
 
+export interface UserJoinedVoicePayload {
+  userId: string;
+  channelId: string;
+  timestamp: string;
+}
+
+export interface UserLeftVoicePayload {
+  userId: string;
+  channelId: string;
+  timestamp: string;
+}
+
+export interface VoiceStateChangedPayload {
+  userId: string;
+  channelId: string;
+  muted: boolean;
+  deafened: boolean;
+  timestamp: string;
+}
+
 // Map each channel to its payload type for type-safe subscribe/publish
 export interface EventPayloadMap {
   [EventChannels.VISIBILITY_CHANGED]: VisibilityChangedPayload;
@@ -78,6 +101,9 @@ export interface EventPayloadMap {
   [EventChannels.META_TAGS_UPDATED]: MetaTagsUpdatedPayload;
   [EventChannels.MEMBER_JOINED]: MemberJoinedPayload;
   [EventChannels.MEMBER_LEFT]: MemberLeftPayload;
+  [EventChannels.USER_JOINED_VOICE]: UserJoinedVoicePayload;
+  [EventChannels.USER_LEFT_VOICE]: UserLeftVoicePayload;
+  [EventChannels.VOICE_STATE_CHANGED]: VoiceStateChangedPayload;
 }
 
 export type EventHandler<C extends EventChannelName> = (payload: EventPayloadMap[C]) => void;
