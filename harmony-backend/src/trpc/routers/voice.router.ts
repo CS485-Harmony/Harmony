@@ -52,6 +52,15 @@ export const voiceRouter = router({
     .input(z.object({ serverId: z.string().uuid(), channelId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       await requireVoiceChannel(input.channelId, input.serverId);
+
+      // Guard against spurious USER_LEFT_VOICE events from non-participants.
+      // Callers who are not in the channel get an idempotent no-op rather than
+      // triggering a leave event or unnecessary Twilio room destruction.
+      const isMember = await redis.sismember(participantsKey(input.channelId), ctx.userId);
+      if (!isMember) {
+        return { success: true as const };
+      }
+
       await voiceService.leave(ctx.userId, input.channelId);
       return { success: true as const };
     }),
