@@ -9,6 +9,7 @@ import { authRouter } from './routes/auth.router';
 import { publicRouter } from './routes/public.router';
 import { seoRouter } from './routes/seo.router';
 import { eventsRouter } from './routes/events.router';
+import { attachmentRouter } from './routes/attachment.router';
 
 // ─── Auth rate limiters ───────────────────────────────────────────────────────
 
@@ -63,6 +64,9 @@ export function createApp() {
 
   // Real-time SSE endpoints
   app.use('/api/events', eventsRouter);
+
+  // Attachment upload + file serving
+  app.use('/api/attachments', attachmentRouter);
 
   // tRPC endpoint
   app.use(
