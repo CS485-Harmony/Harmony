@@ -18,6 +18,7 @@ import { ServerRail } from '@/components/server-rail/ServerRail';
 import { GuestPromoBanner } from '@/components/channel/GuestPromoBanner';
 import { CreateChannelModal } from '@/components/channel/CreateChannelModal';
 import { useAuth } from '@/hooks/useAuth';
+import { VoiceProvider } from '@/contexts/VoiceContext';
 import { useChannelEvents } from '@/hooks/useChannelEvents';
 import { ChannelType } from '@/types';
 import { useRouter } from 'next/navigation';
@@ -188,6 +189,7 @@ export function HarmonyShell({
   }, []);
 
   return (
+    <VoiceProvider>
     <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
       {/* Skip-to-content: visually hidden, appears on keyboard focus (WCAG 2.4.1) */}
       <a
@@ -227,6 +229,8 @@ export function HarmonyShell({
         onClose={() => setIsMenuOpen(false)}
         basePath={basePath}
         isAuthenticated={isAuthenticated}
+        serverId={currentServer.id}
+        members={members}
         onCreateChannel={defaultType => {
           setCreateChannelDefaultType(defaultType);
           setIsCreateChannelOpen(true);
@@ -314,5 +318,6 @@ export function HarmonyShell({
         />
       )}
     </div>
+    </VoiceProvider>
   );
 }

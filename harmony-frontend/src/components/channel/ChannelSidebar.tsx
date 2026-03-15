@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { UserStatusBar } from '@/components/channel/UserStatusBar';
 import { ChannelVisibility, ChannelType } from '@/types';
 import type { Server, Channel, User } from '@/types';
+import { useVoice } from '@/contexts/VoiceContext';
 
 // ─── Colour tokens (Discord palette) ─────────────────────────────────────────
 
@@ -152,6 +153,10 @@ export interface ChannelSidebarProps {
   isAuthenticated: boolean;
   /** URL base path for channel links — defaults to "/c" */
   basePath?: string;
+  /** Server UUID — required for voice join/leave tRPC calls. */
+  serverId: string;
+  /** Members of the server — used to resolve userIds to display names in voice participant lists. */
+  members?: User[];
   /**
    * Called when an admin clicks the "+" button next to a category header.
    * Receives the default ChannelType for that category.
@@ -169,10 +174,14 @@ export function ChannelSidebar({
   onClose,
   isAuthenticated,
   basePath = '/c',
+  serverId,
+  members,
   onCreateChannel,
 }: ChannelSidebarProps) {
   const [textCollapsed, setTextCollapsed] = useState(false);
   const [voiceCollapsed, setVoiceCollapsed] = useState(false);
+
+  const { connectedChannelId, participants, dominantSpeakerId, joining, joinChannel } = useVoice();
 
   const isAdmin =
     isAuthenticated && (currentUser.isSystemAdmin || currentUser.id === server.ownerId);
@@ -296,12 +305,58 @@ export function ChannelSidebar({
                 <ul className='list-none'>
                   {voiceChannels.map(channel => (
                     <li key={channel.id}>
-                      <div
-                        className='flex cursor-default items-center gap-1.5 rounded px-2 py-1 text-sm text-gray-400 opacity-60'
+                      <button
+                        type='button'
+                        disabled={joining}
+                        onClick={() => {
+                          if (isAuthenticated) {
+                            void joinChannel(channel.id, serverId, channel.name);
+                          }
+                        }}
+                        className={cn(
+                          'group flex w-full items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
+                          connectedChannelId === channel.id
+                            ? cn(BG_ACTIVE, 'text-white')
+                            : 'text-gray-400 hover:bg-[#393c43] hover:text-gray-200',
+                          !isAuthenticated && 'cursor-default opacity-60',
+                        )}
                       >
                         <ChannelIcon type={channel.type} />
-                        <span className='truncate'>{channel.name}</span>
-                      </div>
+                        <span className='flex-1 truncate text-left'>{channel.name}</span>
+                      </button>
+                      {/* Participant list for this voice channel */}
+                      {(() => {
+                        const channelParticipants =
+                          connectedChannelId === channel.id ? participants : [];
+                        if (channelParticipants.length === 0) return null;
+                        return (
+                          <ul className='mb-1 ml-4 list-none space-y-0.5'>
+                            {channelParticipants.map(p => {
+                              const member = members?.find(m => m.id === p.userId);
+                              const displayName =
+                                member?.displayName ?? member?.username ?? p.userId.slice(0, 8);
+                              const isSpeaking = dominantSpeakerId === p.userId;
+                              return (
+                                <li
+                                  key={p.userId}
+                                  className={cn(
+                                    'flex items-center gap-1.5 rounded px-2 py-0.5 text-xs',
+                                    isSpeaking ? 'text-green-400' : 'text-gray-400',
+                                  )}
+                                >
+                                  {isSpeaking && (
+                                    <span className='h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-green-400' />
+                                  )}
+                                  <span className='truncate'>{displayName}</span>
+                                  {p.muted && (
+                                    <span className='ml-auto text-[10px] opacity-60'>🔇</span>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        );
+                      })()}
                     </li>
                   ))}
                 </ul>
