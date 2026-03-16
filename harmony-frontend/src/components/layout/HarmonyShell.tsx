@@ -256,20 +256,20 @@ export function HarmonyShell({
       // Update the channel's visibility in the sidebar immediately.
       setLocalChannels(prev => prev.map(c => (c.id === channel.id ? channel : c)));
 
-      // If the current user is viewing this channel and it became PRIVATE,
-      // they may have lost access. For unauthenticated (guest) users, redirect
-      // to the server root so VisibilityGuard can gate access on re-render.
-      // Authenticated users remain (the server handles their authorization).
+      // If the current user is viewing this channel and it just became PRIVATE,
+      // redirect non-owner members to the server root so VisibilityGuard can
+      // gate access on re-render. Server owners are not redirected because they
+      // may have intentionally made the change and still need access.
       if (
         channel.id === currentChannel.id &&
         oldVisibility !== ChannelVisibility.PRIVATE &&
         channel.visibility === ChannelVisibility.PRIVATE &&
-        !isAuthenticated
+        !checkIsAdmin(currentServer.ownerId)
       ) {
         router.push(`${basePath}/${currentServer.slug}`);
       }
     },
-    [currentChannel.id, isAuthenticated, basePath, currentServer.slug, router],
+    [currentChannel.id, checkIsAdmin, currentServer.ownerId, basePath, currentServer.slug, router],
   );
 
   useServerEvents({

@@ -8,7 +8,6 @@
  */
 
 import http from 'http';
-import request from 'supertest';
 import { createApp } from '../src/app';
 import { eventBus } from '../src/events/eventBus';
 import { prisma } from '../src/db/prisma';
@@ -34,6 +33,7 @@ jest.mock('../src/events/eventBus', () => ({
     CHANNEL_DELETED: 'harmony:CHANNEL_DELETED',
     MEMBER_JOINED: 'harmony:MEMBER_JOINED',
     MEMBER_LEFT: 'harmony:MEMBER_LEFT',
+    VISIBILITY_CHANGED: 'harmony:VISIBILITY_CHANGED',
   },
 }));
 
