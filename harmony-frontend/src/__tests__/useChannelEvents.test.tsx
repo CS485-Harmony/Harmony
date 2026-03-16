@@ -10,6 +10,7 @@
 import { renderHook, act } from '@testing-library/react';
 import { useChannelEvents } from '../hooks/useChannelEvents';
 import type { Message } from '../types/message';
+import type { Server } from '../types/server';
 
 // ─── Mock api-client ──────────────────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ Object.defineProperty(global, 'EventSource', {
 // ─── Fixture data ─────────────────────────────────────────────────────────────
 
 const CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440001';
+const SERVER_ID = '660e8400-e29b-41d4-a716-446655440001';
 const API_URL = 'http://localhost:4000';
 
 const MOCK_MESSAGE: Message = {
@@ -97,6 +99,14 @@ const MOCK_MESSAGE: Message = {
   content: 'Hello!',
   timestamp: '2024-01-01T00:00:00.000Z',
   attachments: [],
+};
+
+const MOCK_SERVER: Server = {
+  id: SERVER_ID,
+  name: 'Updated Server',
+  slug: 'updated-server',
+  ownerId: 'user-001',
+  createdAt: '2024-01-01T00:00:00.000Z',
 };
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -308,5 +318,84 @@ describe('useChannelEvents — edge cases', () => {
     unmount();
 
     expect(mockEventSourceInstance!.removeEventListener).toHaveBeenCalled();
+  });
+});
+
+// ─── onServerUpdated extension ────────────────────────────────────────────────
+
+describe('useChannelEvents — onServerUpdated', () => {
+  it('calls onServerUpdated with parsed server data when server:updated event fires', () => {
+    const onServerUpdated = jest.fn();
+
+    renderHook(() =>
+      useChannelEvents({
+        channelId: CHANNEL_ID,
+        onMessageCreated: jest.fn(),
+        onMessageEdited: jest.fn(),
+        onMessageDeleted: jest.fn(),
+        onServerUpdated,
+      }),
+    );
+
+    act(() => {
+      mockEventSourceInstance!.simulateEvent('server:updated', MOCK_SERVER);
+    });
+
+    expect(onServerUpdated).toHaveBeenCalledTimes(1);
+    expect(onServerUpdated).toHaveBeenCalledWith(MOCK_SERVER);
+  });
+
+  it('does not throw when onServerUpdated is not provided (backwards compatible)', () => {
+    renderHook(() =>
+      useChannelEvents({
+        channelId: CHANNEL_ID,
+        onMessageCreated: jest.fn(),
+        onMessageEdited: jest.fn(),
+        onMessageDeleted: jest.fn(),
+        // onServerUpdated intentionally omitted
+      }),
+    );
+
+    expect(() => {
+      act(() => {
+        mockEventSourceInstance!.simulateEvent('server:updated', MOCK_SERVER);
+      });
+    }).not.toThrow();
+  });
+
+  it('registers a server:updated event listener', () => {
+    renderHook(() =>
+      useChannelEvents({
+        channelId: CHANNEL_ID,
+        onMessageCreated: jest.fn(),
+        onMessageEdited: jest.fn(),
+        onMessageDeleted: jest.fn(),
+        onServerUpdated: jest.fn(),
+      }),
+    );
+
+    const addedTypes = (
+      mockEventSourceInstance!.addEventListener.mock.calls as [string, unknown][]
+    ).map(([type]) => type);
+    expect(addedTypes).toContain('server:updated');
+  });
+
+  it('removes the server:updated listener on unmount', () => {
+    const { unmount } = renderHook(() =>
+      useChannelEvents({
+        channelId: CHANNEL_ID,
+        onMessageCreated: jest.fn(),
+        onMessageEdited: jest.fn(),
+        onMessageDeleted: jest.fn(),
+        onServerUpdated: jest.fn(),
+      }),
+    );
+
+    unmount();
+
+    const removedTypes = (
+      mockEventSourceInstance!.removeEventListener.mock.calls as [string, unknown][]
+    ).map(([type]) => type);
+    expect(removedTypes).toContain('server:updated');
   });
 });
