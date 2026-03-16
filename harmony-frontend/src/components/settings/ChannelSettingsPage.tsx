@@ -293,7 +293,7 @@ function PermissionsSection() {
         <table className='w-full text-sm'>
           <thead>
             <tr className='border-b border-[#40444b] bg-[#2f3136]'>
-              {/* Empty header for the action label column */}
+              {/* Header for the action label column */}
               <th
                 scope='col'
                 className='px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-400'
