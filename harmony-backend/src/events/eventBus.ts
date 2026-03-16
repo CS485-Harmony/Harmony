@@ -12,15 +12,17 @@
 
 import Redis from 'ioredis';
 import { redis } from '../db/redis';
-import {
-  EventChannelName,
-  EventPayloadMap,
-  EventHandler,
-  EventChannels,
-} from './eventTypes';
+import { EventChannelName, EventPayloadMap, EventHandler, EventChannels } from './eventTypes';
 
 export { EventChannels, EventChannelName, EventPayloadMap, EventHandler };
-export type { VisibilityChangedPayload, MessageCreatedPayload, MessageEditedPayload, MessageDeletedPayload, MetaTagsUpdatedPayload } from './eventTypes';
+export type {
+  VisibilityChangedPayload,
+  MessageCreatedPayload,
+  MessageEditedPayload,
+  MessageDeletedPayload,
+  MetaTagsUpdatedPayload,
+  ServerUpdatedPayload,
+} from './eventTypes';
 
 let subscriberClient: Redis | null = null;
 
@@ -123,9 +125,11 @@ export const eventBus = {
         if (count <= 0) {
           channelHandlerCounts.delete(channel);
           channelReadyPromises.delete(channel);
-          client.unsubscribe(channel).catch((err) =>
-            console.error(`[EventBus] Failed to unsubscribe from ${channel}:`, err),
-          );
+          client
+            .unsubscribe(channel)
+            .catch((err) =>
+              console.error(`[EventBus] Failed to unsubscribe from ${channel}:`, err),
+            );
         } else {
           channelHandlerCounts.set(channel, count);
         }

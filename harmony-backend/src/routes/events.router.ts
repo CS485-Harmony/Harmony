@@ -25,6 +25,7 @@ import type {
   ChannelCreatedPayload,
   ChannelUpdatedPayload,
   ChannelDeletedPayload,
+  ServerUpdatedPayload,
 } from '../events/eventTypes';
 
 export const eventsRouter = Router();
@@ -177,6 +178,20 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     },
   );
 
+  const { unsubscribe: unsubServerUpdated } = eventBus.subscribe(
+    EventChannels.SERVER_UPDATED,
+    (payload: ServerUpdatedPayload) => {
+      if (payload.serverId !== channel.serverId) return;
+      sendEvent(res, 'server:updated', {
+        id: payload.serverId,
+        name: payload.name,
+        iconUrl: payload.iconUrl,
+        description: payload.description,
+        updatedAt: payload.timestamp,
+      });
+    },
+  );
+
   // ── Heartbeat — keeps the connection alive through proxies ───────────────
   const heartbeat = setInterval(() => {
     res.write(':\n\n');
@@ -188,6 +203,7 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     unsubCreated();
     unsubEdited();
     unsubDeleted();
+    unsubServerUpdated();
   });
 });
 
