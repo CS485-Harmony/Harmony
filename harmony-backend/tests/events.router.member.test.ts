@@ -140,6 +140,7 @@ beforeEach(() => {
     username: 'newmember',
     displayName: 'New Member',
     avatarUrl: null,
+    status: 'ONLINE',
   });
 });
 
@@ -224,6 +225,54 @@ describe('GET /api/events/server/:serverId — member:joined event', () => {
     expect(body).toContain(JOINING_USER_ID);
     // User profile fields must be present
     expect(body).toContain('newmember');
+  });
+
+  it('does not emit member:joined for a different server', async () => {
+    let memberJoinedHandler: ((payload: unknown) => Promise<void>) | null = null;
+
+    mockSubscribe.mockImplementation((channel: string, handler: (payload: unknown) => Promise<void>) => {
+      if (channel === 'harmony:MEMBER_JOINED') {
+        memberJoinedHandler = handler;
+      }
+      return { unsubscribe: jest.fn(), ready: Promise.resolve() };
+    });
+
+    const addr = httpServer.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad address');
+    const port = (addr as { port: number }).port;
+
+    const chunks: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get(
+        { hostname: 'localhost', port, path: `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}` },
+        (res) => {
+          res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+
+          setTimeout(async () => {
+            if (memberJoinedHandler) {
+              // Fire with a different serverId — should be filtered out
+              await memberJoinedHandler({
+                userId: JOINING_USER_ID,
+                serverId: 'different-server-id',
+                role: 'MEMBER',
+                timestamp: new Date().toISOString(),
+              });
+            }
+
+            setTimeout(() => {
+              res.destroy();
+              resolve();
+            }, 50);
+          }, 50);
+
+          res.on('error', reject);
+        },
+      );
+      req.on('error', reject);
+    });
+
+    const body = chunks.join('');
+    expect(body).not.toContain('event: member:joined');
   });
 });
 

@@ -348,7 +348,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       try {
         const user = await prisma.user.findUnique({
           where: { id: payload.userId },
-          select: { id: true, username: true, displayName: true, avatarUrl: true },
+          select: { id: true, username: true, displayName: true, avatarUrl: true, status: true },
         });
         if (!user) return;
 
@@ -359,7 +359,8 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
           avatar: user.avatarUrl ?? undefined,
           // Cast backend RoleTypeValue (e.g. 'MEMBER') to frontend UserRole (e.g. 'member')
           role: payload.role.toLowerCase(),
-          status: 'online',
+          // Cast DB UserStatus (e.g. 'ONLINE') to frontend UserStatus (e.g. 'online')
+          status: user.status.toLowerCase(),
         });
       } catch {
         // Silently ignore DB errors — the client will re-fetch on next load
