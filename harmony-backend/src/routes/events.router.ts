@@ -22,6 +22,9 @@ import type {
   MessageCreatedPayload,
   MessageEditedPayload,
   MessageDeletedPayload,
+  ChannelCreatedPayload,
+  ChannelUpdatedPayload,
+  ChannelDeletedPayload,
 } from '../events/eventTypes';
 
 export const eventsRouter = Router();
@@ -35,7 +38,7 @@ export const eventsRouter = Router();
  */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function isValidChannelId(id: string): boolean {
+function isValidUUID(id: string): boolean {
   return UUID_RE.test(id.trim());
 }
 
@@ -61,7 +64,7 @@ function sendEvent(res: Response, eventType: string, data: unknown): void {
 eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
   const { channelId } = req.params;
 
-  if (!isValidChannelId(channelId)) {
+  if (!isValidUUID(channelId)) {
     res.status(400).json({ error: 'Invalid channelId: must be a UUID' });
     return;
   }
@@ -185,5 +188,146 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     unsubCreated();
     unsubEdited();
     unsubDeleted();
+  });
+});
+
+// ─── Prisma select shape for channel SSE events ───────────────────────────────
+
+const CHANNEL_SSE_SELECT = {
+  id: true,
+  serverId: true,
+  name: true,
+  slug: true,
+  type: true,
+  visibility: true,
+  topic: true,
+  position: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+// ─── Server-scoped SSE route — channel list updates ───────────────────────────
+
+/**
+ * GET /api/events/server/:serverId?token=<accessToken>
+ *
+ * Streams real-time channel events (created, updated, deleted) to authenticated,
+ * authorised clients using Server-Sent Events. Scoped to a server so all members
+ * see the same sidebar updates regardless of which channel they're currently viewing.
+ *
+ * Auth: same token-via-query-param pattern as /channel/:channelId (EventSource cannot
+ * send custom headers).
+ *
+ * Authorisation: user must be a member of the server.
+ */
+eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
+  const { serverId } = req.params;
+
+  if (!isValidUUID(serverId)) {
+    res.status(400).json({ error: 'Invalid serverId: must be a UUID' });
+    return;
+  }
+
+  // ── Auth ─────────────────────────────────────────────────────────────────
+  const token = typeof req.query.token === 'string' ? req.query.token : null;
+  if (!token) {
+    res.status(401).json({ error: 'Missing token query parameter' });
+    return;
+  }
+
+  let userId: string;
+  try {
+    const payload = authService.verifyAccessToken(token);
+    userId = payload.sub;
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired access token' });
+    return;
+  }
+
+  // ── Authorisation — verify server exists and user is a member ────────────
+  const server = await prisma.server.findUnique({
+    where: { id: serverId },
+    select: { id: true },
+  });
+  if (!server) {
+    res.status(404).json({ error: 'Server not found' });
+    return;
+  }
+
+  const membership = await prisma.serverMember.findFirst({
+    where: { userId, serverId },
+    select: { userId: true },
+  });
+  if (!membership) {
+    res.status(403).json({ error: 'You are not a member of this server' });
+    return;
+  }
+
+  // ── SSE headers ──────────────────────────────────────────────────────────
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  // ── Subscribe to channel events ──────────────────────────────────────────
+
+  const { unsubscribe: unsubChannelCreated } = eventBus.subscribe(
+    EventChannels.CHANNEL_CREATED,
+    async (payload: ChannelCreatedPayload) => {
+      if (payload.serverId !== serverId) return;
+
+      try {
+        const channel = await prisma.channel.findUnique({
+          where: { id: payload.channelId },
+          select: CHANNEL_SSE_SELECT,
+        });
+        if (!channel) return;
+
+        sendEvent(res, 'channel:created', channel);
+      } catch {
+        // Silently ignore DB errors — the client will still receive future events
+      }
+    },
+  );
+
+  const { unsubscribe: unsubChannelUpdated } = eventBus.subscribe(
+    EventChannels.CHANNEL_UPDATED,
+    async (payload: ChannelUpdatedPayload) => {
+      if (payload.serverId !== serverId) return;
+
+      try {
+        const channel = await prisma.channel.findUnique({
+          where: { id: payload.channelId },
+          select: CHANNEL_SSE_SELECT,
+        });
+        if (!channel) return;
+
+        sendEvent(res, 'channel:updated', channel);
+      } catch {
+        // Silently ignore DB errors
+      }
+    },
+  );
+
+  const { unsubscribe: unsubChannelDeleted } = eventBus.subscribe(
+    EventChannels.CHANNEL_DELETED,
+    (payload: ChannelDeletedPayload) => {
+      if (payload.serverId !== serverId) return;
+      sendEvent(res, 'channel:deleted', { channelId: payload.channelId });
+    },
+  );
+
+  // ── Heartbeat ────────────────────────────────────────────────────────────
+  const heartbeat = setInterval(() => {
+    res.write(':\n\n');
+  }, 30_000);
+
+  // ── Cleanup on client disconnect ─────────────────────────────────────────
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubChannelCreated();
+    unsubChannelUpdated();
+    unsubChannelDeleted();
   });
 });
