@@ -357,7 +357,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
           username: user.username,
           displayName: user.displayName,
           avatar: user.avatarUrl ?? undefined,
-          // New members always join as MEMBER role; cast to frontend UserRole
+          // Cast backend RoleTypeValue (e.g. 'MEMBER') to frontend UserRole (e.g. 'member')
           role: payload.role.toLowerCase(),
           status: 'online',
         });
