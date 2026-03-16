@@ -117,6 +117,12 @@ export function HarmonyShell({
     setPrevChannelsProp(channels);
     setLocalChannels(channels);
   }
+  // Derive the live version of the current channel from localChannels so that
+  // real-time visibility changes (e.g. PUBLIC → PRIVATE) are reflected in the
+  // MessageList header badge without a page reload (AC 3 of issue #187).
+  const localCurrentChannel =
+    localChannels.find(c => c.id === currentChannel.id) ?? currentChannel;
+
   // Local members state so join/leave events update the sidebar without reload.
   const [localMembers, setLocalMembers] = useState<User[]>(members);
   // Reset when the members prop changes (server navigation or SSR revalidation).
@@ -351,7 +357,7 @@ export function HarmonyShell({
         tabIndex={-1}
       >
         <TopBar
-          channel={currentChannel}
+          channel={localCurrentChannel}
           serverSlug={currentServer.slug}
           isAdmin={checkIsAdmin(currentServer.ownerId)}
           isMembersOpen={isMembersOpen}
@@ -365,7 +371,7 @@ export function HarmonyShell({
           <div className={cn('flex flex-1 flex-col overflow-hidden', BG.primary)}>
             <MessageList
               key={currentChannel.id}
-              channel={currentChannel}
+              channel={localCurrentChannel}
               messages={localMessages}
             />
             <MessageInput

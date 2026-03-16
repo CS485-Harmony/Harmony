@@ -170,7 +170,7 @@ describe('useServerEvents — connection', () => {
     expect(mockEventSourceInstance?.close).toHaveBeenCalled();
   });
 
-  it('registers listeners for all five event types', () => {
+  it('registers listeners for all six event types', () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -191,6 +191,7 @@ describe('useServerEvents — connection', () => {
     expect(addedTypes).toContain('channel:deleted');
     expect(addedTypes).toContain('member:joined');
     expect(addedTypes).toContain('member:left');
+    expect(addedTypes).toContain('channel:visibility-changed');
   });
 });
 
