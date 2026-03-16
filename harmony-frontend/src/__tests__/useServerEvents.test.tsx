@@ -170,7 +170,7 @@ describe('useServerEvents — connection', () => {
     expect(mockEventSourceInstance?.close).toHaveBeenCalled();
   });
 
-  it('registers listeners for all five event types', () => {
+  it('registers listeners for all six event types', () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
