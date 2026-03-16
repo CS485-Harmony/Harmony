@@ -18,6 +18,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Message } from '@/types/message';
+import type { Server } from '@/types/server';
 import { getAccessToken } from '@/lib/api-client';
 
 export interface UseChannelEventsOptions {
@@ -25,6 +26,8 @@ export interface UseChannelEventsOptions {
   onMessageCreated: (msg: Message) => void;
   onMessageEdited: (msg: Message) => void;
   onMessageDeleted: (messageId: string) => void;
+  /** Called when a server:updated SSE event is received for the current server. Optional. */
+  onServerUpdated?: (server: Server) => void;
   /** Set to false to disable the connection (e.g. for unauthenticated guests). Defaults to true. */
   enabled?: boolean;
 }
@@ -38,6 +41,7 @@ export function useChannelEvents({
   onMessageCreated,
   onMessageEdited,
   onMessageDeleted,
+  onServerUpdated,
   enabled = true,
 }: UseChannelEventsOptions): UseChannelEventsResult {
   const [isConnected, setIsConnected] = useState(false);
@@ -48,11 +52,13 @@ export function useChannelEvents({
   const onCreatedRef = useRef(onMessageCreated);
   const onEditedRef = useRef(onMessageEdited);
   const onDeletedRef = useRef(onMessageDeleted);
+  const onServerUpdatedRef = useRef(onServerUpdated);
 
   useLayoutEffect(() => {
     onCreatedRef.current = onMessageCreated;
     onEditedRef.current = onMessageEdited;
     onDeletedRef.current = onMessageDeleted;
+    onServerUpdatedRef.current = onServerUpdated;
   });
 
   useEffect(() => {
@@ -93,9 +99,19 @@ export function useChannelEvents({
       }
     };
 
+    const handleServerUpdated = (event: MessageEvent<string>) => {
+      try {
+        const server = JSON.parse(event.data) as Server;
+        onServerUpdatedRef.current?.(server);
+      } catch {
+        // Ignore malformed payloads
+      }
+    };
+
     es.addEventListener('message:created', handleCreated);
     es.addEventListener('message:edited', handleEdited);
     es.addEventListener('message:deleted', handleDeleted);
+    es.addEventListener('server:updated', handleServerUpdated);
 
     // Track whether the connection ever opened successfully.
     // If onerror fires before onopen it's a permanent failure (4xx/5xx from the
@@ -119,6 +135,7 @@ export function useChannelEvents({
       es.removeEventListener('message:created', handleCreated);
       es.removeEventListener('message:edited', handleEdited);
       es.removeEventListener('message:deleted', handleDeleted);
+      es.removeEventListener('server:updated', handleServerUpdated);
       es.close();
       setIsConnected(false);
     };

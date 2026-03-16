@@ -20,6 +20,7 @@ import { CreateChannelModal } from '@/components/channel/CreateChannelModal';
 import { useAuth } from '@/hooks/useAuth';
 import { useChannelEvents } from '@/hooks/useChannelEvents';
 import { useServerEvents } from '@/hooks/useServerEvents';
+import { useServerListSync } from '@/hooks/useServerListSync';
 import { ChannelType } from '@/types';
 import { useRouter } from 'next/navigation';
 import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
@@ -147,12 +148,15 @@ export function HarmonyShell({
     setLocalServers(servers);
   }
 
+  const { notifyServerCreated } = useServerListSync();
+
   const handleServerCreated = useCallback(
     (server: Server, defaultChannel: Channel) => {
       setLocalServers(prev => [...prev, server]);
+      notifyServerCreated(server.id);
       router.push(`${basePath}/${server.slug}/${defaultChannel.slug}`);
     },
-    [basePath, router],
+    [basePath, notifyServerCreated, router],
   );
 
   const handleMessageSent = useCallback((msg: Message) => {
@@ -177,11 +181,18 @@ export function HarmonyShell({
     setLocalMessages(prev => prev.filter(m => m.id !== messageId));
   }, []);
 
+  const handleServerUpdated = useCallback((updatedServer: Server) => {
+    setLocalServers(prev =>
+      prev.map(s => (s.id === updatedServer.id ? { ...s, ...updatedServer } : s)),
+    );
+  }, []);
+
   useChannelEvents({
     channelId: currentChannel.id,
     onMessageCreated: handleRealTimeCreated,
     onMessageEdited: handleRealTimeEdited,
     onMessageDeleted: handleRealTimeDeleted,
+    onServerUpdated: handleServerUpdated,
     enabled: isAuthenticated,
   });
 

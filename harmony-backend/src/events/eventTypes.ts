@@ -19,6 +19,7 @@ export const EventChannels = {
   CHANNEL_CREATED: 'harmony:CHANNEL_CREATED',
   CHANNEL_UPDATED: 'harmony:CHANNEL_UPDATED',
   CHANNEL_DELETED: 'harmony:CHANNEL_DELETED',
+  SERVER_UPDATED: 'harmony:SERVER_UPDATED',
 } as const;
 
 export type EventChannelName = (typeof EventChannels)[keyof typeof EventChannels];
@@ -113,6 +114,14 @@ export interface ChannelDeletedPayload {
   timestamp: string;
 }
 
+export interface ServerUpdatedPayload {
+  serverId: string;
+  name?: string;
+  iconUrl?: string | null;
+  description?: string | null;
+  timestamp: string;
+}
+
 // Map each channel to its payload type for type-safe subscribe/publish
 export interface EventPayloadMap {
   [EventChannels.VISIBILITY_CHANGED]: VisibilityChangedPayload;
@@ -128,6 +137,7 @@ export interface EventPayloadMap {
   [EventChannels.CHANNEL_CREATED]: ChannelCreatedPayload;
   [EventChannels.CHANNEL_UPDATED]: ChannelUpdatedPayload;
   [EventChannels.CHANNEL_DELETED]: ChannelDeletedPayload;
+  [EventChannels.SERVER_UPDATED]: ServerUpdatedPayload;
 }
 
 export type EventHandler<C extends EventChannelName> = (payload: EventPayloadMap[C]) => void;

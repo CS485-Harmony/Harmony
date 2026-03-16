@@ -4,6 +4,7 @@ import { prisma } from '../db/prisma';
 import { channelService } from './channel.service';
 import { serverMemberService } from './serverMember.service';
 import { isSystemAdmin } from '../lib/admin.utils';
+import { eventBus, EventChannels } from '../events/eventBus';
 
 // Role hierarchy for sorting: lower rank = higher privilege
 const ROLE_RANK: Record<string, number> = {
@@ -139,13 +140,25 @@ export const serverService = {
     if (server.ownerId !== actorId && !(await isSystemAdmin(actorId)))
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the server owner can update' });
 
+    let updated: Server;
     if (data.name && data.name !== server.name) {
       const slug = await generateUniqueSlug(data.name);
-      return withSlugRetry(data.name, slug, (s) =>
+      updated = await withSlugRetry(data.name, slug, (s) =>
         prisma.server.update({ where: { id }, data: { ...data, slug: s } }),
       );
+    } else {
+      updated = await prisma.server.update({ where: { id }, data });
     }
-    return prisma.server.update({ where: { id }, data });
+
+    void eventBus.publish(EventChannels.SERVER_UPDATED, {
+      serverId: id,
+      name: updated.name,
+      iconUrl: updated.iconUrl ?? null,
+      description: updated.description ?? null,
+      timestamp: new Date().toISOString(),
+    });
+
+    return updated;
   },
 
   async deleteServer(id: string, actorId: string): Promise<Server> {
