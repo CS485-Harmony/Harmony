@@ -8,7 +8,6 @@
  */
 
 import http from 'http';
-import request from 'supertest';
 import { createApp } from '../src/app';
 import { eventBus } from '../src/events/eventBus';
 import { prisma } from '../src/db/prisma';
