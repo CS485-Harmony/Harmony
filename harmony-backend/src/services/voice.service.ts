@@ -167,6 +167,9 @@ export const voiceService = {
       .catch((err: unknown) => console.error('[VoiceService] publish USER_JOINED_VOICE error:', err));
 
     const token = voiceService.generateToken(userId, channelId);
+    console.log(
+      `[VoiceService] join — userId=${userId} channelId=${channelId} mockMode=${isMockMode()} tokenPrefix=${token.slice(0, 20)}...`,
+    );
     const participants = await voiceService.getParticipants(channelId);
 
     return { token, participants };
