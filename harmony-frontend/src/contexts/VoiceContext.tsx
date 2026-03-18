@@ -211,6 +211,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
 
         // Dynamic import keeps the Twilio SDK out of SSR.
         const TwilioVideo = await import('twilio-video');
+        console.log(`[VoiceContext] TwilioVideo.connect — room=${channelId} tokenPrefix=${token.slice(0, 20)}...`);
         const room = await TwilioVideo.connect(token, {
           name: channelId,
           audio: true,
@@ -303,7 +304,9 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
-        console.error('[VoiceContext] joinChannel error:', message);
+        // Log full error object so Twilio error codes are visible in the browser console.
+        console.error('[VoiceContext] joinChannel error:', message, err);
+        console.error('[VoiceContext] joinChannel error detail:', JSON.stringify(err, Object.getOwnPropertyNames(err as object)));
         showToast({ message: 'Could not connect to voice channel. Please try again.', type: 'error' });
         // If voice.join succeeded (refs were written) but Twilio connect failed,
         // notify the backend so Redis state is not left stale.
