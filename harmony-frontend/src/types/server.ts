@@ -30,4 +30,6 @@ export interface ServerDTO {
 export interface CreateServerInput {
   name: string;
   description?: string;
+  /** When true the server appears in Browse Public Servers and anyone can join. */
+  isPublic?: boolean;
 }

@@ -9,6 +9,7 @@ import type { Server, Channel } from '@/types';
 export async function createServerAction(
   name: string,
   description?: string,
+  isPublic?: boolean,
 ): Promise<{ server: Server; defaultChannel: Channel }> {
   if (typeof name !== 'string') throw new Error('Invalid server name');
   const trimmed = name.trim();
@@ -26,7 +27,7 @@ export async function createServerAction(
   }
 
   // The backend createServer auto-creates a default "general" channel
-  const server = await createServer({ name: trimmed, description: sanitizedDescription });
+  const server = await createServer({ name: trimmed, description: sanitizedDescription, isPublic: isPublic === true });
 
   // Fetch the default channel created by the backend
   const channels = await getChannels(server.id);

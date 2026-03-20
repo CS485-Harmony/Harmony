@@ -156,6 +156,7 @@ export async function createServer(input: CreateServerInput): Promise<Server> {
   const data = await trpcMutate<Record<string, unknown>>('server.createServer', {
     name: input.name,
     description: input.description,
+    isPublic: input.isPublic ?? false,
   });
   return toFrontendServer(data);
 }
