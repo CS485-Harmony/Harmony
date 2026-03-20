@@ -333,18 +333,18 @@ Like the previous section, I had to reprompt to fix inconsistencies. The LLM als
 stateDiagram-v2
     [*] --> PRIVATE : Channel created (default)
 
-    PRIVATE : PRIVATE\nindexedAt=null\nrobots="noindex, nofollow"
-    PUBLIC_NO_INDEX : PUBLIC_NO_INDEX\nindexedAt=null\nrobots="noindex"
-    PUBLIC_INDEXABLE : PUBLIC_INDEXABLE\nindexedAt=now()\nrobots="index, follow"
+    state "PRIVATE (indexedAt=null, robots=noindex nofollow)" as PRIVATE
+    state "PUBLIC_NO_INDEX (indexedAt=null, robots=noindex)" as PUBLIC_NO_INDEX
+    state "PUBLIC_INDEXABLE (indexedAt=now, robots=index follow)" as PUBLIC_INDEXABLE
 
-    PRIVATE --> PUBLIC_NO_INDEX : setVisibility(PUBLIC_NO_INDEX)\n[no side effects]
-    PRIVATE --> PUBLIC_INDEXABLE : setVisibility(PUBLIC_INDEXABLE)\n[add to sitemap; notify search engines]
+    PRIVATE --> PUBLIC_NO_INDEX : setVisibility(PUBLIC_NO_INDEX)
+    PRIVATE --> PUBLIC_INDEXABLE : setVisibility(PUBLIC_INDEXABLE) - add to sitemap, notify search engines
 
-    PUBLIC_NO_INDEX --> PRIVATE : setVisibility(PRIVATE)\n[no side effects]
-    PUBLIC_NO_INDEX --> PUBLIC_INDEXABLE : setVisibility(PUBLIC_INDEXABLE)\n[add to sitemap; notify search engines]
+    PUBLIC_NO_INDEX --> PRIVATE : setVisibility(PRIVATE)
+    PUBLIC_NO_INDEX --> PUBLIC_INDEXABLE : setVisibility(PUBLIC_INDEXABLE) - add to sitemap, notify search engines
 
-    PUBLIC_INDEXABLE --> PRIVATE : setVisibility(PRIVATE)\n[remove from sitemap; request de-index]
-    PUBLIC_INDEXABLE --> PUBLIC_NO_INDEX : setVisibility(PUBLIC_NO_INDEX)\n[remove from sitemap; set noindex]
+    PUBLIC_INDEXABLE --> PRIVATE : setVisibility(PRIVATE) - remove from sitemap, request de-index
+    PUBLIC_INDEXABLE --> PUBLIC_NO_INDEX : setVisibility(PUBLIC_NO_INDEX) - remove from sitemap, set noindex
 ```
 
 ### 5.3 Admin Action State Diagram
