@@ -31,258 +31,108 @@
 
 ### 2.1 System Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              LEGEND                                              │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│  ┌──────┐  Module/Component    ─────►  Data Flow                                │
-│  │      │                      ─ ─ ─►  Optional/Conditional Flow                │
-│  └──────┘                      ══════  Bidirectional Flow                       │
-│  [      ]  External System     Blue: Client Layer  Green: Server Layer          │
-│  (      )  Data Store          Orange: Cloud Services  Gray: External           │
-│  {{ }}     Cache Layer                                                          │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Actors["External Actors"]
+        GuestUser["A1: Guest User\nAnonymous browser user"]
+        BotUser["A2: Search Engine Bot\nGooglebot, Bingbot, etc."]
+    end
 
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           EXTERNAL ACTORS                                        │
-│  ┌─────────────────────────┐  ┌─────────────────────────┐                       │
-│  │ [A1 Guest User]         │  │ [A2 Search Engine Bot]  │                       │
-│  │ Anonymous browser user  │  │ Googlebot, Bingbot, etc │                       │
-│  │ arriving via search     │  │ Crawling public content │                       │
-│  └───────────┬─────────────┘  └───────────┬─────────────┘                       │
-└──────────────┼────────────────────────────┼─────────────────────────────────────┘
-               │                            │
-               │ HTTPS GET                  │ HTTPS GET
-               │ /c/{server}/{channel}      │ /c/{server}/{channel}
-               ▼                            ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           EDGE LAYER (CDN - CloudFlare)                          │
-│  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │ W1 Edge Cache Module                                                       │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ W1.1 CacheRouter            │    │ W1.2 BotDetector               │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ cacheKey: string            │    │ userAgent: string               │   │  │
-│  │  │ ttl: number                 │    │ isBot: boolean                  │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ checkCache()                │───►│ detectBot()                     │   │  │
-│  │  │ serveFromCache()            │    │ applyBotHeaders()               │   │  │
-│  │  │ cacheResponse()             │    │ rateLimitBot()                  │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  └───────────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-               │
-               │ Cache Miss
-               ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           CLIENT LAYER (Server-Side Rendered)                    │
-│  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │ M1 Public View Module (Next.js SSR)                                        │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C1.1 PublicChannelPage      │    │ C1.2 SEOMetadataComponent       │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ serverSlug: string          │    │ title: string                   │   │  │
-│  │  │ channelSlug: string         │    │ description: string             │   │  │
-│  │  │ messages: Message[]         │    │ canonicalUrl: string            │   │  │
-│  │  │ serverInfo: ServerDTO       │    │ ogImage: string                 │   │  │
-│  │  │ channelInfo: ChannelDTO     │    │ structuredData: JSON-LD         │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ getServerSideProps()        │◄───│ generateMetaTags()              │   │  │
-│  │  │ render()                    │    │ generateStructuredData()        │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C1.3 MessageListComponent   │    │ C1.4 GuestPromoBanner           │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ messages: Message[]         │    │ serverName: string              │   │  │
-│  │  │ hasMore: boolean            │    │ channelName: string             │   │  │
-│  │  │ loadingMore: boolean        │    │ memberCount: number             │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ render()                    │    │ render()                        │   │  │
-│  │  │ loadMoreMessages()          │    │ onJoinClick()                   │   │  │
-│  │  │ scrollToMessage()           │    │ onDismiss()                     │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C1.5 MessageCard            │    │ C1.6 ServerSidebar              │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ author: AuthorDTO           │    │ serverInfo: ServerDTO           │   │  │
-│  │  │ content: string             │    │ publicChannels: ChannelDTO[]    │   │  │
-│  │  │ timestamp: DateTime         │    │ ─────────────────────────────── │   │  │
-│  │  │ attachments: Attachment[]   │    │ render()                        │   │  │
-│  │  │ ─────────────────────────── │    │ navigateToChannel()             │   │  │
-│  │  │ render()                    │    └─────────────────────────────────┘   │  │
-│  │  │ formatTimestamp()           │                                          │  │
-│  │  │ renderAttachments()         │                                          │  │
-│  │  └─────────────────────────────┘                                          │  │
-│  └───────────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │ M2 Client Interaction Module (Browser Hydration)                           │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C2.1 InfiniteScrollHandler  │    │ C2.2 MessageLinkHandler         │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ observer: IntersectionObs   │    │ messageId: string               │   │  │
-│  │  │ threshold: number           │    │ ─────────────────────────────── │   │  │
-│  │  │ ─────────────────────────── │    │ scrollToMessage()               │   │  │
-│  │  │ observe()                   │    │ highlightMessage()              │   │  │
-│  │  │ onIntersect()               │    │ copyMessageLink()               │   │  │
-│  │  │ loadMore()                  │    └─────────────────────────────────┘   │  │
-│  │  └─────────────────────────────┘                                          │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C2.3 SearchHighlighter      │    │ C2.4 ShareHandler               │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ searchTerms: string[]       │    │ currentUrl: string              │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ parseSearchTerms()          │    │ shareToTwitter()                │   │  │
-│  │  │ highlightMatches()          │    │ shareToLinkedIn()               │   │  │
-│  │  │ scrollToFirstMatch()        │    │ copyLink()                      │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  └───────────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-                                        │
-                                        │ Internal API Calls (Server-Side)
-                                        ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           SERVER LAYER (Application Server)                      │
-│  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │ M3 Public API Module                                                       │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C3.1 PublicChannelController│    │ C3.2 PublicServerController     │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ channelService: ref         │    │ serverService: ref              │   │  │
-│  │  │ messageService: ref         │    │ ─────────────────────────────── │   │  │
-│  │  │ ─────────────────────────── │    │ getPublicServerInfo()           │   │  │
-│  │  │ getPublicChannelPage()      │    │ getPublicChannelList()          │   │  │
-│  │  │ getPublicMessages()         │    │ getServerLandingPage()          │   │  │
-│  │  │ getPublicMessage()          │    └─────────────────────────────────┘   │  │
-│  │  └─────────────────────────────┘                                          │  │
-│  └───────────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │ M4 Access Control Module                                                   │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C4.1 VisibilityGuard        │    │ C4.2 ContentFilter              │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ channelRepository: ref      │    │ sensitivePatterns: RegExp[]     │   │  │
-│  │  │ cacheService: ref           │    │ ─────────────────────────────── │   │  │
-│  │  │ ─────────────────────────── │    │ filterSensitiveContent()        │   │  │
-│  │  │ isChannelPublic()           │    │ redactUserMentions()            │   │  │
-│  │  │ isServerPublic()            │    │ sanitizeForDisplay()            │   │  │
-│  │  │ getVisibilityStatus()       │    │ sanitizeAttachments()           │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C4.3 RateLimiter            │    │ C4.4 AnonymousSessionManager    │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ windowMs: number            │    │ sessionId: string               │   │  │
-│  │  │ maxRequests: number         │    │ preferences: GuestPreferences   │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ checkLimit()                │    │ getOrCreateSession()            │   │  │
-│  │  │ incrementCounter()          │    │ storePreference()               │   │  │
-│  │  │ isRateLimited()             │    │ getPreferences()                │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  └───────────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │ M5 Content Delivery Module                                                 │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C5.1 MessageService         │    │ C5.2 AuthorService              │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ messageRepository: ref      │    │ userRepository: ref             │   │  │
-│  │  │ contentFilter: ref          │    │ privacyService: ref             │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ getMessagesForPublicView()  │    │ getPublicAuthorInfo()           │   │  │
-│  │  │ getMessageById()            │    │ anonymizeAuthor()               │   │  │
-│  │  │ buildMessageDTO()           │    │ getDisplayName()                │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C5.3 AttachmentService      │    │ C5.4 SEOService                 │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ storageClient: ref          │    │ channelService: ref             │   │  │
-│  │  │ ─────────────────────────── │    │ messageService: ref             │   │  │
-│  │  │ getPublicAttachmentUrl()    │    │ ─────────────────────────────── │   │  │
-│  │  │ generateThumbnail()         │    │ generatePageTitle()             │   │  │
-│  │  │ isAttachmentPublic()        │    │ generateDescription()           │   │  │
-│  │  └─────────────────────────────┘    │ generateStructuredData()        │   │  │
-│  │                                     │ generateBreadcrumbs()           │   │  │
-│  │                                     │ getCanonicalUrl()               │   │  │
-│  │                                     └─────────────────────────────────┘   │  │
-│  └───────────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │ M6 Data Access Module                                                      │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C6.1 ChannelRepository      │    │ C6.2 MessageRepository          │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ database: DatabaseClient    │    │ database: DatabaseClient        │   │  │
-│  │  │ cache: CacheClient          │    │ cache: CacheClient              │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ findBySlug()                │    │ findByChannelPaginated()        │   │  │
-│  │  │ findPublicByServerId()      │    │ findById()                      │   │  │
-│  │  │ getVisibility()             │    │ countByChannel()                │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ C6.3 ServerRepository       │    │ C6.4 UserRepository             │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ database: DatabaseClient    │    │ database: DatabaseClient        │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ findBySlug()                │    │ findById()                      │   │  │
-│  │  │ getPublicInfo()             │    │ getPublicProfile()              │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  └───────────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-                                        │
-                                        │ Database Protocol
-                                        ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           DATA LAYER (Cloud Infrastructure)                      │
-│  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │ M7 Persistence Module                                                      │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ D7.1 ServersTable           │    │ D7.2 ChannelsTable              │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ id: UUID (PK)               │    │ id: UUID (PK)                   │   │  │
-│  │  │ name: VARCHAR(100)          │    │ server_id: UUID (FK)            │   │  │
-│  │  │ slug: VARCHAR(100)          │    │ name: VARCHAR(100)              │   │  │
-│  │  │ description: TEXT           │    │ slug: VARCHAR(100)              │   │  │
-│  │  │ icon_url: VARCHAR(500)      │    │ visibility: ENUM                │   │  │
-│  │  │ is_public: BOOLEAN          │    │ topic: TEXT                     │   │  │
-│  │  │ member_count: INTEGER       │    │ created_at: TIMESTAMP           │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ D7.3 MessagesTable          │    │ D7.4 UsersTable                 │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ id: UUID (PK)               │    │ id: UUID (PK)                   │   │  │
-│  │  │ channel_id: UUID (FK)       │    │ username: VARCHAR(32)           │   │  │
-│  │  │ author_id: UUID (FK)        │    │ display_name: VARCHAR(100)      │   │  │
-│  │  │ content: TEXT               │    │ avatar_url: VARCHAR(500)        │   │  │
-│  │  │ created_at: TIMESTAMP       │    │ public_profile: BOOLEAN         │   │  │
-│  │  │ edited_at: TIMESTAMP        │    │ created_at: TIMESTAMP           │   │  │
-│  │  │ is_deleted: BOOLEAN         │    └─────────────────────────────────┘   │  │
-│  │  └─────────────────────────────┘                                          │  │
-│  │  ┌─────────────────────────────┐                                          │  │
-│  │  │ D7.5 AttachmentsTable       │                                          │  │
-│  │  │ ─────────────────────────── │                                          │  │
-│  │  │ id: UUID (PK)               │                                          │  │
-│  │  │ message_id: UUID (FK)       │                                          │  │
-│  │  │ filename: VARCHAR(255)      │                                          │  │
-│  │  │ url: VARCHAR(500)           │                                          │  │
-│  │  │ content_type: VARCHAR(100)  │                                          │  │
-│  │  │ size_bytes: BIGINT          │                                          │  │
-│  │  └─────────────────────────────┘                                          │  │
-│  └───────────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │ M8 Cache Module                                                            │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ D8.1 ChannelVisibilityCache │    │ D8.2 PublicMessagesCache        │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ key: channel:{id}:visibility│    │ key: channel:{id}:msgs:{page}   │   │  │
-│  │  │ value: VisibilityEnum       │    │ value: MessageDTO[]             │   │  │
-│  │  │ ttl: 3600 seconds           │    │ ttl: 60 seconds                 │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │  │
-│  │  │ D8.3 ServerInfoCache        │    │ D8.4 GuestSessionCache          │   │  │
-│  │  │ ─────────────────────────── │    │ ─────────────────────────────── │   │  │
-│  │  │ key: server:{id}:info       │    │ key: guest:{sessionId}          │   │  │
-│  │  │ value: ServerInfoDTO        │    │ value: GuestPreferences         │   │  │
-│  │  │ ttl: 300 seconds            │    │ ttl: 86400 seconds              │   │  │
-│  │  └─────────────────────────────┘    └─────────────────────────────────┘   │  │
-│  └───────────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────────┘
+    subgraph EdgeLayer["Edge Layer (CDN - CloudFlare)"]
+        CacheRouter["W1.1 CacheRouter\ncheckCache()\nserveFromCache()\ncacheResponse()"]
+        BotDetector["W1.2 BotDetector\ndetectBot()\napplyBotHeaders()\nrateLimitBot()"]
+    end
+
+    subgraph MGV1["M-GV1: Public View Module (Next.js SSR)"]
+        PublicChannelPage["PublicChannelPage\ngetServerSideProps()\nrender()"]
+        SEOMetadata["SEOMetadataComponent\ngenerateMetaTags()\ngenerateStructuredData()"]
+        MessageListComp["MessageListComponent\nrender()\nloadMoreMessages()"]
+        GuestPromoBanner["GuestPromoBanner\nrender()\nonJoinClick()"]
+        MessageCard["MessageCard\nrender()\nformatTimestamp()"]
+        ServerSidebar["ServerSidebar\nrender()\nnavigateToChannel()"]
+    end
+
+    subgraph MGV2["M-GV2: Client Interaction Module (Browser)"]
+        InfiniteScrollHandler["InfiniteScrollHandler\nobserve()\nonIntersect()\nloadMore()"]
+        MessageLinkHandler["MessageLinkHandler\nscrollToMessage()\nhighlightMessage()"]
+        SearchHighlighter["SearchHighlighter\nparseSearchTerms()\nhighlightMatches()"]
+        ShareHandler["ShareHandler\nshareToTwitter()\ncopyLink()"]
+    end
+
+    subgraph MB1["M-B1: API Gateway (Public API)"]
+        PublicChannelCtrl["PublicChannelController\n(REST, public)\ngetPublicChannelPage()\ngetPublicMessages()"]
+        PublicServerCtrl["PublicServerController\n(REST, public)\ngetPublicServerInfo()\ngetPublicChannelList()"]
+    end
+
+    subgraph MB2["M-B2: Access Control"]
+        VisibilityGuard["VisibilityGuard\nisChannelPublic()\ngetVisibilityStatus()"]
+        ContentFilter["ContentFilter\nfilterSensitiveContent()\nredactUserMentions()"]
+        RateLimiter["RateLimiter\ncheckLimit()\nincrementCounter()"]
+        AnonSessionMgr["AnonymousSessionManager\ngetOrCreateSession()\nstorePreference()"]
+    end
+
+    subgraph MB4["M-B4: Content Delivery"]
+        MessageService["MessageService\ngetMessagesForPublicView()\ngetMessageById()"]
+        AuthorService["AuthorService\ngetPublicAuthorInfo()\nanonymizeAuthor()"]
+        AttachmentService["AttachmentService\ngetPublicAttachmentUrl()\nisAttachmentPublic()"]
+        SEOService["SEOService\ngeneratePageTitle()\ngenerateDescription()\ngenerateStructuredData()"]
+    end
+
+    subgraph MD1["M-D1: Data Access"]
+        ChannelRepo["ChannelRepository\nfindBySlug()\nfindPublicByServerId()\ngetVisibility()"]
+        MessageRepo["MessageRepository\nfindByChannelPaginated()\nfindById()"]
+        ServerRepo["ServerRepository\nfindBySlug()\ngetPublicInfo()"]
+        UserRepo["UserRepository\nfindById()\ngetPublicProfile()"]
+    end
+
+    subgraph MD2["M-D2: Persistence (PostgreSQL)"]
+        ServersTable[("servers")]
+        ChannelsTable[("channels")]
+        MessagesTable[("messages")]
+        UsersTable[("users")]
+        AttachmentsTable[("attachments")]
+    end
+
+    subgraph MD3["M-D3: Cache (Redis)"]
+        VisCache["channel:{channelId}:visibility\nTTL: 3600s (M-B3 owner)"]
+        MsgsCache["channel:msgs:{channelId}:page:{pageNum}\nTTL: 60s (M-B4 owner)"]
+        ServerCache["server:{serverId}:info\nTTL: 300s (M-B4 owner)"]
+        GuestSession["guest:session:{sessionId}\nTTL: 86400s (M-B2 owner)"]
+    end
+
+    GuestUser -->|HTTPS GET| CacheRouter
+    BotUser -->|HTTPS GET| CacheRouter
+    CacheRouter --> BotDetector
+    CacheRouter -->|Cache Miss| PublicChannelPage
+    PublicChannelPage --> SEOMetadata
+    PublicChannelPage --> MessageListComp
+    PublicChannelPage --> GuestPromoBanner
+    PublicChannelPage --> ServerSidebar
+    MessageListComp --> MessageCard
+    InfiniteScrollHandler -->|REST| PublicChannelCtrl
+    PublicChannelPage -->|Internal| PublicChannelCtrl
+    PublicChannelPage -->|Internal| PublicServerCtrl
+    PublicChannelCtrl --> VisibilityGuard
+    PublicChannelCtrl --> RateLimiter
+    PublicChannelCtrl --> AnonSessionMgr
+    PublicChannelCtrl --> MessageService
+    PublicChannelCtrl --> SEOService
+    MessageService --> ContentFilter
+    MessageService --> AttachmentService
+    MessageService --> AuthorService
+    VisibilityGuard --> ChannelRepo
+    MessageService --> MessageRepo
+    AuthorService --> UserRepo
+    PublicServerCtrl --> ServerRepo
+    ChannelRepo --> ChannelsTable
+    ChannelRepo --> VisCache
+    MessageRepo --> MessagesTable
+    MessageRepo --> MsgsCache
+    ServerRepo --> ServersTable
+    ServerRepo --> ServerCache
+    UserRepo --> UsersTable
+    AttachmentService --> AttachmentsTable
+    AnonSessionMgr --> GuestSession
 ```
 
 > **Note:** All cache keys use UUID-based identifiers (e.g., `channel:{channelId}:visibility`) for consistency across all Harmony specs.
@@ -304,46 +154,25 @@
 
 ### 2.3 Request Path Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    Guest Request Path (Cache Miss Scenario)                      │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant Guest as Guest User
+    participant CDN as CDN Edge
+    participant NextJS_SSR as Next.js SSR
+    participant Database as Database
 
-Guest User                CDN Edge              Next.js SSR           Database
-    │                        │                       │                    │
-    │  GET /c/gamedev/help   │                       │                    │
-    │───────────────────────►│                       │                    │
-    │                        │                       │                    │
-    │                        │  Cache MISS           │                    │
-    │                        │  Forward to origin    │                    │
-    │                        │──────────────────────►│                    │
-    │                        │                       │                    │
-    │                        │                       │  Check visibility  │
-    │                        │                       │───────────────────►│
-    │                        │                       │                    │
-    │                        │                       │  visibility=PUBLIC │
-    │                        │                       │◄───────────────────│
-    │                        │                       │                    │
-    │                        │                       │  Fetch messages    │
-    │                        │                       │───────────────────►│
-    │                        │                       │                    │
-    │                        │                       │  Message[]         │
-    │                        │                       │◄───────────────────│
-    │                        │                       │                    │
-    │                        │                       │  Render HTML       │
-    │                        │                       │  with SEO tags     │
-    │                        │                       │                    │
-    │                        │  HTML + Cache-Control │                    │
-    │                        │◄──────────────────────│                    │
-    │                        │                       │                    │
-    │                        │  Store in cache       │                    │
-    │                        │                       │                    │
-    │  HTML Response         │                       │                    │
-    │◄───────────────────────│                       │                    │
-    │                        │                       │                    │
-    │  Browser renders       │                       │                    │
-    │  page immediately      │                       │                    │
-    │                        │                       │                    │
+    Guest->>CDN: GET /c/gamedev/help
+    CDN-->>CDN: Cache MISS
+    CDN->>NextJS_SSR: Forward to origin
+    NextJS_SSR->>Database: Check visibility
+    Database-->>NextJS_SSR: visibility=PUBLIC
+    NextJS_SSR->>Database: Fetch messages
+    Database-->>NextJS_SSR: Message[]
+    NextJS_SSR-->>NextJS_SSR: Render HTML with SEO tags
+    NextJS_SSR-->>CDN: HTML + Cache-Control
+    CDN-->>CDN: Store in cache
+    CDN-->>Guest: HTML Response
+    Guest-->>Guest: Browser renders page immediately
 ```
 
 ### 2.4 Rationale
@@ -354,184 +183,194 @@ The archtecture diagram is justified because client server split abstracts from 
 
 ## 3. Class Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              LEGEND                                              │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│  ────────►  Inheritance (extends)                                               │
-│  - - - - ►  Implementation (implements)                                         │
-│  ─────────  Association                                                         │
-│  ◆─────────  Composition (owns)                                                 │
-│  ◇─────────  Aggregation (uses)                                                 │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+classDiagram
+    class IPublicContentProvider {
+        <<interface>>
+        +getPublicContent()
+        +isAccessible()
+        +getMetadata()
+    }
 
-                            ┌───────────────────────────┐
-                            │    <<interface>>          │
-                            │  CL1.1 IPublicContent     │
-                            │         Provider          │
-                            ├───────────────────────────┤
-                            │ + getPublicContent()      │
-                            │ + isAccessible()          │
-                            │ + getMetadata()           │
-                            └─────────────┬─────────────┘
-                                          │
-              ┌───────────────────────────┼───────────────────────────┐
-              │                           │                           │
-    - - - - - ┼ - - - - -       - - - - - ┼ - - - - -       - - - - - ┼ - - - - -
-              │                           │                           │
-    ┌─────────▼─────────┐       ┌─────────▼─────────┐       ┌─────────▼─────────┐
-    │ CL1.2 Public      │       │ CL1.3 Public      │       │ CL1.4 Public      │
-    │ ChannelProvider   │       │ MessageProvider   │       │ ServerProvider    │
-    ├───────────────────┤       ├───────────────────┤       ├───────────────────┤
-    │ - channelRepo     │       │ - messageRepo     │       │ - serverRepo      │
-    │ - visibilityGuard │       │ - contentFilter   │       │ - channelRepo     │
-    ├───────────────────┤       ├───────────────────┤       ├───────────────────┤
-    │ + getPublicContent│       │ + getPublicContent│       │ + getPublicContent│
-    │ + isAccessible    │       │ + isAccessible    │       │ + isAccessible    │
-    │ + getMetadata     │       │ + getMetadata     │       │ + getMetadata     │
-    └─────────┬─────────┘       └─────────┬─────────┘       └───────────────────┘
-              │                           │
-              ◇                           ◇
-    ┌─────────▼─────────┐       ┌─────────▼─────────┐
-    │ CL2.1 Visibility  │       │ CL2.2 Content     │
-    │ Guard             │       │ Filter            │
-    ├───────────────────┤       ├───────────────────┤
-    │ - channelRepo     │       │ - patterns        │
-    │ - cache           │       ├───────────────────┤
-    ├───────────────────┤       │ + filterSensitive │
-    │ + isChannelPublic │       │   Content()       │
-    │   ()              │       │ + redactUser      │
-    │ + isServerPublic  │       │   Mentions()      │
-    │   ()              │       │ + sanitizeFor     │
-    │ + getVisibility   │       │   Display()       │
-    │   Status()        │       │ + sanitize        │
-    └───────────────────┘       │   Attachments()   │
-                                └───────────────────┘
+    class PublicChannelProvider {
+        -channelRepo
+        -visibilityGuard
+        +getPublicContent()
+        +isAccessible()
+        +getMetadata()
+    }
 
+    class PublicMessageProvider {
+        -messageRepo
+        -contentFilter
+        +getPublicContent()
+        +isAccessible()
+        +getMetadata()
+    }
 
-    ┌───────────────────────────────────────────────────────────────────────────┐
-    │                          Page Components                                   │
-    └───────────────────────────────────────────────────────────────────────────┘
+    class PublicServerProvider {
+        -serverRepo
+        -channelRepo
+        +getPublicContent()
+        +isAccessible()
+        +getMetadata()
+    }
 
-    ┌─────────────────────────┐
-    │ CL3.1 PublicChannelPage │
-    │ <<React Component>>     │
-    ├─────────────────────────┤
-    │ + serverSlug: string    │
-    │ + channelSlug: string   │
-    │ + initialData: PageData │
-    ├─────────────────────────┤
-    │ + getServerSideProps()  │
-    │ + render()              │
-    └────────────┬────────────┘
-                 │
-                 ◆ contains
-    ┌────────────┴────────────────────────────────────────────┐
-    │            │                │                │          │
-    ▼            ▼                ▼                ▼          ▼
-┌─────────┐ ┌─────────────┐ ┌───────────────┐ ┌────────────┐ ┌─────────────┐
-│CL3.2 SEO│ │CL3.3 Server │ │CL3.4 Message  │ │CL3.5       │ │CL3.6        │
-│Metadata │ │Sidebar      │ │List           │ │Guest       │ │Message      │
-│Component│ │             │ │               │ │PromoBanner │ │Card         │
-├─────────┤ ├─────────────┤ ├───────────────┤ ├────────────┤ ├─────────────┤
-│ + title │ │ + server    │ │ + messages    │ │ + name     │ │ + msg       │
-│ + desc  │ │ + channels  │ │ + hasMore     │ │ + channel  │ │ + author    │
-│ + url   │ ├─────────────┤ ├───────────────┤ │ + members  │ ├─────────────┤
-├─────────┤ │ + render()  │ │ + render()    │ ├────────────┤ │+render()    │
-│+generate│ │+navigateTo  │ │+loadMore      │ │+render()   │ │+formatTime  │
-│MetaTags │ │ Channel()   │ │ Messages()    │ │+onJoinClick│ │ stamp()     │
-│  ()     │ └─────────────┘ │+scrollTo      │ │  ()        │ │+renderAtt   │
-│+generate│                 │ Message()     │ │+onDismiss()│ │ achments()  │
-│Structured│                └───────────────┘ └────────────┘ └─────────────┘
-│Data()   │
-└─────────┘
+    class VisibilityGuard {
+        -channelRepo
+        -cache
+        +isChannelPublic()
+        +isServerPublic()
+        +getVisibilityStatus()
+    }
 
+    class ContentFilter {
+        -patterns
+        +filterSensitiveContent()
+        +redactUserMentions()
+        +sanitizeForDisplay()
+        +sanitizeAttachments()
+    }
 
-    ┌───────────────────────────────────────────────────────────────────────────┐
-    │                          Data Transfer Objects                             │
-    └───────────────────────────────────────────────────────────────────────────┘
+    class PublicChannelPage {
+        <<React Component>>
+        +serverSlug string
+        +channelSlug string
+        +initialData PageData
+        +getServerSideProps()
+        +render()
+    }
 
-    ┌─────────────────────────┐         ┌─────────────────────────┐
-    │ CL4.1 PublicChannelDTO  │         │ CL4.2 PublicMessageDTO  │
-    │ <<DTO>>                 │         │ <<DTO>>                 │
-    ├─────────────────────────┤         ├─────────────────────────┤
-    │ + id: string            │         │ + id: string            │
-    │ + name: string          │         │ + content: string       │
-    │ + slug: string          │         │ + author: PublicAuthorDTO│
-    │ + topic: string         │         │ + timestamp: DateTime   │
-    │ + messageCount: number  │         │ + editedAt: DateTime    │
-    │ + serverSlug: string    │         │ + attachments: []       │
-    └─────────────────────────┘         │ + permalink: string     │
-                                        └─────────────────────────┘
+    class SEOMetadataComponent {
+        +title string
+        +description string
+        +canonicalUrl string
+        +generateMetaTags()
+        +generateStructuredData()
+    }
 
-    ┌─────────────────────────┐         ┌─────────────────────────┐
-    │ CL4.3 PublicAuthorDTO   │         │ CL4.4 PublicServerDTO   │
-    │ <<DTO>>                 │         │ <<DTO>>                 │
-    ├─────────────────────────┤         ├─────────────────────────┤
-    │ + displayName: string   │         │ + name: string          │
-    │ + avatarUrl: string     │         │ + slug: string          │
-    │ + isBot: boolean        │         │ + description: string   │
-    │ (No userId exposed)     │         │ + iconUrl: string       │
-    └─────────────────────────┘         │ + memberCount: number   │
-                                        │ + publicChannelCount:   │
-                                        │     number              │
-                                        └─────────────────────────┘
+    class MessageListComponent {
+        +messages Message[]
+        +hasMore boolean
+        +render()
+        +loadMoreMessages()
+        +scrollToMessage()
+    }
 
-    ┌─────────────────────────┐         ┌─────────────────────────┐
-    │ CL4.5 PageDataDTO       │         │ CL4.6 SEODataDTO        │
-    │ <<DTO>>                 │         │ <<DTO>>                 │
-    ├─────────────────────────┤         ├─────────────────────────┤
-    │ + server: ServerDTO     │         │ + title: string         │
-    │ + channel: ChannelDTO   │         │ + description: string   │
-    │ + messages: MessageDTO[]│         │ + canonicalUrl: string  │
-    │ + pagination: object    │         │ + ogImage: string       │
-    │ + seo: SEODataDTO       │         │ + breadcrumbs: []       │
-    └─────────────────────────┘         │ + structuredData: JSON  │
-                                        └─────────────────────────┘
+    class GuestPromoBanner {
+        +serverName string
+        +channelName string
+        +memberCount number
+        +render()
+        +onJoinClick()
+        +onDismiss()
+    }
 
+    class MessageCard {
+        +message Message
+        +author AuthorDTO
+        +render()
+        +formatTimestamp()
+        +renderAttachments()
+    }
 
-    ┌───────────────────────────────────────────────────────────────────────────┐
-    │                          Domain Entities                                   │
-    └───────────────────────────────────────────────────────────────────────────┘
+    class ServerSidebar {
+        +serverInfo ServerDTO
+        +publicChannels ChannelDTO[]
+        +render()
+        +navigateToChannel()
+    }
 
-    ┌─────────────────────────┐         ┌─────────────────────────┐
-    │ CL-D7 Channel           │◄────────│ CL-D8 Message           │
-    │ <<Entity>>              │ 1    *  │ <<Entity>>              │
-    ├─────────────────────────┤         ├─────────────────────────┤
-    │ + id: UUID              │         │ + id: UUID              │
-    │ + serverId: UUID        │         │ + channelId: UUID       │
-    │ + name: string          │         │ + authorId: UUID        │
-    │ + slug: string          │         │ + content: string       │
-    │ + visibility: Enum      │         │ + createdAt: DateTime   │
-    │ + topic: string         │         │ + editedAt: DateTime    │
-    └─────────────────────────┘         │ + isDeleted: boolean    │
-              ▲                         └─────────────────────────┘
-              │ *
-              │
-              │ 1
-    ┌─────────┴───────────────┐         ┌─────────────────────────┐
-    │ CL-D9 Server            │         │ CL-D10 User             │
-    │ <<Entity>>              │         │ <<Entity>>              │
-    ├─────────────────────────┤         ├─────────────────────────┤
-    │ + id: UUID              │         │ + id: UUID              │
-    │ + name: string          │         │ + username: string      │
-    │ + slug: string          │         │ + displayName: string   │
-    │ + description: string   │         │ + avatarUrl: string     │
-    │ + isPublic: boolean     │         │ + publicProfile: bool   │
-    │ + memberCount: number   │         └─────────────────────────┘
-    └─────────────────────────┘
+    class Channel {
+        <<Entity>>
+        +id UUID
+        +serverId UUID
+        +name string
+        +slug string
+        +visibility Enum
+        +topic string
+    }
 
-    ┌─────────────────────────┐
-    │ CL-D11 Attachment       │
-    │ <<Entity>>              │
-    ├─────────────────────────┤
-    │ + id: UUID              │
-    │ + messageId: UUID       │
-    │ + filename: string      │
-    │ + url: string           │
-    │ + contentType: string   │
-    │ + sizeBytes: number     │
-    └─────────────────────────┘
+    class Message {
+        <<Entity>>
+        +id UUID
+        +channelId UUID
+        +authorId UUID
+        +content string
+        +createdAt DateTime
+        +editedAt DateTime
+        +isDeleted boolean
+    }
+
+    class Server {
+        <<Entity>>
+        +id UUID
+        +name string
+        +slug string
+        +description string
+        +isPublic boolean
+        +memberCount number
+    }
+
+    class User {
+        <<Entity>>
+        +id UUID
+        +username string
+        +displayName string
+        +avatarUrl string
+        +publicProfile boolean
+    }
+
+    class Attachment {
+        <<Entity>>
+        +id UUID
+        +messageId UUID
+        +filename string
+        +url string
+        +contentType string
+        +sizeBytes number
+    }
+
+    class ChannelRepository {
+        +findBySlug()
+        +findPublicByServerId()
+        +getVisibility()
+    }
+
+    class MessageRepository {
+        +findByChannelPaginated()
+        +findById()
+        +countByChannel()
+    }
+
+    class ServerRepository {
+        +findBySlug()
+        +getPublicInfo()
+    }
+
+    class UserRepository {
+        +findById()
+        +getPublicProfile()
+    }
+
+    IPublicContentProvider <|.. PublicChannelProvider
+    IPublicContentProvider <|.. PublicMessageProvider
+    IPublicContentProvider <|.. PublicServerProvider
+    PublicChannelProvider o-- VisibilityGuard
+    PublicMessageProvider o-- ContentFilter
+    PublicChannelPage *-- SEOMetadataComponent
+    PublicChannelPage *-- MessageListComponent
+    PublicChannelPage *-- GuestPromoBanner
+    PublicChannelPage *-- ServerSidebar
+    MessageListComponent *-- MessageCard
+    VisibilityGuard ..> ChannelRepository
+    Channel "1" o-- "many" Message
+    Server "1" o-- "many" Channel
+    Message o-- Attachment
+    ChannelRepository ..> Channel
+    MessageRepository ..> Message
+    ServerRepository ..> Server
+    UserRepository ..> User
 ```
 
 ### 3.1 Rationale
@@ -670,187 +509,66 @@ The list of classes clearly states the moving parts for ensuring guest user can 
 
 ### 5.2 Page Load State Machine
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              LEGEND                                              │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│  (( ))  Initial State        [ ]  State         < >  Decision                   │
-│  ─────► Transition           [[ ]] Final State                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> S1 : GET /c/{server}/{channel}
 
-                         (( S0: URL Requested ))
-                                    │
-                                    │ GET /c/{server}/{channel}
-                                    ▼
-                    ┌───────────────────────────────┐
-                    │ S1: Edge Cache Check          │
-                    │ ───────────────────────────── │
-                    │ cache.status = CHECKING       │
-                    │ request.path = /c/srv/ch      │
-                    └───────────────┬───────────────┘
-                                    │
-                            < Cache Hit? >
-                           /              \
-                          / Yes            \ No (MISS)
-                         ▼                  ▼
-        ┌─────────────────────────┐    ┌───────────────────────────────┐
-        │ S2: Serve Cached        │    │ S3: Origin Request            │
-        │ ─────────────────────── │    │ ───────────────────────────── │
-        │ cache.status = HIT      │    │ cache.status = MISS           │
-        │ response.source = EDGE  │    │ request.forwarded = true      │
-        └───────────┬─────────────┘    └───────────────┬───────────────┘
-                    │                                  │
-                    │                                  ▼
-                    │                  ┌───────────────────────────────┐
-                    │                  │ S4: Visibility Check          │
-                    │                  │ ───────────────────────────── │
-                    │                  │ channel.visibility = ?        │
-                    │                  └───────────────┬───────────────┘
-                    │                                  │
-                    │                  ┌───────────────┴───────────────┐
-                    │                  │                               │
-                    │          < Is Public? >                          │
-                    │         /               \                        │
-                    │        / No              \ Yes                   │
-                    │       ▼                   ▼                      │
-                    │  ┌─────────────────┐  ┌───────────────────────────────┐
-                    │  │ S5: Access      │  │ S6: Fetch Content             │
-                    │  │ Denied          │  │ ───────────────────────────── │
-                    │  │ ─────────────── │  │ messages = loading            │
-                    │  │ error = 403     │  │ server = loading              │
-                    │  │ OR              │  │ channel = loading             │
-                    │  │ redirect = true │  └───────────────┬───────────────┘
-                    │  └────────┬────────┘                  │
-                    │           │                           ▼
-                    │           │          ┌───────────────────────────────┐
-                    │           │          │ S7: Render Page               │
-                    │           │          │ ───────────────────────────── │
-                    │           │          │ page.loadState = COMPLETE     │
-                    │           │          │ messages = MessageDTO[]       │
-                    │           │          │ seo.tags = generated          │
-                    │           │          └───────────────┬───────────────┘
-                    │           │                          │
-                    │           │                          ▼
-                    │           │          ┌───────────────────────────────┐
-                    │           │          │ S8: Cache Response            │
-                    │           │          │ ───────────────────────────── │
-                    │           │          │ cache.stored = true           │
-                    │           │          │ cache.ttl = 60s               │
-                    │           │          └───────────────┬───────────────┘
-                    │           │                          │
-                    └───────────┴──────────────────────────┘
-                                           │
-                                           ▼
-                         [[ S9: Response Delivered ]]
-                         ─────────────────────────────
-                         page.loadState = DELIVERED
-                         guest can view content
+    S1 : S1: Edge Cache Check\ncache.status=CHECKING
+    S2 : S2: Serve Cached\ncache.status=HIT\nresponse.source=EDGE
+    S3 : S3: Origin Request\ncache.status=MISS\nrequest.forwarded=true
+    S4 : S4: Visibility Check\nchannel.visibility=?
+    S5 : S5: Access Denied\nerror=403 OR redirect=true
+    S6 : S6: Fetch Content\nmessages=loading\nserver=loading
+    S7 : S7: Render Page\npage.loadState=COMPLETE\nseo.tags=generated
+    S8 : S8: Cache Response\ncache.stored=true\ncache.ttl=60s
+    S9 : S9: Response Delivered\npage.loadState=DELIVERED
 
-
-State Transition Table:
-┌────────────────────┬────────────────────────────┬────────────────────┬──────────────────────────────┐
-│ Current State      │ Condition/Action           │ Next State         │ Side Effects                 │
-├────────────────────┼────────────────────────────┼────────────────────┼──────────────────────────────┤
-│ S1: Cache Check    │ Cache key exists, valid    │ S2: Serve Cached   │ Return cached HTML           │
-│ S1: Cache Check    │ Cache stale (expired <300s)│ S2: Serve Cached   │ Return stale HTML; trigger   │
-│                    │                            │                    │ background revalidation      │
-│ S1: Cache Check    │ Cache miss or expired      │ S3: Origin Request │ Forward to origin            │
-│ S3: Origin Request │ Always                     │ S4: Visibility     │ Query database               │
-│ S4: Visibility     │ visibility != PUBLIC_*     │ S5: Access Denied  │ Return 403 or redirect       │
-│ S4: Visibility     │ visibility = PUBLIC_*      │ S6: Fetch Content  │ Query messages               │
-│ S6: Fetch Content  │ Content retrieved          │ S7: Render Page    │ Generate HTML                │
-│ S7: Render Page    │ Rendering complete         │ S8: Cache Response │ Store in edge cache          │
-│ S2, S8             │ Response ready             │ S9: Delivered      │ Send to client               │
-└────────────────────┴────────────────────────────┴────────────────────┴──────────────────────────────┘
+    S1 --> S2 : Cache hit (valid or stale <300s)\n[return cached HTML; stale triggers background revalidation]
+    S1 --> S3 : Cache miss or expired\n[forward to origin]
+    S3 --> S4 : Always\n[query database]
+    S4 --> S5 : visibility != PUBLIC_*\n[return 403 or redirect]
+    S4 --> S6 : visibility = PUBLIC_*\n[query messages]
+    S6 --> S7 : Content retrieved\n[generate HTML]
+    S7 --> S8 : Rendering complete\n[store in edge cache]
+    S2 --> S9 : Response ready\n[send to client]
+    S8 --> S9 : Response ready\n[send to client]
+    S5 --> S9 : Response ready\n[send to client]
 ```
 
 ### 5.3 Message Loading State Machine (Client-Side Hydration)
 
-```
-                         (( M0: Page Hydrated ))
-                                    │
-                                    │ Initial messages rendered
-                                    ▼
-                    ┌───────────────────────────────┐
-                    │ M1: Initial View              │
-                    │ ───────────────────────────── │
-                    │ messages.count = initialBatch │
-                    │ pagination.hasMore = true     │
-                    │ scroll.position = top         │
-                    └───────────────┬───────────────┘
-                                    │
-                ┌───────────────────┼───────────────────┐
-                │                   │                   │
-                │ Scroll to bottom  │ Click message link│
-                ▼                   │                   ▼
-    ┌───────────────────────┐       │       ┌───────────────────────┐
-    │ M2: Loading More      │       │       │ M3: Scrolling to      │
-    │ ───────────────────── │       │       │ Message               │
-    │ loading = true        │       │       │ ───────────────────── │
-    │ pagination.page++     │       │       │ targetMessage = id    │
-    └───────────┬───────────┘       │       │ scroll.behavior=smooth│
-                │                   │       └───────────┬───────────┘
-                │ API returns       │                   │
-                ▼                   │                   │ Message found
-    ┌───────────────────────┐       │                   ▼
-    │ M4: Messages Appended │       │       ┌───────────────────────┐
-    │ ───────────────────── │       │       │ M5: Message           │
-    │ messages += newBatch  │       │       │ Highlighted           │
-    │ loading = false       │       │       │ ───────────────────── │
-    │ hasMore = response.   │       │       │ highlight.visible=true│
-    │   hasMore             │       │       │ highlight.ttl = 3s    │
-    └───────────┬───────────┘       │       └───────────┬───────────┘
-                │                   │                   │
-                └───────────────────┴───────────────────┘
-                                    │
-                                    ▼
-                    ┌───────────────────────────────┐
-                    │ M1: Initial View (Updated)    │
-                    │ (Return to browsing state)    │
-                    └───────────────────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> M1 : Page hydrated\n(initial messages rendered)
+
+    M1 : M1: Initial View\nmessages.count=initialBatch\npagination.hasMore=true\nscroll.position=top
+    M2 : M2: Loading More\nloading=true\npagination.page++
+    M3 : M3: Scrolling to Message\ntargetMessage=id\nscroll.behavior=smooth
+    M4 : M4: Messages Appended\nmessages+=newBatch\nloading=false
+    M5 : M5: Message Highlighted\nhighlight.visible=true\nhighlight.ttl=3s
+
+    M1 --> M2 : Scroll to bottom
+    M1 --> M3 : Click message link
+    M2 --> M4 : API returns
+    M3 --> M5 : Message found
+    M4 --> M1 : Return to browsing state
+    M5 --> M1 : Return to browsing state
 ```
 
 ### 5.4 Access Denial State Machine
 
-```
-                         (( D0: Private Channel Requested ))
-                                    │
-                                    │ visibility = PRIVATE
-                                    ▼
-                    ┌───────────────────────────────┐
-                    │ D1: Evaluate Response         │
-                    │ ───────────────────────────── │
-                    │ server.isPublic = ?           │
-                    │ referrer.source = ?           │
-                    └───────────────┬───────────────┘
-                                    │
-                    ┌───────────────┼───────────────┐
-                    │               │               │
-            < From search? >  < Server public? >   │
-                   │               │               │
-                   ▼               ▼               ▼
-    ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-    │ D2: Show Login   │  │ D3: Show Server  │  │ D4: Show 404     │
-    │ Prompt           │  │ Landing          │  │ Not Found        │
-    │ ──────────────── │  │ ──────────────── │  │ ──────────────── │
-    │ "Log in to view  │  │ Redirect to      │  │ Channel does not │
-    │ this channel"    │  │ /s/{server}      │  │ exist or is      │
-    │ + explain why    │  │ Show public      │  │ private          │
-    │ + link to join   │  │ channels list    │  │ (no info leak)   │
-    └──────────────────┘  └──────────────────┘  └──────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> D1 : Private channel requested\n(visibility=PRIVATE)
 
-Decision Logic:
-┌────────────────────────┬────────────────────────┬────────────────────────┐
-│ Condition              │ Response               │ Rationale              │
-├────────────────────────┼────────────────────────┼────────────────────────┤
-│ Channel doesn't exist  │ 404 Not Found          │ Don't reveal existence │
-│ Channel private,       │ 403 + Login prompt     │ User expected content  │
-│   from search          │                        │                        │
-│ Channel private,       │ Redirect to server     │ Show available content │
-│   server is public     │   landing              │                        │
-│ Channel private,       │ 404 Not Found          │ Don't reveal existence │
-│   server is private    │                        │                        │
-└────────────────────────┴────────────────────────┴────────────────────────┘
+    D1 : D1: Evaluate Response\nserver.isPublic=?\nreferrer.source=?
+    D2 : D2: Show Login Prompt\n"Log in to view this channel"\n+ explain why + link to join
+    D3 : D3: Show Server Landing\nRedirect to /s/{server}\nShow public channels list
+    D4 : D4: Show 404 Not Found\nChannel does not exist or is private\n(no info leak)
+
+    D1 --> D2 : From search engine\n[403 + Login prompt]
+    D1 --> D3 : Server is public\n[Redirect to server landing]
+    D1 --> D4 : Server is private OR channel not found\n[404 Not Found]
 ```
 
 ### 5.5 Rationale
@@ -865,429 +583,119 @@ These states were chosen to show the phases a guest can be for viewing a public 
 
 **Scenario Description:** A guest user clicks a search result link that leads to a public channel. The system serves the full content without any login prompts, allowing the user to immediately access the information they were searching for.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              LEGEND                                              │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│  (( ))   Start/End (Terminal)        [ ]  Process        < >  Decision          │
-│  /   /   Input/Output                [===]  Predefined Process (Subroutine)     │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Start(["START: Guest clicks search result\nURL: /c/gamedev/help-and-questions?m=abc123\nReferrer: google.com search"])
+    F11["F1.1 Request reaches CloudFlare edge\nCacheRouter.checkCache()"]
+    CacheHit{"F1.2: Cache hit?"}
+    F13["F1.3 Serve cached HTML response"]
+    F14["F1.4 Forward to origin server"]
+    F15["F1.5 Parse URL params\nserverSlug, channelSlug, messageId"]
+    F16["F1.6 Look up channel\nChannelRepository.findBySlug(serverSlug, channelSlug)"]
+    ChExists{"F1.7: Channel exists?"}
+    F18["F1.8 Return 404\nChannel not found"]
+    F19["F1.9 Check visibility\nVisibilityGuard.isChannelPublic(channelId)"]
+    IsPublic{"F1.10: Is PUBLIC_INDEXABLE\nor PUBLIC_NO_INDEX?"}
+    F111["F1.11 Handle private channel\n(See Flow 6.2)"]
+    F112["F1.12 Fetch server info\nServerRepository.getPublicInfo(serverId)"]
+    F113["F1.13 Fetch public channels for sidebar\nChannelRepository.findPublicByServerId()"]
+    F114["F1.14 Fetch messages\nMessageService.getMessagesForPublicView(channelId, page=1, limit=50)"]
+    F115["F1.15 Filter content\nContentFilter.filterSensitiveContent()\nContentFilter.redactUserMentions()"]
+    F115b["F1.15b Resolve attachments\nAttachmentService.getPublicAttachmentUrl()\nAttachmentService.isAttachmentPublic()"]
+    F116["F1.16 Build public author DTOs\nAuthorService.getPublicAuthorInfo()"]
+    F117["F1.17 Generate SEO data\nSEOService.generatePageTitle()\ngenerateDescription()\ngenerateStructuredData()"]
+    F118["F1.18 Render HTML with Next.js SSR\n- SEO meta tags\n- Server sidebar\n- Message list\n- Guest promo banner\n- Structured data JSON-LD"]
+    F119["F1.19 Set cache headers\nCache-Control: public, max-age=60, s-maxage=60\nstale-while-revalidate=300\nX-Robots-Tag: index, follow"]
+    F120["F1.20 Response delivered to guest browser"]
+    F121["F1.21 Browser renders page\nGuest sees full channel content"]
+    MsgInUrl{"F1.22: messageId in URL?"}
+    F123["F1.23 Display from top of channel"]
+    F124["F1.24 Scroll to message and highlight it\nMessageLinkHandler.scrollToMessage()\nMessageLinkHandler.highlightMessage()"]
+    F125["F1.25 Parse search terms from referrer URL\nSearchHighlighter.parseSearchTerms()\nSearchHighlighter.highlightMatches()"]
+    End(["END: Guest viewing public channel\n- Full content visible\n- No login prompt shown\n- Search terms highlighted\n- Can navigate to other public channels"])
 
-    (( START: Guest clicks search result ))
-    URL: https://harmony.app/c/gamedev/help-and-questions?m=abc123
-    Referrer: https://google.com/search?q=unity+physics+bug
-                            │
-                            │ [State: S0]
-                            ▼
-            ┌───────────────────────────────┐
-            │ [F1.1] Request reaches        │
-            │ CloudFlare edge               │
-            │ CacheRouter.checkCache() │
-            └───────────────┬───────────────┘
-                            │
-                            ▼
-                    < F1.2: Cache hit? >                    [State: S1]
-                   /                    \
-                  / Yes                  \ No
-                 ▼                        ▼
-    ┌─────────────────────────┐    ┌───────────────────────────────┐
-    │ [F1.3] Serve cached     │    │ [F1.4] Forward to origin      │
-    │ HTML response           │    │ server                        │
-    │ [State: S2]             │    │ [State: S3]                   │
-    └───────────┬─────────────┘    └───────────────┬───────────────┘
-                │                                  │
-                │                                  ▼
-                │                  ┌───────────────────────────────┐
-                │                  │ [F1.5] Parse URL params       │
-                │                  │ serverSlug = "gamedev"        │
-                │                  │ channelSlug = "help-and-      │
-                │                  │   questions"                  │
-                │                  │ messageId = "abc123"          │
-                │                  └───────────────┬───────────────┘
-                │                                  │
-                │                                  ▼
-                │                  ┌───────────────────────────────┐
-                │                  │ [F1.6] Look up channel        │
-                │                  │ ChannelRepository.     │
-                │                  │   findBySlug(serverSlug,      │
-                │                  │     channelSlug)              │
-                │                  └───────────────┬───────────────┘
-                │                                  │
-                │                                  ▼
-                │                      < F1.7: Channel exists? >
-                │                     /                         \
-                │                    / No                    Yes \
-                │                   ▼                             ▼
-                │      ┌─────────────────────┐    ┌───────────────────────────────┐
-                │      │ [F1.8] Return 404   │    │ [F1.9] Check visibility       │
-                │      │ "Channel not found" │    │ VisibilityGuard.       │
-                │      │ page                │    │   isChannelPublic(channelId)  │
-                │      └──────────┬──────────┘    └───────────────┬───────────────┘
-                │                 │                               │
-                │                 │                               ▼
-                │                 │               < F1.10: Is PUBLIC_INDEXABLE
-                │                 │                     or PUBLIC_NO_INDEX? >
-                │                 │              /                              \
-                │                 │             / No (PRIVATE)               Yes \
-                │                 │            ▼                                  ▼
-                │                 │  ┌─────────────────────┐   ┌───────────────────────────────┐
-                │                 │  │ [F1.11] Handle      │   │ [F1.12] Fetch server info     │
-                │                 │  │ private channel     │   │ ServerRepository.      │
-                │                 │  │ (See Flow 6.2)      │   │   getPublicInfo(serverId)     │
-                │                 │  └──────────┬──────────┘   └───────────────┬───────────────┘
-                │                 │             │                              │
-                │                 │             │                              ▼
-                │                 │             │              ┌───────────────────────────────┐
-                │                 │             │              │ [F1.13] Fetch public channels │
-                │                 │             │              │ for sidebar navigation        │
-                │                 │             │              │ ChannelRepository.     │
-                │                 │             │              │   findPublicByServerId()      │
-                │                 │             │              └───────────────┬───────────────┘
-                │                 │             │                              │
-                │                 │             │                              ▼
-                │                 │             │              ┌───────────────────────────────┐
-                │                 │             │              │ [F1.14] Fetch messages        │
-                │                 │             │              │ MessageService.        │
-                │                 │             │              │   getMessagesForPublicView(   │
-                │                 │             │              │     channelId, page=1,        │
-                │                 │             │              │     limit=50)                 │
-                │                 │             │              └───────────────┬───────────────┘
-                │                 │             │                              │
-                │                 │             │                              ▼
-                │                 │             │              ┌───────────────────────────────┐
-                │                 │             │              │ [F1.15] Filter content        │
-                │                 │             │              │ ContentFilter.         │
-                │                 │             │              │   filterSensitiveContent()    │
-                │                 │             │              │   redactUserMentions()        │
-                │                 │             │              └───────────────┬───────────────┘
-                │                 │             │                              │
-                │                 │             │                              ▼
-                │                 │             │              ┌───────────────────────────────┐
-                │                 │             │              │ [F1.15b] Resolve attachments  │
-                │                 │             │              │ AttachmentService.            │
-                │                 │             │              │   getPublicAttachmentUrl()    │
-                │                 │             │              │   isAttachmentPublic()        │
-                │                 │             │              └───────────────┬───────────────┘
-                │                 │             │                              │
-                │                 │             │                              ▼
-                │                 │             │              ┌───────────────────────────────┐
-                │                 │             │              │ [F1.16] Build public author   │
-                │                 │             │              │ DTOs (no user IDs)            │
-                │                 │             │              │ AuthorService.         │
-                │                 │             │              │   getPublicAuthorInfo()       │
-                │                 │             │              └───────────────┬───────────────┘
-                │                 │             │                              │
-                │                 │             │                              ▼
-                │                 │             │              ┌───────────────────────────────┐
-                │                 │             │              │ [F1.17] Generate SEO data     │
-                │                 │             │              │ SEOService.            │  [State: S7]
-                │                 │             │              │   generatePageTitle()         │
-                │                 │             │              │   generateDescription()       │
-                │                 │             │              │   generateStructuredData()    │
-                │                 │             │              │   generateBreadcrumbs()       │
-                │                 │             │              └───────────────┬───────────────┘
-                │                 │             │                              │
-                │                 │             │                              ▼
-                │                 │             │              ┌───────────────────────────────┐
-                │                 │             │              │ [F1.18] Render HTML with      │
-                │                 │             │              │ Next.js SSR                   │
-                │                 │             │              │ - SEO meta tags in <head>     │
-                │                 │             │              │ - Server sidebar              │
-                │                 │             │              │ - Message list                │
-                │                 │             │              │ - Guest promo banner          │
-                │                 │             │              │ - Structured data (JSON-LD)   │
-                │                 │             │              └───────────────┬───────────────┘
-                │                 │             │                              │
-                │                 │             │                              ▼
-                │                 │             │              ┌───────────────────────────────┐
-                │                 │             │              │ [F1.19] Set cache headers     │  [State: S8]
-                │                 │             │              │ Cache-Control: public,        │
-                │                 │             │              │   max-age=60, s-maxage=60,    │
-                │                 │             │              │   stale-while-revalidate=300  │
-                │                 │             │              │ X-Robots-Tag: index, follow   │
-                │                 │             │              └───────────────┬───────────────┘
-                │                 │             │                              │
-                └─────────────────┴─────────────┴──────────────────────────────┘
-                                               │
-                                               ▼
-                               ┌───────────────────────────────┐
-                               │ [F1.20] Response delivered    │  [State: S9]
-                               │ to guest's browser            │
-                               └───────────────┬───────────────┘
-                                               │
-                                               ▼
-                               ┌───────────────────────────────┐
-                               │ [F1.21] Browser renders page  │
-                               │ Guest sees full channel       │
-                               │ content immediately           │
-                               └───────────────┬───────────────┘
-                                               │
-                                               ▼
-                                   < F1.22: messageId in URL? >
-                                  /                            \
-                                 / No                       Yes \
-                                ▼                                ▼
-                ┌───────────────────────┐    ┌───────────────────────────────┐
-                │ [F1.23] Display from  │    │ [F1.24] Scroll to message     │
-                │ top of channel        │    │ and highlight it              │
-                │                       │    │ MessageLinkHandler.    │
-                │                       │    │   scrollToMessage()           │
-                │                       │    │   highlightMessage()          │
-                └───────────┬───────────┘    └───────────────┬───────────────┘
-                            │                                │
-                            └────────────────┬───────────────┘
-                                             │
-                                             ▼
-                               ┌───────────────────────────────┐
-                               │ [F1.25] Parse search terms    │
-                               │ from referrer URL             │
-                               │ SearchHighlighter.     │
-                               │   parseSearchTerms()          │
-                               │   highlightMatches()          │
-                               └───────────────┬───────────────┘
-                                               │
-                                               ▼
-                    (( END: Guest viewing public channel ))
-                    - Full content visible
-                    - No login prompt shown
-                    - Search terms highlighted
-                    - Can navigate to other public channels
+    Start --> F11 --> CacheHit
+    CacheHit -->|Yes| F13 --> F120
+    CacheHit -->|No| F14 --> F15 --> F16 --> ChExists
+    ChExists -->|No| F18 --> F120
+    ChExists -->|Yes| F19 --> IsPublic
+    IsPublic -->|No PRIVATE| F111 --> F120
+    IsPublic -->|Yes| F112 --> F113 --> F114 --> F115 --> F115b --> F116 --> F117 --> F118 --> F119 --> F120
+    F120 --> F121 --> MsgInUrl
+    MsgInUrl -->|No| F123 --> F125
+    MsgInUrl -->|Yes| F124 --> F125
+    F125 --> End
 ```
 
 ### 6.2 Scenario: Guest Requests Private Channel
 
 **Scenario Description:** A guest user requests a channel URL that points to a private channel. The system provides a helpful response without revealing sensitive information about the server's structure.
 
-```
-    (( START: Guest requests private channel ))
-    URL: https://harmony.app/c/company/internal-hr
-                            │
-                            │ [State: D0]
-                            ▼
-            ┌───────────────────────────────┐
-            │ [F2.1] Visibility check       │
-            │ returns PRIVATE               │
-            │ VisibilityGuard.       │
-            │   getVisibilityStatus()       │
-            └───────────────┬───────────────┘
-                            │
-                            ▼
-            ┌───────────────────────────────┐
-            │ [F2.2] Check request context  │  [State: D1]
-            │ - Parse referrer header       │
-            │ - Check if from search engine │
-            │ - Check server publicity      │
-            └───────────────┬───────────────┘
-                            │
-                            ▼
-                < F2.3: Server is public? >
-               /                            \
-              / No                        Yes \
-             ▼                                 ▼
-┌─────────────────────────┐    ┌───────────────────────────────┐
-│ [F2.4] Return 404       │    │ [F2.5] Check referrer         │
-│ "Page not found"        │    │                               │
-│ [State: D4]             │    └───────────────┬───────────────┘
-│                         │                    │
-│ Do not reveal that      │                    ▼
-│ server or channel       │        < F2.6: From search engine? >
-│ exists                  │       /                             \
-└─────────────────────────┘      / Yes                        No \
-                                ▼                                 ▼
-                ┌───────────────────────────┐  ┌───────────────────────────────┐
-                │ [F2.7] Show login prompt  │  │ [F2.8] Redirect to server     │
-                │ with explanation          │  │ landing page                  │
-                │ [State: D2]               │  │ [State: D3]                   │
-                │                           │  │                               │
-                │ "This channel requires    │  │ 302 Redirect to               │
-                │ membership to view.       │  │ /s/company                    │
-                │                           │  │                               │
-                │ The content you're        │  │ Show list of public           │
-                │ looking for may be in     │  │ channels in this server       │
-                │ a private channel.        │  │                               │
-                │                           │  │ "The channel you requested    │
-                │ [Login] [Create Account]  │  │ is private. Here are public   │
-                │ [Browse Public Channels]" │  │ channels you can view:"       │
-                └───────────────────────────┘  └───────────────────────────────┘
-                            │                                │
-                            └────────────────┬───────────────┘
-                                             │
-                                             ▼
-                    (( END: Appropriate response served ))
-                    - No sensitive info leaked
-                    - User guided to available content
-                    - Clear explanation provided
+```mermaid
+flowchart TD
+    Start(["START: Guest requests private channel\nURL: /c/company/internal-hr"])
+    F21["F2.1 Visibility check returns PRIVATE\nVisibilityGuard.getVisibilityStatus()"]
+    F22["F2.2 Check request context\n- Parse referrer header\n- Check if from search engine\n- Check server publicity"]
+    ServerPublic{"F2.3: Server is public?"}
+    F24["F2.4 Return 404\nPage not found\n(do not reveal that server or channel exists)"]
+    F25["F2.5 Check referrer"]
+    FromSearch{"F2.6: From search engine?"}
+    F27["F2.7 Show login prompt\nThis channel requires membership to view.\nLogin / Create Account / Browse Public Channels"]
+    F28["F2.8 Redirect to server landing page\n302 Redirect to /s/company\nShow list of public channels"]
+    End(["END: Appropriate response served\n- No sensitive info leaked\n- User guided to available content\n- Clear explanation provided"])
+
+    Start --> F21 --> F22 --> ServerPublic
+    ServerPublic -->|No| F24 --> End
+    ServerPublic -->|Yes| F25 --> FromSearch
+    FromSearch -->|Yes| F27 --> End
+    FromSearch -->|No| F28 --> End
 ```
 
 ### 6.3 Scenario: Guest Loads More Messages (Infinite Scroll)
 
 **Scenario Description:** A guest user scrolls to the bottom of the message list, triggering the infinite scroll mechanism to load older messages without a full page reload.
 
-```
-    (( START: Guest scrolls to bottom ))
-                            │
-                            │ [State: M1]
-                            ▼
-            ┌───────────────────────────────┐
-            │ [F3.1] IntersectionObserver   │
-            │ detects sentinel element      │
-            │ InfiniteScrollHandler. │
-            │   onIntersect()               │
-            └───────────────┬───────────────┘
-                            │
-                            ▼
-                < F3.2: hasMore == true? >
-               /                           \
-              / No                       Yes \
-             ▼                                ▼
-┌─────────────────────────┐    ┌───────────────────────────────┐
-│ [F3.3] Do nothing       │    │ [F3.4] Set loading state      │  [State: M2]
-│ All messages loaded     │    │ loading = true                │
-└─────────────────────────┘    │ Show loading spinner          │
-                               └───────────────┬───────────────┘
-                                               │
-                                               ▼
-                               ┌───────────────────────────────┐
-                               │ [F3.5] Fetch next page        │
-                               │ Client API call:              │
-                               │ GET /api/public/channels/     │
-                               │   {channelId}/messages        │
-                               │   ?page={currentPage+1}       │
-                               │   &limit=50                   │
-                               └───────────────┬───────────────┘
-                                               │
-                                               ▼
-                               ┌───────────────────────────────┐
-                               │ [F3.6] Server validates       │
-                               │ channel is still public       │
-                               │ (visibility could change)     │
-                               └───────────────┬───────────────┘
-                                               │
-                                               ▼
-                                   < F3.7: Still public? >
-                                  /                        \
-                                 / No                    Yes \
-                                ▼                             ▼
-                ┌───────────────────────────┐  ┌───────────────────────────────┐
-                │ [F3.8] Return 403         │  │ [F3.9] Fetch messages         │
-                │ Show "channel is now      │  │ MessageRepository.     │
-                │ private" message          │  │   findByChannelPaginated()    │
-                └───────────────────────────┘  └───────────────┬───────────────┘
-                                                               │
-                                                               ▼
-                                               ┌───────────────────────────────┐
-                                               │ [F3.10] Apply content filter  │
-                                               │ ContentFilter.         │
-                                               │   filterSensitiveContent()    │
-                                               └───────────────┬───────────────┘
-                                                               │
-                                                               ▼
-                                               ┌───────────────────────────────┐
-                                               │ [F3.11] Return JSON response  │
-                                               │ {                             │
-                                               │   messages: MessageDTO[],     │
-                                               │   hasMore: boolean,           │
-                                               │   nextPage: number            │
-                                               │ }                             │
-                                               └───────────────┬───────────────┘
-                                                               │
-                                                               ▼
-                                               ┌───────────────────────────────┐
-                                               │ [F3.12] Append messages to    │  [State: M4]
-                                               │ existing list                 │
-                                               │ MessageListComponent.  │
-                                               │   appendMessages()            │
-                                               └───────────────┬───────────────┘
-                                                               │
-                                                               ▼
-                                               ┌───────────────────────────────┐
-                                               │ [F3.13] Update state          │
-                                               │ loading = false               │
-                                               │ hasMore = response.hasMore    │
-                                               │ currentPage++                 │
-                                               └───────────────┬───────────────┘
-                                                               │
-                                                               ▼
-                    (( END: More messages displayed ))  [State: M1]
-                    - Seamless scroll experience
-                    - No page reload required
-                    - Loading indicator shown during fetch
+```mermaid
+flowchart TD
+    Start(["START: Guest scrolls to bottom"])
+    F31["F3.1 IntersectionObserver detects sentinel element\nInfiniteScrollHandler.onIntersect()"]
+    HasMore{"F3.2: hasMore == true?"}
+    F33["F3.3 Do nothing\nAll messages loaded"]
+    F34["F3.4 Set loading state\nloading=true\nShow loading spinner"]
+    F35["F3.5 Fetch next page\nGET /api/public/channels/{channelId}/messages\n?page={currentPage+1}&limit=50"]
+    F36["F3.6 Server validates channel is still public\n(visibility could change)"]
+    StillPublic{"F3.7: Still public?"}
+    F38["F3.8 Return 403\nShow channel is now private message"]
+    F39["F3.9 Fetch messages\nMessageRepository.findByChannelPaginated()"]
+    F310["F3.10 Apply content filter\nContentFilter.filterSensitiveContent()"]
+    F311["F3.11 Return JSON response\n{messages: MessageDTO[], hasMore: boolean, nextPage: number}"]
+    F312["F3.12 Append messages to existing list\nMessageListComponent.appendMessages()"]
+    F313["F3.13 Update state\nloading=false\nhasMore=response.hasMore\ncurrentPage++"]
+    End(["END: More messages displayed\n- Seamless scroll experience\n- No page reload required\n- Loading indicator shown during fetch"])
+
+    Start --> F31 --> HasMore
+    HasMore -->|No| F33
+    HasMore -->|Yes| F34 --> F35 --> F36 --> StillPublic
+    StillPublic -->|No| F38
+    StillPublic -->|Yes| F39 --> F310 --> F311 --> F312 --> F313 --> End
 ```
 
 ### 6.4 Scenario: Search Engine Bot Crawls Public Channel
 
 **Scenario Description:** A search engine bot (Googlebot, Bingbot, etc.) crawls a public channel page. The system serves optimized content with appropriate SEO signals.
 
-```
-    (( START: Bot requests public channel ))
-    User-Agent: Googlebot/2.1
-    URL: https://harmony.app/c/opensource/announcements
-                            │
-                            ▼
-            ┌───────────────────────────────┐
-            │ [F4.1] Bot detection at edge  │
-            │ BotDetector.detectBot()  │
-            │ Identified: Googlebot         │
-            └───────────────┬───────────────┘
-                            │
-                            ▼
-            ┌───────────────────────────────┐
-            │ [F4.2] Apply bot-specific     │
-            │ handling                      │
-            │ - Skip JS-dependent content   │
-            │ - Ensure full HTML render     │
-            │ - Apply bot rate limits       │
-            └───────────────┬───────────────┘
-                            │
-                            ▼
-            (Same visibility and content flow as F1.4-F1.18)
-                            │
-                            ▼
-            ┌───────────────────────────────┐
-            │ [F4.3] Generate bot-optimized │
-            │ response                      │
-            │                               │
-            │ Include:                      │
-            │ - Full message content inline │
-            │ - Structured data (JSON-LD)   │
-            │ - Canonical URL               │
-            │ - Breadcrumb schema           │
-            │ - hreflang tags (if i18n)     │
-            └───────────────┬───────────────┘
-                            │
-                            ▼
-            ┌───────────────────────────────┐
-            │ [F4.4] Set SEO headers        │
-            │                               │
-            │ X-Robots-Tag: index, follow   │
-            │ Link: <canonical>; rel=canon  │
-            │ Cache-Control: public,        │
-            │   s-maxage=3600               │
-            └───────────────┬───────────────┘
-                            │
-                            ▼
-            ┌───────────────────────────────┐
-            │ [F4.5] Return HTML with       │
-            │ structured data               │
-            │                               │
-            │ <script type="application/    │
-            │   ld+json">                   │
-            │ {                             │
-            │   "@context": "schema.org",   │
-            │   "@type": "DiscussionForum   │
-            │     Posting",                 │
-            │   "headline": "...",          │
-            │   "datePublished": "...",     │
-            │   "author": {...}             │
-            │ }                             │
-            │ </script>                     │
-            └───────────────┬───────────────┘
-                            │
-                            ▼
-                    (( END: Bot crawl complete ))
-                    - Content indexed
-                    - Structured data parsed
-                    - Links discovered
+```mermaid
+flowchart TD
+    Start(["START: Bot requests public channel\nUser-Agent: Googlebot/2.1\nURL: /c/opensource/announcements"])
+    F41["F4.1 Bot detection at edge\nBotDetector.detectBot()\nIdentified: Googlebot"]
+    F42["F4.2 Apply bot-specific handling\n- Skip JS-dependent content\n- Ensure full HTML render\n- Apply bot rate limits"]
+    F43SameFlow["Same visibility and content flow as F1.4-F1.18"]
+    F43["F4.3 Generate bot-optimized response\n- Full message content inline\n- Structured data JSON-LD\n- Canonical URL\n- Breadcrumb schema\n- hreflang tags if i18n"]
+    F44["F4.4 Set SEO headers\nX-Robots-Tag: index, follow\nLink: canonical; rel=canon\nCache-Control: public, s-maxage=3600"]
+    F45["F4.5 Return HTML with structured data\nscript type=application/ld+json\n{ @context: schema.org, @type: DiscussionForumPosting, ... }"]
+    End(["END: Bot crawl complete\n- Content indexed\n- Structured data parsed\n- Links discovered"])
+
+    Start --> F41 --> F42 --> F43SameFlow --> F43 --> F44 --> F45 --> End
 ```
 
 ### 6.5 Cross-Spec Integration: VISIBILITY_CHANGED Event Consumption
@@ -1376,20 +784,30 @@ The flow charts depict the major flow cases a guest will experience for Harmony.
 
 ### 7.6 Failure Priority Matrix
 
-```
-                    Impact
-                    Low         Medium      High        Critical
-            ┌───────────────────────────────────────────────────┐
-     High   │ IF-2      │           │ IF-1      │              │
-            ├───────────┼───────────┼───────────┼──────────────┤
-            │ RF-5      │ RF-2,CF-4 │ RF-1      │              │
-   Medium   │ IF-6      │ CF-5      │           │ IF-3         │
-            ├───────────┼───────────┼───────────┼──────────────┤
-            │           │ RF-3,RF-6 │ RF-4,HF-1 │ CF-3,IF-4    │
-     Low    │ DF-4      │ RF-7,DF-3 │ DF-2,HF-3 │ DF-1         │
-            ├───────────┼───────────┼───────────┼──────────────┤
-  Very Low  │           │           │ CF-1,CF-2 │ HF-2,IF-5    │
-            └───────────────────────────────────────────────────┘
+```mermaid
+graph LR
+    subgraph Matrix["Failure Priority Matrix (Likelihood × Impact)"]
+        subgraph High["High Likelihood"]
+            H_Low["Low Impact:\nIF-2"]
+            H_High["High Impact:\nIF-1"]
+        end
+        subgraph Medium["Medium Likelihood"]
+            M_Low["Low Impact:\nRF-5, IF-6"]
+            M_Med["Medium Impact:\nRF-2, CF-4, CF-5"]
+            M_High["High Impact:\nRF-1"]
+            M_Crit["Critical Impact:\nIF-3"]
+        end
+        subgraph Low["Low Likelihood"]
+            L_Med["Medium Impact:\nRF-3, RF-6\nRF-7, DF-3"]
+            L_High["High Impact:\nRF-4, HF-1\nDF-2, HF-3"]
+            L_Crit["Critical Impact:\nCF-3, IF-4, DF-1"]
+            L_LowImpact["Low Impact:\nDF-4"]
+        end
+        subgraph VeryLow["Very Low Likelihood"]
+            VL_High["High Impact:\nCF-1, CF-2"]
+            VL_Crit["Critical Impact:\nHF-2, IF-5"]
+        end
+    end
 ```
 
 ### 7.7 Rationale 
@@ -2379,36 +1797,26 @@ The data schemas covers the data required for rendering the feature of public ch
 
 ### 12.4 Data Flow for Public View
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Data Flow: Message to Public View                 │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph DB["Database"]
+        MsgTable["Messages table\n(id, channel_id, author_id,\ncontent, created_at, is_deleted)"]
+        UsersTable["Users table\n(id, username, display_name,\navatar_url, public_profile)"]
+    end
 
-Database                 Server                           Client
-───────                  ──────                           ──────
-Messages table           MessageService                   PublicMessageDTO
-┌─────────────┐          ┌─────────────────┐              ┌─────────────────┐
-│ id          │─────────►│ id              │─────────────►│ id              │
-│ channel_id  │          │ (filtered out)  │              │ (not exposed)   │
-│ author_id   │─────────►│ (lookup user)   │              │                 │
-│ content     │─────────►│ (filter content)│─────────────►│ content         │
-│ created_at  │─────────►│ created_at      │─────────────►│ timestamp       │
-│ is_deleted  │─────────►│ (if true, skip) │              │                 │
-└─────────────┘          └─────────────────┘              └─────────────────┘
-                                │
-                                ▼
-Users table              AuthorService                    PublicAuthorDTO
-┌─────────────┐          ┌─────────────────┐              ┌─────────────────┐
-│ id          │─────────►│ (not exposed)   │              │ (not exposed)   │
-│ username    │─────────►│ (not exposed)   │              │ (not exposed)   │
-│ display_name│─────────►│ getDisplayName()│─────────────►│ displayName     │
-│ avatar_url  │─────────►│ (if public)     │─────────────►│ avatarUrl       │
-│public_profile│────────►│ (check flag)    │              │                 │
-└─────────────┘          └─────────────────┘              └─────────────────┘
+    subgraph Server["Server"]
+        MsgService["MessageService\n- id → kept\n- channel_id → filtered out\n- author_id → lookup user\n- content → filter content\n- created_at → kept\n- is_deleted → if true, skip"]
+        AuthService["AuthorService\n- id → NOT exposed\n- username → NOT exposed\n- display_name → getDisplayName()\n- avatar_url → if public_profile=true\n- public_profile → check flag\n\nIf public_profile=false:\n  displayName='Anonymous'\n  avatarUrl=null"]
+    end
 
-If public_profile = false:
-  displayName = "Anonymous"
-  avatarUrl = null
+    subgraph Client["Client"]
+        MsgDTO["PublicMessageDTO\n(id, content, timestamp,\nauthor: PublicAuthorDTO)"]
+        AuthorDTO["PublicAuthorDTO\n(displayName, avatarUrl)\n[no userId exposed]"]
+    end
+
+    MsgTable --> MsgService --> MsgDTO
+    UsersTable --> AuthService --> AuthorDTO
+    MsgService --> AuthService
 ```
 
 ### 12.5 Security Headers
