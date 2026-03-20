@@ -130,6 +130,11 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
   const speakingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localSpeakingRef = useRef(false);
 
+  // Tracks attached remote audio elements keyed by participant identity for cleanup.
+  // Twilio does not auto-play subscribed tracks; we must attach them to <audio> elements.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const remoteAudioTracksRef = useRef<Map<string, any[]>>(new Map());
+
   // ── Fetch participant lists for all voice channels on mount / server change ──
   // This populates the sidebar before the user has joined any channel.
   useEffect(() => {
@@ -150,6 +155,15 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
   }, [serverId, voiceChannelIds]);
 
   const resetVoiceState = useCallback(() => {
+    // Detach all remote audio elements before clearing other state.
+    remoteAudioTracksRef.current.forEach((tracks) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tracks.forEach((track: any) => {
+        track.detach().forEach((el: HTMLAudioElement) => el.remove());
+      });
+    });
+    remoteAudioTracksRef.current.clear();
+
     connectedChannelIdRef.current = null;
     connectedServerIdRef.current = null;
     roomRef.current = null;
@@ -272,7 +286,10 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
           ?.mediaStreamTrack;
         if (mediaTrack) {
           try {
-            const ctx = new AudioContext();
+            // Pin to 48 kHz — WebRTC's native rate — so the OS audio driver does not
+            // need to negotiate a different sample rate and risk exclusive-mode conflicts
+            // that silence other apps (especially on macOS Core Audio / Windows WASAPI).
+            const ctx = new AudioContext({ sampleRate: 48000 });
             const source = ctx.createMediaStreamSource(new MediaStream([mediaTrack]));
             const analyser = ctx.createAnalyser();
             analyser.fftSize = 256;
@@ -309,7 +326,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
         }
 
 
-        // Merge remote participants already in the room.
+        // Merge remote participants already in the room and attach their audio.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         room.participants.forEach((participant: any) => {
           const newEntry: VoiceParticipant = { userId: participant.identity, muted: false, deafened: false };
@@ -321,6 +338,16 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
             return list.some(p => p.userId === participant.identity)
               ? prev
               : { ...prev, [channelId]: [...list, newEntry] };
+          });
+          // Attach any already-subscribed audio tracks so we hear them immediately.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          participant.audioTracks.forEach((pub: any) => {
+            if (pub.track) {
+              const el: HTMLAudioElement = pub.track.attach();
+              document.body.appendChild(el);
+              const existing = remoteAudioTracksRef.current.get(participant.identity) ?? [];
+              remoteAudioTracksRef.current.set(participant.identity, [...existing, pub.track]);
+            }
           });
         });
 
@@ -345,17 +372,42 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
               }
             });
           }
-          // Also handle tracks subscribed after the participant connected.
+          // Attach tracks subscribed after this participant connected; apply deafen immediately.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           participant.on('trackSubscribed', (track: any) => {
-            if (track.kind === 'audio' && track.mediaStreamTrack) {
-              track.mediaStreamTrack.enabled = !isDeafenedRef.current;
+            if (track.kind === 'audio') {
+              const el: HTMLAudioElement = track.attach();
+              document.body.appendChild(el);
+              const existing = remoteAudioTracksRef.current.get(participant.identity) ?? [];
+              remoteAudioTracksRef.current.set(participant.identity, [...existing, track]);
+              if (track.mediaStreamTrack) {
+                track.mediaStreamTrack.enabled = !isDeafenedRef.current;
+              }
+            }
+          });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          participant.on('trackUnsubscribed', (track: any) => {
+            if (track.kind === 'audio') {
+              track.detach().forEach((el: HTMLAudioElement) => el.remove());
+              const existing = remoteAudioTracksRef.current.get(participant.identity) ?? [];
+              remoteAudioTracksRef.current.set(
+                participant.identity,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                existing.filter((t: any) => t !== track),
+              );
             }
           });
         });
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         room.on('participantDisconnected', (participant: any) => {
+          // Detach audio before removing from state to avoid a brief render with dangling elements.
+          const tracks = remoteAudioTracksRef.current.get(participant.identity) ?? [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          tracks.forEach((track: any) => {
+            track.detach().forEach((el: HTMLAudioElement) => el.remove());
+          });
+          remoteAudioTracksRef.current.delete(participant.identity);
           setParticipants(prev => prev.filter(p => p.userId !== participant.identity));
           setChannelParticipants(prev => ({
             ...prev,
