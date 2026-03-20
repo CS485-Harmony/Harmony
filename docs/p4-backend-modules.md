@@ -2,6 +2,8 @@
 
 This document provides the P4 specification for every backend module in the Harmony architecture, following the required format from the course project description.
 
+> **Path shorthand:** All `backend/src/...` paths in the Code Generation sections refer to `harmony-backend/src/...` in the actual repository.
+
 ---
 
 ## Module 1: Authentication
@@ -14,7 +16,7 @@ This document provides the P4 specification for every backend module in the Harm
 | Login | Authenticates a user by email and password, returns an access token and a refresh token. Uses constant-time comparison to prevent timing attacks. |
 | Token refresh | Rotates an existing refresh token into a new access/refresh pair. The old token is revoked atomically. |
 | Logout | Revokes a single refresh token. |
-| Rate limiting | Login: 10 attempts / 15 min. Registration: 5 attempts / hour (production). |
+| Rate limiting (planned) | Login: 10 attempts / 15 min. Registration: 5 attempts / hour (production). Not yet implemented — no rate-limiting middleware is present in `auth.router.ts`. |
 
 **What it does not do:** This module does not handle OAuth/social login, multi-factor authentication, password reset flows, or session management beyond JWT tokens.
 
@@ -349,7 +351,7 @@ Implementation code is located in:
 | List channels | Returns all channels in a server, ordered by position. |
 | Get channel | Retrieves a single channel by server slug + channel slug. |
 | Update channel | Modify name, topic, or position. |
-| Delete channel | Soft-deletes a channel (retains data for audit). |
+| Delete channel | Hard delete with cascading removal of associated messages and audit log entries. |
 | Set visibility | Changes channel visibility among `PUBLIC_INDEXABLE`, `PUBLIC_NO_INDEX`, and `PRIVATE`. Writes an audit log entry and publishes a `VISIBILITY_CHANGED` event. |
 | Get visibility | Returns the current visibility of a channel. Served from Redis cache when available. |
 | Default channel | Automatically creates a `#general` TEXT channel when a server is created. |
@@ -531,7 +533,7 @@ Implementation code is located in:
 | Capability | Description |
 |---|---|
 | Send message | Creates a message in a channel with optional attachments (max 10, 4000 char content limit). Publishes `MESSAGE_CREATED` event. |
-| Get messages | Cursor-based pagination (newest first, max 100 per page). Returns messages with author and attachment data. |
+| Get messages | Cursor-based pagination (oldest first — ascending chronological order, max 100 per page). Returns messages with author and attachment data. |
 | Edit message | Author can edit their own message content. Updates `editedAt` timestamp. Publishes `MESSAGE_EDITED` event. |
 | Delete message | Soft-delete. Members can delete own messages; moderators+ can delete any. Publishes `MESSAGE_DELETED` event. |
 | Pin / Unpin | Moderators+ can pin or unpin messages. Tracks `pinnedAt` timestamp. |
@@ -979,8 +981,8 @@ flowchart TD
 A **ParticipantState** represents a user currently in a voice channel, with their `muted` and `deafened` boolean flags.
 
 Redis storage:
-- Key: `harmony:voice:participants:{channelId}` — a hash where each field is a userId and the value is a JSON `ParticipantState`.
-- Key: `harmony:voice:user:{userId}` — tracks which channel a user is currently in (for single-channel enforcement).
+- Key: `voice:channel:{channelId}:participants` — a Redis Set of userIds currently in the channel.
+- Key: `voice:user:{userId}:voice` — a Redis Hash with fields: `channelId`, `muted` (0/1), `deafened` (0/1). Tracks which channel a user is currently in (for single-channel enforcement).
 
 ### 4. Stable Storage
 
@@ -1260,10 +1262,10 @@ The public API exposes read-only views of Servers, Channels, and Messages. It ap
 
 This module reads from the same PostgreSQL tables as the authenticated modules (Server, Channel, Message). It uses Redis for caching:
 
-- `harmony:channel:visibility:{channelId}` — channel visibility (TTL 3600s)
-- `harmony:channel:messages:{channelId}:{page}` — paginated messages (TTL 60s)
-- `harmony:server:info:{serverId}` — server metadata (TTL 300s)
-- Sitemap cache: `harmony:sitemap:{serverSlug}` (TTL 300s)
+- `channel:{channelId}:visibility` — channel visibility (TTL 3600s)
+- `channel:msgs:{channelId}:page:{page}` — paginated messages (TTL 60s)
+- `server:{serverId}:info` — server metadata (TTL 300s)
+- Sitemap cache: `sitemap:{serverSlug}` (TTL 300s)
 
 ### 5. External API
 
