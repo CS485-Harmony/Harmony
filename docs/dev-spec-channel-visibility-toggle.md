@@ -34,113 +34,74 @@ Header with versioning and authors.
 
 ### 2.1 System Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         CLIENT LAYER                            │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ M1 Admin Dashboard                                        │  │
-│  │  ┌──────────────────────┐  ┌────────────────────────────┐ │  │
-│  │  │ C1.1 ChannelSettings │  │ C1.2 VisibilityToggle      │ │  │
-│  │  │   channelId: string  │  │   isPublic: boolean        │ │  │
-│  │  │   currentVisibility  │◄─│   isLoading: boolean       │ │  │
-│  │  │   render()           │  │   onToggle()               │ │  │
-│  │  │   loadSettings()     │  │   validatePermissions()    │ │  │
-│  │  └──────────────────────┘  └────────────────────────────┘ │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ M2 Public Channel Viewer                                  │  │
-│  │  ┌──────────────────────┐  ┌────────────────────────────┐ │  │
-│  │  │ C2.1 PublicChannel   │  │ C2.2 MessageList           │ │  │
-│  │  │   serverId: string   │  │   messages: Message[]      │ │  │
-│  │  │   isAuthenticated    │◄─│   isAnonymous: boolean     │ │  │
-│  │  │   render()           │  │   render(), loadMore()     │ │  │
-│  │  └──────────────────────┘  └────────────────────────────┘ │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ M3 Client Services                                        │  │
-│  │  ┌──────────────────────┐  ┌────────────────────────────┐ │  │
-│  │  │ C3.1 ChannelService  │  │ C3.2 AuthService           │ │  │
-│  │  │   getChannel()       │  │   isAuthenticated()        │ │  │
-│  │  │   updateVisibility() │  │   hasPermission()          │ │  │
-│  │  │   getPublicChannels()│  └────────────────────────────┘ │  │
-│  │  └──────────────────────┘                                 │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │ HTTPS/WebSocket
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        SERVER LAYER                             │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ M4 API Gateway                                            │  │
-│  │  ┌──────────────────────┐  ┌────────────────────────────┐ │  │
-│  │  │ C4.1 ChannelCtrl     │  │ C4.2 PublicAccessCtrl      │ │  │
-│  │  │   getChannelSettings │  │   getPublicChannel()       │ │  │
-│  │  │   updateChannelVis() │  │   getServerSitemap()       │ │  │
-│  │  │   getVisAuditLog()   │  │   getRobotsTxt()           │ │  │
-│  │  │  -validateAdminAcces │  │   getPublicMessages()      │ │  │
-│  │  └──────────────────────┘  └────────────────────────────┘ │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ M5 Business Logic                                         │  │
-│  │  ┌──────────────────────┐  ┌────────────────────────────┐ │  │
-│  │  │ C5.1 VisibilityServ  │  │ C5.2 IndexingService       │ │  │
-│  │  │   setVisibility()    │  │   updateSitemap()          │ │  │
-│  │  │   getVisibility()    │  │   notifySearchEngines()    │ │  │
-│  │  │   canChangeVisib()   │  │   generateCanonicalUrl()   │ │  │
-│  │  │  -validateTransition │  │   getRobotsDirectives()    │ │  │
-│  │  │  -emitVisibChange()  │  │                            │ │  │
-│  │  └──────────────────────┘  └────────────────────────────┘ │  │
-│  │  ┌──────────────────────┐  ┌────────────────────────────┐ │  │
-│  │  │ C5.3 PermissionServ  │  │ C5.4 AuditLogService       │ │  │
-│  │  │   canManageChannel() │  │   logVisibilityChange()    │ │  │
-│  │  │   isServerAdmin()    │  │   getAuditHistory()        │ │  │
-│  │  │   getEffectivePerms()│  │   exportAuditLog()         │ │  │
-│  │  └──────────────────────┘  └────────────────────────────┘ │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ M6 Data Access                                            │  │
-│  │  ┌──────────────────────┐  ┌────────────────────────────┐ │  │
-│  │  │ C6.1 ChannelRepo     │  │ C6.2 AuditLogRepo          │ │  │
-│  │  │   findById()         │  │   create()                 │ │  │
-│  │  │   findBySlug()       │  │   findByChannelId()        │ │  │
-│  │  │   update()           │  │   findByDateRange()        │ │  │
-│  │  │   findPublicByServerId│  └────────────────────────────┘ │  │
-│  │  │   getVisibility()    │                                 │  │
-│  │  │   getMetadata()      │                                 │  │
-│  │  │  -invalidateCache()  │                                 │  │
-│  │  │  -getCacheKey()      │                                 │  │
-│  │  └──────────────────────┘                                 │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │ Database Protocol
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         DATA LAYER                              │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ M7 Persistence                                            │  │
-│  │  ┌──────────────────────┐  ┌────────────────────────────┐ │  │
-│  │  │ D7.1 channels        │  │ D7.2 visibility_audit_log  │ │  │
-│  │  │  id, server_id, name │  │  id, channel_id, actor_id  │ │  │
-│  │  │  slug, visibility    │  │  action, old/new_value     │ │  │
-│  │  │  topic, position     │  │  timestamp, ip_address     │ │  │
-│  │  │  indexed_at, ts cols │  └────────────────────────────┘ │  │
-│  │  └──────────────────────┘                                 │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ M8 Cache (Redis)                                          │  │
-│  │  ┌──────────────────────┐  ┌────────────────────────────┐ │  │
-│  │  │ D8.1 Visibility      │  │ D8.2 PublicChannelList     │ │  │
-│  │  │ channel:{id}:visib.  │  │ server:{id}:public_channels│ │  │
-│  │  │ TTL: 3600s           │  │ TTL: 300s                  │ │  │
-│  │  └──────────────────────┘  └────────────────────────────┘ │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │ HTTP/API
-                              ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                       EXTERNAL SYSTEMS                           │
-│  [E1 Search Engines]  [E2 Sitemap Consumers]  [E3 CDN/CloudFlare]│
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Client["Client Layer"]
+        subgraph MCV1["M-CV1: Admin Dashboard"]
+            ChannelSettings["ChannelSettingsView"]
+            VisibilityToggle["VisibilityToggleComponent"]
+        end
+        subgraph MCV2["M-CV2: Public Channel Viewer"]
+            PublicChannelView["PublicChannelView"]
+            MessageList["MessageListComponent"]
+        end
+        ClientServices["Client Services\n(ChannelService, AuthService)"]
+    end
+
+    subgraph Server["Server Layer"]
+        subgraph MB1["M-B1: API Gateway"]
+            ChannelCtrl["ChannelController\n(tRPC, authenticated)"]
+            PublicChannelCtrl["PublicChannelController\n(REST, public)"]
+        end
+        subgraph MB3["M-B3: Visibility Management"]
+            ChannelVisibilityService["ChannelVisibilityService"]
+            PermissionService["PermissionService"]
+            AuditLogService["AuditLogService"]
+        end
+        subgraph MB6["M-B6: SEO & Indexing"]
+            IndexingService["IndexingService"]
+            SitemapGenerator["SitemapGenerator"]
+        end
+    end
+
+    subgraph DataLayer["Data Layer"]
+        subgraph MD1["M-D1: Data Access"]
+            ChannelRepository["ChannelRepository"]
+            AuditLogRepository["AuditLogRepository"]
+        end
+        subgraph MD2["M-D2: Persistence"]
+            ChannelsTable[("channels")]
+            AuditLogTable[("visibility_audit_log")]
+        end
+        subgraph MD3["M-D3: Cache (Redis)"]
+            VisCache["channel:{channelId}:visibility\nTTL: 3600s"]
+            PubChCache["server:{serverId}:public_channels\nTTL: 300s"]
+        end
+    end
+
+    subgraph External["External Systems"]
+        SearchEngines["Search Engines"]
+        SitemapConsumers["Sitemap Consumers"]
+        CDN["CDN / CloudFlare"]
+    end
+
+    VisibilityToggle -->|tRPC| ChannelCtrl
+    PublicChannelView -->|REST| PublicChannelCtrl
+    ChannelCtrl --> ChannelVisibilityService
+    ChannelCtrl --> PermissionService
+    PublicChannelCtrl --> ChannelVisibilityService
+    ChannelVisibilityService --> AuditLogService
+    ChannelVisibilityService --> IndexingService
+    ChannelVisibilityService --> ChannelRepository
+    AuditLogService --> AuditLogRepository
+    IndexingService --> SitemapGenerator
+    ChannelRepository --> ChannelsTable
+    AuditLogRepository --> AuditLogTable
+    ChannelRepository --> VisCache
+    ChannelRepository --> PubChCache
+    IndexingService -->|HTTP| SearchEngines
+    SitemapGenerator --> SitemapConsumers
+    PublicChannelCtrl --> CDN
 ```
 
 > **Note:** All cache keys use UUID-based identifiers (e.g., `channel:{channelId}:visibility`) for consistency across all Harmony specs.
@@ -169,104 +130,113 @@ We had to prompt edits to this to ensure the database columns were not mismatche
 
 ## 3. Class Diagram
 
-```
-                          ┌───────────────────────────┐
-                          │    <<interface>>          │
-                          │  CL1.1 IVisibilityToggle  │
-                          ├───────────────────────────┤
-                          │ + setVisibility()         │
-                          │ + getVisibility()         │
-                          │ + canChangeVisibility()   │
-                          └─────────────┬─────────────┘
-                                        │ implements
-                          ┌─────────────▼─────────────┐
-                          │ CL1.2 ChannelVisibility   │
-                          │        Service            │
-                          ├───────────────────────────┤
-                          │ - channelRepository       │
-                          │ - auditLogger             │
-                          │ - eventBus                │
-                          │ - permissionService       │
-                          ├───────────────────────────┤
-                          │ + setVisibility()         │
-                          │ + getVisibility()         │
-                          │ + canChangeVisibility()   │
-                          │ - validateTransition()    │
-                          │ - emitVisibilityChange()  │
-                          └───────────┬───────────────┘
-                                      │
-               ┌──────────────────────┼──────────────────────┐
-               ◇                     ◇                     ◇
-  ┌────────────▼────────────┐ ┌───────▼──────────┐ ┌────────▼──────────┐
-  │CL2.1 ChannelRepository  │ │CL2.2 AuditLog    │ │CL2.3 Permission   │
-  ├─────────────────────────┤ │      Service     │ │      Service      │
-  │ - database              │ ├──────────────────┤ ├───────────────────┤
-  │ - cache                 │ │ + logVisibility  │ │ + canManage       │
-  ├─────────────────────────┤ │     Change()     │ │     Channel()     │
-  │ + findById()            │ │ + getAudit       │ │ + isServer        │
-  │ + findBySlug()          │ │     History()    │ │     Admin()       │
-  │ + update()              │ │ + exportAudit    │ │ + getEffective    │
-  │ + findPublicByServerId()│ │     Log()        │ │     Permissions() │
-  │ + getVisibility()       │ └──────────────────┘ └───────────────────┘
-  │ + getMetadata()         │
-  │ - invalidateCache()     │
-  │ - getCacheKey()         │
-  └────────────┬────────────┘
-               ◆
-  ┌────────────▼────────────┐
-  │  CL3.1 Channel          │
-  │  <<Entity>>             │
-  ├─────────────────────────┤
-  │ + id: UUID              │
-  │ + serverId: UUID        │
-  │ + name: string          │
-  │ + slug: string          │
-  │ + visibility: Enum      │
-  │ + topic: string | null  │
-  │ + position: number      │
-  │ + indexedAt: DateTime   │
-  │ + createdAt: DateTime   │
-  │ + updatedAt: DateTime   │
-  ├─────────────────────────┤
-  │ + isPublic()            │
-  │ + isIndexable()         │
-  │ + setVisibility()       │
-  └─────────────────────────┘
+```mermaid
+classDiagram
+    class IVisibilityToggle {
+        <<interface>>
+        +setVisibility()
+        +getVisibility()
+        +canChangeVisibility()
+    }
 
-  ┌───────────────────────────┐
-  │ CL4.1 ChannelVisibility   │
-  │ <<Enumeration>>           │
-  ├───────────────────────────┤
-  │ PUBLIC_INDEXABLE          │
-  │ PUBLIC_NO_INDEX           │
-  │ PRIVATE                   │
-  └───────────────────────────┘
+    class ChannelVisibilityService {
+        -channelRepository
+        -auditLogger
+        -eventBus
+        -permissionService
+        +setVisibility()
+        +getVisibility()
+        +canChangeVisibility()
+        -validateTransition()
+        -emitVisibilityChange()
+    }
 
-  ┌─────────────────────────┐      ┌─────────────────────────┐
-  │  CL5.1 VisibilityChange │      │  CL5.2 AuditLogEntry    │
-  │  <<Event>>              │      │  <<Entity>>             │
-  ├─────────────────────────┤      ├─────────────────────────┤
-  │ + channelId: UUID       │      │ + id: UUID              │
-  │ + oldVisibility: Enum   │      │ + channelId: UUID       │
-  │ + newVisibility: Enum   │      │ + actorId: UUID         │
-  │ + actorId: UUID         │      │ + action: string        │
-  │ + timestamp: DateTime   │      │ + oldValue: JSON        │
-  └─────────────────────────┘      │ + newValue: JSON        │
-                                   │ + timestamp: DateTime   │
-                                   │ + ipAddress: string     │
-                                   └─────────────────────────┘
+    class ChannelRepository {
+        -database
+        -cache
+        +findById()
+        +findBySlug()
+        +update()
+        +findPublicByServerId()
+        +getVisibility()
+        +getMetadata()
+        -invalidateCache()
+        -getCacheKey()
+    }
 
-  ┌─────────────────────────┐      ┌─────────────────────────┐
-  │  CL6.1 IndexingService  │─────►│  CL6.2 SitemapGenerator │
-  ├─────────────────────────┤      ├─────────────────────────┤
-  │ - sitemapGenerator      │      │ - publicChannelRepo     │
-  │ - searchEngineNotifier  │      ├─────────────────────────┤
-  ├─────────────────────────┤      │ + generate()            │
-  │ + updateSitemap()       │      │ + getLastModified()     │
-  │ + notifySearchEngines() │      └─────────────────────────┘
-  │ + generateCanonicalUrl()│
-  │ + getRobotsDirectives() │
-  └─────────────────────────┘
+    class AuditLogService {
+        +logVisibilityChange()
+        +getAuditHistory()
+        +exportAuditLog()
+    }
+
+    class PermissionService {
+        +canManageChannel()
+        +isServerAdmin()
+        +getEffectivePermissions()
+    }
+
+    class Channel {
+        <<Entity>>
+        +id UUID
+        +serverId UUID
+        +name string
+        +slug string
+        +visibility Enum
+        +topic string
+        +position number
+        +indexedAt DateTime
+        +createdAt DateTime
+        +updatedAt DateTime
+        +isPublic()
+        +isIndexable()
+        +setVisibility()
+    }
+
+    class AuditLogEntry {
+        <<Entity>>
+        +id UUID
+        +channelId UUID
+        +actorId UUID
+        +action string
+        +oldValue JSON
+        +newValue JSON
+        +timestamp DateTime
+        +ipAddress string
+    }
+
+    class VisibilityChangeEvent {
+        <<Event>>
+        +channelId UUID
+        +oldVisibility Enum
+        +newVisibility Enum
+        +actorId UUID
+        +timestamp DateTime
+    }
+
+    class IndexingService {
+        -sitemapGenerator
+        -searchEngineNotifier
+        +updateSitemap()
+        +notifySearchEngines()
+        +generateCanonicalUrl()
+        +getRobotsDirectives()
+    }
+
+    class SitemapGenerator {
+        -publicChannelRepo
+        +generate()
+        +getLastModified()
+    }
+
+    IVisibilityToggle <|.. ChannelVisibilityService
+    ChannelVisibilityService o-- ChannelRepository
+    ChannelVisibilityService o-- AuditLogService
+    ChannelVisibilityService o-- PermissionService
+    ChannelRepository *-- Channel
+    AuditLogService ..> AuditLogEntry
+    ChannelVisibilityService ..> VisibilityChangeEvent
+    IndexingService --> SitemapGenerator
 ```
 
 > **Sitemap Ownership:** `IndexingService` (CL6.1 / C5.2) is the canonical owner of sitemap generation and search engine notification across all Harmony specs. Other features (e.g., SEO Meta Tag Generation) emit events that this service consumes to trigger sitemap updates.
@@ -359,88 +329,43 @@ Like the previous section, I had to reprompt to fix inconsistencies. The LLM als
 
 ### 5.2 Channel Visibility State Machine
 
-```
-                            (( S0: Channel Created ))
-                                      │
-                                      │ Default: visibility = PRIVATE
-                                      ▼
-                      ┌───────────────────────────────┐
-                      │         S1: PRIVATE           │
-                      │ indexedAt = null              │
-                      │ robots = "noindex, nofollow"  │
-                      └───────────────┬───────────────┘
-                                      │
-      ┌───────────────────────────────┼────────────────────────────────┐
-      │ setVisibility(PUBLIC_NO_INDEX)│ setVisibility(PUBLIC_INDEXABLE)│
-      ▼                               │                                ▼
-┌─────────────────────┐               │                ┌─────────────────────┐
-│ S2: PUBLIC_NO_INDEX │               │                │ S3: PUBLIC_INDEXABLE│
-│ indexedAt = null    │◄──────────────┘                │ indexedAt = now()   │
-│ robots = "noindex"  │                                │ robots = "index,    │
-│                     │  setVisibility                 │          follow"    │
-│                     │  (PUBLIC_INDEXABLE)            │                     │
-│                     ├───────────────────────────────►│                     │
-│                     │◄───────────────────────────────┤                     │
-│                     │  setVisibility                 │                     │
-│                     │  (PUBLIC_NO_INDEX)             │                     │
-└─────────┬───────────┘                                └─────────┬───────────┘
-          │              setVisibility(PRIVATE)                  │
-          └─────────────────────────┬────────────────────────────┘
-                                    ▼
-                      ┌───────────────────────────────┐
-                      │         S1: PRIVATE           │
-                      │ + Request removal from index  │
-                      │ + Update sitemap              │
-                      └───────────────────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> PRIVATE : Channel created (default)
 
-State Transition Table:
-┌────────────────────┬──────────────────────┬────────────────────┬──────────────────────────────┐
-│ Current State      │ Action               │ Next State         │ Side Effects                 │
-├────────────────────┼──────────────────────┼────────────────────┼──────────────────────────────┤
-│ S1: PRIVATE        │ setVis(PUB_IDX)      │ S3: PUB_INDEXABLE  │ Add to sitemap, notify bots  │
-│ S1: PRIVATE        │ setVis(PUB_NO)       │ S2: PUB_NO_INDEX   │ None                         │
-│ S2: PUB_NO_INDEX   │ setVis(PRIVATE)      │ S1: PRIVATE        │ None                         │
-│ S2: PUB_NO_INDEX   │ setVis(PUB_IDX)      │ S3: PUB_INDEXABLE  │ Add to sitemap, notify bots  │
-│ S3: PUB_INDEXABLE  │ setVis(PRIVATE)      │ S1: PRIVATE        │ Remove from sitemap, de-index │
-│ S3: PUB_INDEXABLE  │ setVis(PUB_NO)       │ S2: PUB_NO_INDEX   │ Remove from sitemap, noindex │
-└────────────────────┴──────────────────────┴────────────────────┴──────────────────────────────┘
+    state "PRIVATE (indexedAt=null, robots=noindex nofollow)" as PRIVATE
+    state "PUBLIC_NO_INDEX (indexedAt=null, robots=noindex)" as PUBLIC_NO_INDEX
+    state "PUBLIC_INDEXABLE (indexedAt=now, robots=index follow)" as PUBLIC_INDEXABLE
+
+    PRIVATE --> PUBLIC_NO_INDEX : setVisibility(PUBLIC_NO_INDEX)
+    PRIVATE --> PUBLIC_INDEXABLE : setVisibility(PUBLIC_INDEXABLE) - add to sitemap, notify search engines
+
+    PUBLIC_NO_INDEX --> PRIVATE : setVisibility(PRIVATE)
+    PUBLIC_NO_INDEX --> PUBLIC_INDEXABLE : setVisibility(PUBLIC_INDEXABLE) - add to sitemap, notify search engines
+
+    PUBLIC_INDEXABLE --> PRIVATE : setVisibility(PRIVATE) - remove from sitemap, request de-index
+    PUBLIC_INDEXABLE --> PUBLIC_NO_INDEX : setVisibility(PUBLIC_NO_INDEX) - remove from sitemap, set noindex
 ```
 
 ### 5.3 Admin Action State Diagram
 
-```
-                            (( A0: Admin Views Channel ))
-                                      │
-                                      ▼
-                      ┌───────────────────────────────┐
-                      │ A1: Settings Page Loaded      │
-                      │ isLoading = false             │
-                      └───────────────┬───────────────┘
-                                      │ Admin clicks toggle
-                                      ▼
-                      ┌───────────────────────────────┐
-                      │ A2: Confirmation Dialog       │
-                      │ pendingVisibility = new       │
-                      └───────────────┬───────────────┘
-                      ┌───────────────┴───────────────┐
-                      │ Cancel                        │ Confirm
-                      ▼                               ▼
-      ┌───────────────────────┐   ┌───────────────────────────────┐
-      │ A1 (Return)           │   │ A3: Updating (isLoading=true) │
-      └───────────────────────┘   └───────────────┬───────────────┘
-                            ┌─────────────────────┴───────┐
-                            │ Error                       │ Success
-                            ▼                             ▼
-                  ┌─────────────────────┐   ┌───────────────────────────┐
-                  │ A4: Error State     │   │ A5: Success State         │
-                  │ errorMessage = msg  │   │ visibility = updated      │
-                  └─────────┬───────────┘   └─────────────┬─────────────┘
-                            └──────────┬──────────────────┘
-                                       │ After 3s / dismiss
-                                       ▼
-                      ┌───────────────────────────────┐
-                      │ A1: Settings Page (clean)     │
-                      └───────────────────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> A1 : Admin views channel
+
+    A1 : A1: Settings Page Loaded\nisLoading=false
+    A2 : A2: Confirmation Dialog\npendingVisibility=new
+    A3 : A3: Updating\nisLoading=true
+    A4 : A4: Error State\nerrorMessage=msg
+    A5 : A5: Success State\nvisibility=updated
+
+    A1 --> A2 : Admin clicks toggle
+    A2 --> A1 : Cancel
+    A2 --> A3 : Confirm
+    A3 --> A4 : Error
+    A3 --> A5 : Success
+    A4 --> A1 : After 3s / dismiss
+    A5 --> A1 : After 3s / dismiss
 ```
 
 ### 5.4 Rationale
@@ -457,69 +382,42 @@ The second diagram correctly tracks the state transitions for the channel visibi
 
 Admin navigates to channel settings and toggles a private channel to publicly indexable. System validates permissions, updates DB, regenerates sitemap, and notifies search engines.
 
-```
-    (( START: Admin opens channel settings ))
-                        │
-                        ▼
-        [F1.1] Load channel data → Client.ChannelService.getChannel(channelId)
-                        │
-                        ▼
-        [F1.2] Display current visibility toggle
-                        │
-                        ▼
-        / Admin clicks "Make Public" toggle /
-                        │
-                        ▼
-        [F1.3] Show confirmation dialog
-                        │
-                        ▼
-                < Admin confirms? >
-               / No            Yes \
-              ▼                     ▼
-    [F1.5] Cancel        [F1.6] Send API request:
-    Return to settings     updateVisibility(channelId, PUBLIC_INDEXABLE)
-                                    │
-                                    ▼
-                        [F1.7] Validate JWT token
-                                    │
-                                    ▼
-                            < Token valid? >
-                           / No         Yes \
-                          ▼                  ▼
-                    Return 401      [F1.10] Check admin permission
-                                             │
-                                             ▼
-                                    < Has permission? >
-                                   / No             Yes \
-                                  ▼                      ▼
-                            Return 403      [F1.13] Update visibility in DB
-                                                         │
-                                                         ▼
-                                            [F1.14] Create audit log entry
-                                                         │
-                                                         ▼
-                                            [F1.15] Emit VISIBILITY_CHANGED event
-                                                         │
-                                                         ▼
-                                            [F1.16] Update sitemap
-                                                         │
-                                                         ▼
-                                            [F1.17] Notify search engines (async)
-                                                         │
-                                                         ▼
-                                            [F1.18] Invalidate cache
-                                                         │
-                                                         ▼
-                                            [F1.19] Return success with updated channel
-                                                         │
-                                                         ▼
-                                            < Success response? >
-                                           / No              Yes \
-                                          ▼                       ▼
-                                [F1.22] Show error    [F1.23] Update UI toggle
-                                                               │
-                                                               ▼
-                                            (( END: Channel is now public ))
+```mermaid
+flowchart TD
+    Start(["START: Admin opens channel settings"])
+    F11["F1.1 Load channel data\nChannelService.getChannel(channelId)"]
+    F12["F1.2 Display current visibility toggle"]
+    F13["F1.3 Show confirmation dialog"]
+    Confirm{Admin confirms?}
+    F15["F1.5 Cancel\nReturn to settings"]
+    F16["F1.6 Send API request:\nupdateVisibility(channelId, PUBLIC_INDEXABLE)"]
+    F17["F1.7 Validate JWT token"]
+    TokenValid{Token valid?}
+    Return401["Return 401"]
+    F110["F1.10 Check admin permission"]
+    HasPerm{Has permission?}
+    Return403["Return 403"]
+    F113["F1.13 Update visibility in DB"]
+    F114["F1.14 Create audit log entry"]
+    F115["F1.15 Emit VISIBILITY_CHANGED event"]
+    F116["F1.16 Update sitemap"]
+    F117["F1.17 Notify search engines (async)"]
+    F118["F1.18 Invalidate cache"]
+    F119["F1.19 Return success with updated channel"]
+    SuccessResp{Success response?}
+    F122["F1.22 Show error"]
+    F123["F1.23 Update UI toggle"]
+    End(["END: Channel is now public"])
+
+    Start --> F11 --> F12 --> F13 --> Confirm
+    Confirm -->|No| F15
+    Confirm -->|Yes| F16 --> F17 --> TokenValid
+    TokenValid -->|No| Return401
+    TokenValid -->|Yes| F110 --> HasPerm
+    HasPerm -->|No| Return403
+    HasPerm -->|Yes| F113 --> F114 --> F115 --> F116 --> F117 --> F118 --> F119 --> SuccessResp
+    SuccessResp -->|No| F122
+    SuccessResp -->|Yes| F123 --> End
 ```
 
 #### 6.1.1 Cross-Spec Integration: Visibility → PUBLIC_INDEXABLE
@@ -533,83 +431,56 @@ When visibility changes to `PUBLIC_INDEXABLE`:
 
 An anonymous user or crawler requests a public channel page. System verifies visibility and serves content with appropriate SEO headers.
 
-```
-    (( START: Request to /c/{serverSlug}/{channelSlug} ))
-                        │
-                        ▼
-        [F2.1] Route to PublicAccessController
-                        │
-                        ▼
-        [F2.2] Check cache: channel:{id}:visibility
-                        │
-                < Cache hit? >
-               / No         Yes \
-              ▼                  ▼
-    [F2.4] Query DB     [F2.5] Use cached value
-    [F2.6] Cache result         │
-              │                 │
-              └────────┬────────┘
-                       │
-                < Channel exists? >
-               / No             Yes \
-              ▼                      ▼
-        Return 404          < Is PUBLIC_* ? >
-                           / No          Yes \
-                          ▼                   ▼
-                    Return 403     [F2.11] Fetch messages
-                                           │
-                                           ▼
-                                  [F2.12] Set X-Robots-Tag header
-                                    PUBLIC_INDEXABLE → "index,follow"
-                                    PUBLIC_NO_INDEX → "noindex"
-                                           │
-                                           ▼
-                                  [F2.13] Add canonical URL + structured data
-                                           │
-                                           ▼
-                                  [F2.14] Return HTML with SEO metadata
-                                           │
-                                           ▼
-                            (( END: Response sent ))
+```mermaid
+flowchart TD
+    Start(["START: Request to /c/{serverSlug}/{channelSlug}"])
+    F21["F2.1 Route to PublicChannelController"]
+    F22["F2.2 Check cache:\nchannel:{channelId}:visibility"]
+    CacheHit{Cache hit?}
+    F24["F2.4 Query DB"]
+    F26["F2.6 Cache result"]
+    F25["F2.5 Use cached value"]
+    ChExists{Channel exists?}
+    Return404["Return 404"]
+    IsPublic{"Is PUBLIC_*?"}
+    Return403["Return 403"]
+    F211["F2.11 Fetch messages"]
+    F212["F2.12 Set X-Robots-Tag header\nPUBLIC_INDEXABLE → index,follow\nPUBLIC_NO_INDEX → noindex"]
+    F213["F2.13 Add canonical URL + structured data"]
+    F214["F2.14 Return HTML with SEO metadata"]
+    End(["END: Response sent"])
+
+    Start --> F21 --> F22 --> CacheHit
+    CacheHit -->|No| F24 --> F26 --> ChExists
+    CacheHit -->|Yes| F25 --> ChExists
+    ChExists -->|No| Return404
+    ChExists -->|Yes| IsPublic
+    IsPublic -->|No| Return403
+    IsPublic -->|Yes| F211 --> F212 --> F213 --> F214 --> End
 ```
 
 ### 6.3 Scenario: Admin Sets Channel to Private (De-indexing)
 
 Administrator changes a public/indexable channel back to private. System removes from sitemap and requests de-indexing.
 
-```
-    (( START: Admin clicks "Make Private" ))
-                        │
-                        ▼
-        [F3.1] Show warning: "Search engines may take time to remove cached content"
-                        │
-                < Admin confirms? >
-               / No            Yes \
-              ▼                     ▼
-        [F3.3] Cancel    [F3.4] API: updateVisibility(PRIVATE)
-                                    │
-                        (Permission checks same as F1.7-F1.12)
-                                    │
-                                    ▼
-                        [F3.5] Update DB: visibility=PRIVATE, indexedAt=null
-                                    │
-                                    ▼
-                        [F3.6] Create audit log
-                                    │
-                                    ▼
-                        [F3.7] Remove from sitemap
-                                    │
-                                    ▼
-                        [F3.8] Request URL removal (Google/Bing APIs, async)
-                                    │
-                                    ▼
-                        [F3.9] Invalidate CDN cache
-                                    │
-                                    ▼
-                        [F3.10] Return success with de-indexing notice
-                                    │
-                                    ▼
-                        (( END: Channel is private ))
+```mermaid
+flowchart TD
+    Start(["START: Admin clicks Make Private"])
+    F31["F3.1 Show warning:\nSearch engines may take time to remove cached content"]
+    Confirm{Admin confirms?}
+    F33["F3.3 Cancel"]
+    F34["F3.4 API: updateVisibility(PRIVATE)\n(Permission checks same as F1.7-F1.12)"]
+    F35["F3.5 Update DB:\nvisibility=PRIVATE, indexedAt=null"]
+    F36["F3.6 Create audit log"]
+    F37["F3.7 Remove from sitemap"]
+    F38["F3.8 Request URL removal\n(Google/Bing APIs, async)"]
+    F39["F3.9 Invalidate CDN cache"]
+    F310["F3.10 Return success with de-indexing notice"]
+    End(["END: Channel is private"])
+
+    Start --> F31 --> Confirm
+    Confirm -->|No| F33
+    Confirm -->|Yes| F34 --> F35 --> F36 --> F37 --> F38 --> F39 --> F310 --> End
 ```
 
 #### 6.3.1 Cross-Spec Integration: Visibility → PRIVATE
@@ -672,17 +543,26 @@ The LLM also had to be reprompted to finalize what the event bus would be. It ch
 
 ### 7.5 Failure Priority Matrix
 
-```
-                Impact:  Low       Medium      High        Critical
-           ┌────────────────────────────────────────────────────┐
-  High     │           │ CF-1      │ IF-1      │                │
-  Medium   │           │ RF-1,RF-5 │           │                │
-           │           │ RF-6,CF-3 │           │                │
-  Low      │ RF-2      │ HF-3      │ RF-7,RF-8 │ RF-3,IF-4      │
-           │           │           │ CF-2,HF-1 │                │
-           │           │           │ HF-2,IF-6 │                │
-  Very Low │           │           │           │ IF-2,IF-3      │
-           └────────────────────────────────────────────────────┘
+```mermaid
+graph LR
+    subgraph Matrix["Failure Priority Matrix (Likelihood × Impact)"]
+        subgraph High["High Likelihood"]
+            H_Med["Medium Impact:\nCF-1"]
+            H_High["High Impact:\nIF-1"]
+        end
+        subgraph Medium["Medium Likelihood"]
+            M_Med["Medium Impact:\nRF-1, RF-5\nRF-6, CF-3"]
+        end
+        subgraph Low["Low Likelihood"]
+            L_Low["Low Impact:\nRF-2"]
+            L_Med["Medium Impact:\nHF-3"]
+            L_High["High Impact:\nRF-7, RF-8\nCF-2, HF-1\nHF-2, IF-6"]
+            L_Crit["Critical Impact:\nRF-3, IF-4"]
+        end
+        subgraph VeryLow["Very Low Likelihood"]
+            VL_Crit["Critical Impact:\nIF-2, IF-3"]
+        end
+    end
 ```
 
 ### 7.6 Rationale
