@@ -354,7 +354,8 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
 
         // Respect the publicProfile privacy flag — consistent with userService.getUser().
         // Users who have opted out of public profile display appear as Anonymous with no avatar.
-        // id and status are still emitted; they do not reveal identity.
+        // status reflects server presence (ONLINE/IDLE/OFFLINE), not identity — intentionally
+        // emitted even for private-profile users since it reveals no personally identifying information.
         const isPublic = user.publicProfile;
         sendEvent(res, 'member:joined', {
           id: user.id,
