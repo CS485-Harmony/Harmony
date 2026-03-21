@@ -20,6 +20,7 @@ export const EventChannels = {
   CHANNEL_UPDATED: 'harmony:CHANNEL_UPDATED',
   CHANNEL_DELETED: 'harmony:CHANNEL_DELETED',
   SERVER_UPDATED: 'harmony:SERVER_UPDATED',
+  USER_STATUS_CHANGED: 'harmony:USER_STATUS_CHANGED',
 } as const;
 
 export type EventChannelName = (typeof EventChannels)[keyof typeof EventChannels];
@@ -122,6 +123,13 @@ export interface ServerUpdatedPayload {
   timestamp: string;
 }
 
+export interface UserStatusChangedPayload {
+  userId: string;
+  serverId: string;
+  /** Prisma UserStatus enum value; normalized to lowercase before emitting over SSE. */
+  status: 'ONLINE' | 'IDLE' | 'DND' | 'OFFLINE';
+}
+
 // Map each channel to its payload type for type-safe subscribe/publish
 export interface EventPayloadMap {
   [EventChannels.VISIBILITY_CHANGED]: VisibilityChangedPayload;
@@ -138,6 +146,7 @@ export interface EventPayloadMap {
   [EventChannels.CHANNEL_UPDATED]: ChannelUpdatedPayload;
   [EventChannels.CHANNEL_DELETED]: ChannelDeletedPayload;
   [EventChannels.SERVER_UPDATED]: ServerUpdatedPayload;
+  [EventChannels.USER_STATUS_CHANGED]: UserStatusChangedPayload;
 }
 
 export type EventHandler<C extends EventChannelName> = (payload: EventPayloadMap[C]) => void;

@@ -26,6 +26,7 @@ import type {
   ChannelUpdatedPayload,
   ChannelDeletedPayload,
   ServerUpdatedPayload,
+  UserStatusChangedPayload,
   MemberJoinedPayload,
   MemberLeftPayload,
   VisibilityChangedPayload,
@@ -337,6 +338,19 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     },
   );
 
+  // ── Subscribe to member status change events ──────────────────────────────
+  // Status reflects presence (ONLINE/IDLE/OFFLINE) not identity, so it is emitted
+  // regardless of the user's publicProfile setting — consistent with the rationale
+  // documented in PR #202 for member join/leave events.
+  const { unsubscribe: unsubStatusChanged } = eventBus.subscribe(
+    EventChannels.USER_STATUS_CHANGED,
+    (payload: UserStatusChangedPayload) => {
+      if (payload.serverId !== serverId) return;
+      // Normalize Prisma enum ('IDLE') to the lowercase format the frontend expects ('idle').
+      sendEvent(res, 'member:statusChanged', { id: payload.userId, status: payload.status.toLowerCase() });
+    },
+  );
+
   // ── Subscribe to member join/leave events ─────────────────────────────────
   // When a member joins, look up their profile and push the full user object so
   // clients can add the new member to the sidebar without a page reload.
@@ -416,6 +430,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     unsubChannelCreated();
     unsubChannelUpdated();
     unsubChannelDeleted();
+    unsubStatusChanged();
     unsubMemberJoined();
     unsubMemberLeft();
     unsubVisibilityChanged();

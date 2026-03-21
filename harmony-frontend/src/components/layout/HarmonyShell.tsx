@@ -21,7 +21,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useChannelEvents } from '@/hooks/useChannelEvents';
 import { useServerEvents } from '@/hooks/useServerEvents';
 import { useServerListSync } from '@/hooks/useServerListSync';
-import { ChannelType, ChannelVisibility } from '@/types';
+import { ChannelType, ChannelVisibility, UserStatus } from '@/types';
 import { useRouter } from 'next/navigation';
 import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
 import type { Server, Channel, Message, User } from '@/types';
@@ -117,7 +117,7 @@ export function HarmonyShell({
     setPrevChannelsProp(channels);
     setLocalChannels(channels);
   }
-  // Local members state so join/leave events update the sidebar without reload.
+  // Local members state so join/leave/status events update the sidebar without reload.
   const [localMembers, setLocalMembers] = useState<User[]>(members);
   // Reset when the members prop changes (server navigation or SSR revalidation).
   const [prevMembersProp, setPrevMembersProp] = useState(members);
@@ -249,6 +249,10 @@ export function HarmonyShell({
     setLocalMembers(prev => prev.filter(m => m.id !== userId));
   }, []);
 
+  const handleMemberStatusChanged = useCallback(({ id, status }: { id: string; status: UserStatus }) => {
+    setLocalMembers(prev => prev.map(m => (m.id === id ? { ...m, status } : m)));
+  }, []);
+
   // ── Real-time visibility changes ──────────────────────────────────────────
 
   const handleChannelVisibilityChanged = useCallback(
@@ -292,6 +296,7 @@ export function HarmonyShell({
     onChannelDeleted: handleChannelDeleted,
     onMemberJoined: handleMemberJoined,
     onMemberLeft: handleMemberLeft,
+    onMemberStatusChanged: handleMemberStatusChanged,
     onChannelVisibilityChanged: handleChannelVisibilityChanged,
     enabled: isAuthenticated,
   });

@@ -1,8 +1,9 @@
 /**
- * useServerEvents.test.tsx — Issue #185 / #186 / #187
+ * useServerEvents.test.tsx — Issue #185 / #186 / #187 / #231
  *
  * Tests the useServerEvents hook that subscribes to real-time SSE events for
- * channel list updates, member list updates, and visibility changes on a server.
+ * channel list updates, member list updates, member status changes, and
+ * visibility changes on a server.
  *
  * EventSource is mocked to avoid actual network connections.
  */
@@ -170,7 +171,7 @@ describe('useServerEvents — connection', () => {
     expect(mockEventSourceInstance?.close).toHaveBeenCalled();
   });
 
-  it('registers listeners for all six event types', () => {
+  it('registers listeners for all seven event types', () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -179,6 +180,7 @@ describe('useServerEvents — connection', () => {
         onChannelDeleted: jest.fn(),
         onMemberJoined: jest.fn(),
         onMemberLeft: jest.fn(),
+        onMemberStatusChanged: jest.fn(),
         onChannelVisibilityChanged: jest.fn(),
       }),
     );
@@ -192,6 +194,7 @@ describe('useServerEvents — connection', () => {
     expect(addedTypes).toContain('channel:deleted');
     expect(addedTypes).toContain('member:joined');
     expect(addedTypes).toContain('member:left');
+    expect(addedTypes).toContain('member:statusChanged');
     expect(addedTypes).toContain('channel:visibility-changed');
   });
 });
@@ -386,6 +389,100 @@ describe('useServerEvents — member events', () => {
     }).not.toThrow();
 
     expect(onMemberJoined).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Member status change handling ───────────────────────────────────────────
+
+describe('useServerEvents — member status change events', () => {
+  it('calls onMemberStatusChanged with id and status on member:statusChanged event', () => {
+    const onMemberStatusChanged = jest.fn();
+
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onMemberStatusChanged,
+      }),
+    );
+
+    act(() => {
+      mockEventSourceInstance!.simulateEvent('member:statusChanged', {
+        id: 'user-new',
+        status: 'idle',
+      });
+    });
+
+    expect(onMemberStatusChanged).toHaveBeenCalledTimes(1);
+    expect(onMemberStatusChanged).toHaveBeenCalledWith({ id: 'user-new', status: 'idle' });
+  });
+
+  it('does not throw when onMemberStatusChanged is not provided', () => {
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        // onMemberStatusChanged intentionally omitted
+      }),
+    );
+
+    expect(() => {
+      act(() => {
+        mockEventSourceInstance!.simulateEvent('member:statusChanged', {
+          id: 'user-new',
+          status: 'offline',
+        });
+      });
+    }).not.toThrow();
+  });
+
+  it('removes member:statusChanged listener on unmount', () => {
+    const { unmount } = renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onMemberStatusChanged: jest.fn(),
+      }),
+    );
+
+    unmount();
+
+    const removedTypes = (
+      mockEventSourceInstance!.removeEventListener.mock.calls as [string, unknown][]
+    ).map(([type]) => type);
+
+    expect(removedTypes).toContain('member:statusChanged');
+  });
+
+  it('does not call onMemberStatusChanged on malformed JSON', () => {
+    const onMemberStatusChanged = jest.fn();
+
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onMemberStatusChanged,
+      }),
+    );
+
+    expect(() => {
+      act(() => {
+        const badEvent = new MessageEvent('member:statusChanged', { data: 'not-json{{{' });
+        (mockEventSourceInstance!.addEventListener.mock.calls as [string, EventSourceHandler][])
+          .filter(([type]) => type === 'member:statusChanged')
+          .forEach(([, handler]) => handler(badEvent));
+      });
+    }).not.toThrow();
+
+    expect(onMemberStatusChanged).not.toHaveBeenCalled();
   });
 });
 
