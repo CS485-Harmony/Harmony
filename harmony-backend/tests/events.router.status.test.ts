@@ -207,7 +207,8 @@ describe('GET /api/events/server/:serverId — member:statusChanged event', () =
     const body = chunks.join('');
     expect(body).toContain('event: member:statusChanged');
     expect(body).toContain(CHANGING_USER_ID);
-    expect(body).toContain('"status":"IDLE"');
+    // SSE emits lowercase (Prisma enum 'IDLE' → frontend 'idle' via .toLowerCase())
+    expect(body).toContain('"status":"idle"');
   });
 
   it('does not emit member:statusChanged for a different server', async () => {
