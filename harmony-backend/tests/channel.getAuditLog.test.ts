@@ -143,15 +143,15 @@ afterAll(async () => {
 
 describe('channel.getAuditLog — permission gate', () => {
   it('throws UNAUTHORIZED when caller is unauthenticated', async () => {
-    await expect(
-      callerAs(null).getAuditLog({ serverId, channelId }),
-    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(callerAs(null).getAuditLog({ serverId, channelId })).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
   });
 
   it('throws FORBIDDEN when caller is a non-admin member', async () => {
-    await expect(
-      callerAs(memberId).getAuditLog({ serverId, channelId }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(callerAs(memberId).getAuditLog({ serverId, channelId })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
   });
 });
 
@@ -199,8 +199,8 @@ describe('channel.getAuditLog — response shape', () => {
   it('results are ordered newest-first', async () => {
     const result = await callerAs(adminId).getAuditLog({ serverId, channelId });
     for (let i = 1; i < result.entries.length; i++) {
-      const prev = (result.entries[i - 1].timestamp as unknown as Date).getTime();
-      const curr = (result.entries[i].timestamp as unknown as Date).getTime();
+      const prev = new Date(result.entries[i - 1].timestamp as string).getTime();
+      const curr = new Date(result.entries[i].timestamp as string).getTime();
       expect(prev).toBeGreaterThanOrEqual(curr);
     }
   });
@@ -216,7 +216,12 @@ describe('channel.getAuditLog — pagination', () => {
 
   it('respects offset (no overlap between pages)', async () => {
     const first = await callerAs(adminId).getAuditLog({ serverId, channelId, limit: 2, offset: 0 });
-    const second = await callerAs(adminId).getAuditLog({ serverId, channelId, limit: 2, offset: 2 });
+    const second = await callerAs(adminId).getAuditLog({
+      serverId,
+      channelId,
+      limit: 2,
+      offset: 2,
+    });
 
     const firstIds = first.entries.map((e) => e.id);
     const secondIds = second.entries.map((e) => e.id);
