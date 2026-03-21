@@ -126,7 +126,8 @@ export interface ServerUpdatedPayload {
 export interface UserStatusChangedPayload {
   userId: string;
   serverId: string;
-  status: string;
+  /** Prisma UserStatus enum value; normalized to lowercase before emitting over SSE. */
+  status: 'ONLINE' | 'IDLE' | 'DND' | 'OFFLINE';
 }
 
 // Map each channel to its payload type for type-safe subscribe/publish

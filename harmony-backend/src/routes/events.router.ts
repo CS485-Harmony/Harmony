@@ -343,7 +343,8 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     EventChannels.USER_STATUS_CHANGED,
     (payload: UserStatusChangedPayload) => {
       if (payload.serverId !== serverId) return;
-      sendEvent(res, 'member:statusChanged', { id: payload.userId, status: payload.status });
+      // Normalize Prisma enum ('IDLE') to the lowercase format the frontend expects ('idle').
+      sendEvent(res, 'member:statusChanged', { id: payload.userId, status: payload.status.toLowerCase() });
     },
   );
 
