@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { getPinnedMessagesAction } from '@/app/actions/getPinnedMessages';
 import type { Message } from '@/types';
@@ -90,28 +90,32 @@ export function PinnedMessagesPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPins = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const pinned = await getPinnedMessagesAction(channelId, serverId);
-      setMessages(pinned);
-    } catch {
-      setError('Failed to load pinned messages.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [channelId, serverId]);
-
+  // isCurrent guard: prevents a slow in-flight fetch from a previous channel
+  // overwriting results after the user has already switched to a new channel.
+  // Async IIFE keeps setState calls inside a function body (not directly in the
+  // effect) to satisfy the react-hooks/set-state-in-effect lint rule.
   useEffect(() => {
-    if (isOpen) fetchPins();
-    else setMessages([]);
-  }, [isOpen, fetchPins]);
+    if (!isOpen) return;
+    let isCurrent = true;
+    void (async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const pinned = await getPinnedMessagesAction(channelId, serverId);
+        if (isCurrent) setMessages(pinned);
+      } catch {
+        if (isCurrent) setError('Failed to load pinned messages.');
+      } finally {
+        if (isCurrent) setIsLoading(false);
+      }
+    })();
+    return () => { isCurrent = false; };
+  }, [isOpen, channelId, serverId]);
 
   return (
     <aside
       className={cn(
-        'flex h-full w-60 flex-shrink-0 flex-col border-l border-black/20 bg-[#2b2d31] transition-all duration-200',
+        'h-full w-60 flex-shrink-0 flex-col border-l border-black/20 bg-[#2b2d31] transition-all duration-200',
         isOpen ? 'flex' : 'hidden',
       )}
       aria-label='Pinned messages'

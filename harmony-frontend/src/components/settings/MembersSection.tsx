@@ -54,6 +54,9 @@ const FRONTEND_TO_BACKEND_ROLE: Record<string, RoleOption> = {
   admin: 'ADMIN',
   moderator: 'MODERATOR',
   member: 'MEMBER',
+  // Guest is a read-only role — no backend promotion path to it via changeRole,
+  // so map it to MEMBER so the select reflects the closest editable role.
+  guest: 'MEMBER',
 };
 
 const BG = {

@@ -217,7 +217,7 @@ export function MessageItem({
       messageId={message.id}
       serverId={serverId}
       canPin={canPin}
-      initialPinned={message.pinned}
+      initialPinned={!!message.pinned}
     />
   );
 

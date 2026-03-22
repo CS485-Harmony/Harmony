@@ -190,25 +190,21 @@ const BACKEND_ROLE_MAP: Record<string, ServerMemberInfo['role']> = {
  * Returns all members of a server with their role info, sorted by role hierarchy.
  */
 export async function getServerMembersWithRole(serverId: string): Promise<ServerMemberInfo[]> {
-  try {
-    const data = await trpcQuery<Array<{
-      userId: string;
-      serverId: string;
-      role: string;
-      joinedAt: string;
-      user: { id: string; username: string; displayName: string; avatarUrl: string | null };
-    }>>('serverMember.getMembers', { serverId });
-    return (data ?? []).map(m => ({
-      userId: m.userId,
-      username: m.user.username,
-      displayName: m.user.displayName ?? null,
-      avatarUrl: m.user.avatarUrl,
-      role: BACKEND_ROLE_MAP[m.role] ?? 'member',
-      joinedAt: m.joinedAt,
-    }));
-  } catch {
-    return [];
-  }
+  const data = await trpcQuery<Array<{
+    userId: string;
+    serverId: string;
+    role: string;
+    joinedAt: string;
+    user: { id: string; username: string; displayName: string; avatarUrl: string | null };
+  }>>('serverMember.getMembers', { serverId });
+  return (data ?? []).map(m => ({
+    userId: m.userId,
+    username: m.user.username,
+    displayName: m.user.displayName ?? null,
+    avatarUrl: m.user.avatarUrl,
+    role: BACKEND_ROLE_MAP[m.role] ?? 'member',
+    joinedAt: m.joinedAt,
+  }));
 }
 
 /**
