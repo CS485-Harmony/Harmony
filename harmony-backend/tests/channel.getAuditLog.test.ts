@@ -199,8 +199,8 @@ describe('channel.getAuditLog — response shape', () => {
   it('results are ordered newest-first', async () => {
     const result = await callerAs(adminId).getAuditLog({ serverId, channelId });
     for (let i = 1; i < result.entries.length; i++) {
-      const prev = new Date(result.entries[i - 1].timestamp as string).getTime();
-      const curr = new Date(result.entries[i].timestamp as string).getTime();
+      const prev = result.entries[i - 1].timestamp.getTime();
+      const curr = result.entries[i].timestamp.getTime();
       expect(prev).toBeGreaterThanOrEqual(curr);
     }
   });
