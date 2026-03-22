@@ -59,10 +59,7 @@ export async function publicGet<T>(path: string): Promise<T | null> {
  * Calls a tRPC query procedure via HTTP GET.
  * Input is JSON-serialized as a query parameter.
  */
-export async function trpcQuery<T>(
-  procedure: string,
-  input?: unknown,
-): Promise<T> {
+export async function trpcQuery<T>(procedure: string, input?: unknown): Promise<T> {
   const url = new URL(`${BASE}/trpc/${procedure}`);
   if (input !== undefined) {
     url.searchParams.set('input', JSON.stringify(input));
@@ -94,17 +91,15 @@ export async function trpcQuery<T>(
 
   const json = await res.json();
   const data = json.result?.data;
-  if (data === undefined) throw new Error(`tRPC query [${procedure}]: response missing result.data`);
+  if (data === undefined)
+    throw new Error(`tRPC query [${procedure}]: response missing result.data`);
   return data as T;
 }
 
 /**
  * Calls a tRPC mutation procedure via HTTP POST.
  */
-export async function trpcMutate<T>(
-  procedure: string,
-  input?: unknown,
-): Promise<T> {
+export async function trpcMutate<T>(procedure: string, input?: unknown): Promise<T> {
   const token = await getAuthToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -134,6 +129,7 @@ export async function trpcMutate<T>(
 
   const json = await res.json();
   const data = json.result?.data;
-  if (data === undefined) throw new Error(`tRPC mutation [${procedure}]: response missing result.data`);
+  if (data === undefined)
+    throw new Error(`tRPC mutation [${procedure}]: response missing result.data`);
   return data as T;
 }

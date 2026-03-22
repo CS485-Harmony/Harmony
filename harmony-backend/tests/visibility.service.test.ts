@@ -338,7 +338,7 @@ describe('visibilityService.setVisibility — audit logging', () => {
     expect(result.auditLogId).toBeTruthy();
 
     const auditEntry = await prisma.visibilityAuditLog.findUnique({
-      where: { id: result.auditLogId },
+      where: { id: result.auditLogId! },
     });
     expect(auditEntry).not.toBeNull();
     expect(auditEntry!.channelId).toBe(textChannelId);

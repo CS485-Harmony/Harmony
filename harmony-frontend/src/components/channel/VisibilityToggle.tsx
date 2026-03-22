@@ -200,6 +200,8 @@ export interface VisibilityToggleProps {
   initialVisibility: ChannelVisibility;
   /** When true, the control is rendered but not interactive (non-admin users). */
   disabled?: boolean;
+  /** Called after a successful visibility change so parent components can refresh. */
+  onVisibilityChanged?: (newVisibility: ChannelVisibility) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -209,6 +211,7 @@ export function VisibilityToggle({
   channelSlug,
   initialVisibility,
   disabled = false,
+  onVisibilityChanged,
 }: VisibilityToggleProps) {
   const { showToast } = useToast();
   const [selected, setSelected] = useState<ChannelVisibility>(initialVisibility);
@@ -228,13 +231,20 @@ export function VisibilityToggle({
   async function applyVisibility(visibility: ChannelVisibility) {
     if (isSavingRef.current) return;
     isSavingRef.current = true;
+    // Capture previous value for rollback on error.
+    const previousVisibility = selected;
+    // Optimistic update: show the new value immediately.
+    setSelected(visibility);
+    setFocusedIdx(OPTIONS.findIndex((o) => o.value === visibility));
     setIsLoading(true);
     try {
       await updateChannelVisibility(serverSlug, channelSlug, visibility);
-      setSelected(visibility);
-      setFocusedIdx(OPTIONS.findIndex((o) => o.value === visibility));
       showToast({ message: 'Channel visibility updated.', type: 'success' });
+      onVisibilityChanged?.(visibility);
     } catch (err) {
+      // Rollback optimistic update on failure.
+      setSelected(previousVisibility);
+      setFocusedIdx(OPTIONS.findIndex((o) => o.value === previousVisibility));
       showToast({
         message: getUserErrorMessage(err, 'Failed to update visibility.'),
         type: 'error',

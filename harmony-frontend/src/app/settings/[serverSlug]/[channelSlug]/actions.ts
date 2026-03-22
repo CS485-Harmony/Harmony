@@ -8,9 +8,10 @@
  */
 
 import { revalidatePath } from 'next/cache';
-import { updateChannel, getChannel } from '@/services/channelService';
+import { updateChannel, getChannel, getAuditLog } from '@/services/channelService';
 import { getServer } from '@/services/serverService';
 import type { Channel } from '@/types';
+import type { AuditLogPage } from '@/services/channelService';
 
 export async function saveChannelSettings(
   serverSlug: string,
@@ -54,4 +55,21 @@ export async function saveChannelSettings(
   revalidatePath(`/channels/${serverSlug}`, 'layout');
   revalidatePath(`/c/${serverSlug}`, 'layout');
   revalidatePath(`/settings/${serverSlug}`, 'layout');
+}
+
+/**
+ * Server action: fetch paginated audit log for a channel.
+ * Resolves IDs from route slugs (don't trust raw IDs from the client),
+ * matching the same defense-in-depth pattern used by saveChannelSettings.
+ */
+export async function fetchAuditLog(
+  serverSlug: string,
+  channelSlug: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<AuditLogPage> {
+  const channel = await getChannel(serverSlug, channelSlug);
+  if (!channel) throw new Error('Channel not found');
+
+  // channel.serverId is already resolved by getChannel — no redundant server lookup needed.
+  return getAuditLog(channel.serverId, channel.id, options);
 }

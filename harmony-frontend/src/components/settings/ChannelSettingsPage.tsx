@@ -6,13 +6,15 @@
 
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn, getUserErrorMessage } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
-import { saveChannelSettings } from '@/app/settings/[serverSlug]/[channelSlug]/actions';
+import { saveChannelSettings, fetchAuditLog } from '@/app/settings/[serverSlug]/[channelSlug]/actions';
 import { VisibilityToggle } from '@/components/channel/VisibilityToggle';
 import type { Channel } from '@/types';
+import type { AuditLogEntry, AuditLogPage } from '@/services/channelService';
+import { ChannelVisibility } from '@/types';
 
 // ─── Discord colour tokens ────────────────────────────────────────────────────
 
@@ -341,6 +343,178 @@ function PermissionsSection() {
   );
 }
 
+// ─── Visibility Section (toggle + audit log) ──────────────────────────────────
+
+const VISIBILITY_LABEL: Record<ChannelVisibility, string> = {
+  [ChannelVisibility.PUBLIC_INDEXABLE]: 'Public (Search Indexed)',
+  [ChannelVisibility.PUBLIC_NO_INDEX]: 'Public (Not Indexed)',
+  [ChannelVisibility.PRIVATE]: 'Private',
+};
+
+function AuditLogTable({ entries }: { entries: AuditLogEntry[] }) {
+  if (entries.length === 0) {
+    return <p className='text-sm text-gray-500'>No visibility changes recorded yet.</p>;
+  }
+  return (
+    <div className='overflow-x-auto'>
+      <table className='w-full text-left text-xs text-gray-400'>
+        <thead>
+          <tr className='border-b border-[#40444b]'>
+            <th className='pb-2 pr-4 font-semibold uppercase tracking-wide'>Date</th>
+            <th className='pb-2 pr-4 font-semibold uppercase tracking-wide'>From</th>
+            <th className='pb-2 font-semibold uppercase tracking-wide'>To</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry) => {
+            const oldVis = (entry.oldValue as { visibility?: string }).visibility as ChannelVisibility | undefined;
+            const newVis = (entry.newValue as { visibility?: string }).visibility as ChannelVisibility | undefined;
+            return (
+              <tr key={entry.id} className='border-b border-[#2f3136]'>
+                <td className='py-2 pr-4 whitespace-nowrap'>
+                  {new Date(entry.timestamp).toLocaleString()}
+                </td>
+                <td className='py-2 pr-4'>
+                  {oldVis ? VISIBILITY_LABEL[oldVis] ?? oldVis : '—'}
+                </td>
+                <td className='py-2'>
+                  {newVis ? VISIBILITY_LABEL[newVis] ?? newVis : '—'}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const AUDIT_PAGE_SIZE = 10;
+
+function VisibilitySection({
+  channel,
+  serverSlug,
+  disabled,
+}: {
+  channel: Channel;
+  serverSlug: string;
+  disabled: boolean;
+}) {
+  const [auditLog, setAuditLog] = useState<AuditLogPage | null>(null);
+  const [auditOffset, setAuditOffset] = useState(0);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  // Monotonically-incrementing token: only the response from the latest in-flight
+  // request is applied. Older in-flight fetches (channel switch, rapid pagination)
+  // compare against this ref and discard their results if they are stale.
+  const requestTokenRef = useRef(0);
+
+  const loadAuditLog = useCallback(async (offset: number) => {
+    const token = ++requestTokenRef.current;
+    setAuditLoading(true);
+    setAuditError(null);
+    try {
+      const page = await fetchAuditLog(serverSlug, channel.slug, {
+        limit: AUDIT_PAGE_SIZE,
+        offset,
+      });
+      if (requestTokenRef.current !== token) return; // stale — discard
+      setAuditLog(page);
+      setAuditOffset(offset); // commit offset only after a successful load — keeps range text in sync with displayed entries
+    } catch (err) {
+      if (requestTokenRef.current !== token) return;
+      setAuditError(getUserErrorMessage(err, 'Failed to load audit log.'));
+    } finally {
+      if (requestTokenRef.current === token) setAuditLoading(false);
+    }
+  }, [serverSlug, channel.slug]);
+
+  // Load audit log when section mounts or channel changes.
+  useEffect(() => {
+    setAuditOffset(0);
+    void loadAuditLog(0);
+  }, [loadAuditLog]);
+
+  function handlePrev() {
+    void loadAuditLog(Math.max(0, auditOffset - AUDIT_PAGE_SIZE));
+  }
+
+  function handleNext() {
+    void loadAuditLog(auditOffset + AUDIT_PAGE_SIZE);
+  }
+
+  // Reset to page 0 and reload after a visibility change.
+  function handleVisibilityChanged() {
+    void loadAuditLog(0);
+  }
+
+  const hasMore = auditLog !== null && auditOffset + AUDIT_PAGE_SIZE < auditLog.total;
+
+  return (
+    <div className='max-w-lg space-y-8'>
+      <VisibilityToggle
+        serverSlug={serverSlug}
+        channelSlug={channel.slug}
+        initialVisibility={channel.visibility}
+        disabled={disabled}
+        onVisibilityChanged={handleVisibilityChanged}
+      />
+
+      {/* Audit log */}
+      <div>
+        <h3 className='mb-3 text-sm font-semibold uppercase tracking-wide text-gray-300'>
+          Visibility Change History
+        </h3>
+
+        {/* Initial load spinner — only shown before first data arrives */}
+        {auditLoading && !auditLog && (
+          <div className='flex items-center gap-2 text-sm text-gray-400'>
+            <svg className='h-4 w-4 animate-spin' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={2}>
+              <path d='M21 12a9 9 0 1 1-6.219-8.56' />
+            </svg>
+            Loading…
+          </div>
+        )}
+
+        {!auditLoading && auditError && (
+          <p role='alert' className='text-sm text-red-400'>{auditError}</p>
+        )}
+
+        {/* Keep previous entries visible while paginating to avoid height collapse
+            and scroll jump. Dim the table to signal the update is in-flight. */}
+        {auditLog && (
+          <div className={cn('transition-opacity', auditLoading ? 'opacity-50' : 'opacity-100')}>
+            <AuditLogTable entries={auditLog.entries} />
+            {auditLog.total > AUDIT_PAGE_SIZE && (
+              <div className='mt-3 flex items-center gap-3 text-xs text-gray-400'>
+                <button
+                  type='button'
+                  onClick={handlePrev}
+                  disabled={auditOffset === 0 || auditLoading}
+                  className='rounded px-2 py-1 hover:bg-[#3d4148] disabled:opacity-40'
+                >
+                  ← Prev
+                </button>
+                <span>
+                  {auditOffset + 1}–{Math.min(auditOffset + AUDIT_PAGE_SIZE, auditLog.total)} of {auditLog.total}
+                </span>
+                <button
+                  type='button'
+                  onClick={handleNext}
+                  disabled={!hasMore || auditLoading}
+                  className='rounded px-2 py-1 hover:bg-[#3d4148] disabled:opacity-40'
+                >
+                  Next →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Loading spinner ──────────────────────────────────────────────────────────
 
 function LoadingScreen() {
@@ -494,10 +668,9 @@ export function ChannelSettingsPage({ channel, serverSlug, serverOwnerId }: Chan
           )}
           {activeSection === 'permissions' && <PermissionsSection />}
           {activeSection === 'visibility' && (
-            <VisibilityToggle
+            <VisibilitySection
+              channel={channel}
               serverSlug={serverSlug}
-              channelSlug={channel.slug}
-              initialVisibility={channel.visibility}
               disabled={!isAdmin(serverOwnerId)}
             />
           )}

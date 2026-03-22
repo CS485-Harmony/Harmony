@@ -14,9 +14,12 @@ import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
 function toFrontendChannel(raw: Record<string, unknown>): Channel {
   // Warn on missing required fields to catch backend shape mismatches early.
   if (typeof raw.id !== 'string') console.warn('[toFrontendChannel] missing or non-string "id"');
-  if (typeof raw.serverId !== 'string') console.warn('[toFrontendChannel] missing or non-string "serverId"');
-  if (typeof raw.slug !== 'string') console.warn('[toFrontendChannel] missing or non-string "slug"');
-  if (typeof raw.createdAt !== 'string') console.warn('[toFrontendChannel] missing or non-string "createdAt"');
+  if (typeof raw.serverId !== 'string')
+    console.warn('[toFrontendChannel] missing or non-string "serverId"');
+  if (typeof raw.slug !== 'string')
+    console.warn('[toFrontendChannel] missing or non-string "slug"');
+  if (typeof raw.createdAt !== 'string')
+    console.warn('[toFrontendChannel] missing or non-string "createdAt"');
   return {
     id: raw.id as string,
     serverId: raw.serverId as string,
@@ -59,53 +62,56 @@ export async function getChannels(serverId: string): Promise<Channel[]> {
  * filled in from context (serverId from the server lookup, visibility hardcoded
  * to PUBLIC_INDEXABLE).
  */
-export const getChannel = cache(async (serverSlug: string, channelSlug: string): Promise<Channel | null> => {
-  // Resolve server first — needed both to supply serverId for the public channel
-  // list and as input to the tRPC fallback.
-  const serverData = await publicGet<Record<string, unknown>>(
-    `/servers/${encodeURIComponent(serverSlug)}`,
-  );
-  if (!serverData) return null;
-  const serverId = serverData.id as string;
-
-  // Try the public REST endpoint. It returns only PUBLIC_INDEXABLE channels, so
-  // a hit here means we can serve the guest view without an auth cookie.
-  try {
-    const publicData = await publicGet<{ channels: Record<string, unknown>[] }>(
-      `/servers/${encodeURIComponent(serverSlug)}/channels`,
+export const getChannel = cache(
+  async (serverSlug: string, channelSlug: string): Promise<Channel | null> => {
+    // Resolve server first — needed both to supply serverId for the public channel
+    // list and as input to the tRPC fallback.
+    const serverData = await publicGet<Record<string, unknown>>(
+      `/servers/${encodeURIComponent(serverSlug)}`,
     );
-    if (publicData) {
-      const match = publicData.channels.find(
-        (c) => (c.slug as string) === channelSlug,
-      );
-      if (match) {
-        return toFrontendChannel({
-          ...match,
-          serverId,
-          visibility: 'PUBLIC_INDEXABLE',
-          position: (match.position as number | undefined) ?? 0,
-          createdAt: (match.createdAt as string | undefined) ?? new Date(0).toISOString(),
-        });
-      }
-    }
-  } catch {
-    // Public endpoint failed — continue to tRPC fallback.
-  }
+    if (!serverData) return null;
+    const serverId = serverData.id as string;
 
-  // Fall back to the authenticated tRPC procedure (for PRIVATE / PUBLIC_NO_INDEX channels).
-  try {
-    const data = await trpcQuery<Record<string, unknown>>('channel.getChannel', {
-      serverId,
-      serverSlug,
-      channelSlug,
-    });
-    if (!data) return null;
-    return toFrontendChannel(data);
-  } catch (error) {
-    console.error(`[channelService.getChannel] API call failed for "${serverSlug}/${channelSlug}":`, error);
-    return null;
-  }
-});
+    // Try the public REST endpoint. It returns only PUBLIC_INDEXABLE channels, so
+    // a hit here means we can serve the guest view without an auth cookie.
+    try {
+      const publicData = await publicGet<{ channels: Record<string, unknown>[] }>(
+        `/servers/${encodeURIComponent(serverSlug)}/channels`,
+      );
+      if (publicData) {
+        const match = publicData.channels.find(c => (c.slug as string) === channelSlug);
+        if (match) {
+          return toFrontendChannel({
+            ...match,
+            serverId,
+            visibility: 'PUBLIC_INDEXABLE',
+            position: (match.position as number | undefined) ?? 0,
+            createdAt: (match.createdAt as string | undefined) ?? new Date(0).toISOString(),
+          });
+        }
+      }
+    } catch {
+      // Public endpoint failed — continue to tRPC fallback.
+    }
+
+    // Fall back to the authenticated tRPC procedure (for PRIVATE / PUBLIC_NO_INDEX channels).
+    try {
+      const data = await trpcQuery<Record<string, unknown>>('channel.getChannel', {
+        serverId,
+        serverSlug,
+        channelSlug,
+      });
+      if (!data) return null;
+      return toFrontendChannel(data);
+    } catch (error) {
+      console.error(
+        `[channelService.getChannel] API call failed for "${serverSlug}/${channelSlug}":`,
+        error,
+      );
+      return null;
+    }
+  },
+);
 
 /**
  * Updates the visibility of a channel via tRPC.
@@ -114,11 +120,8 @@ export const getChannel = cache(async (serverSlug: string, channelSlug: string):
 export async function updateVisibility(
   channelId: string,
   visibility: ChannelVisibility,
-  serverId?: string,
+  serverId: string,
 ): Promise<void> {
-  if (!serverId) {
-    throw new Error('serverId is required for updateVisibility');
-  }
   await trpcMutate('channel.setVisibility', {
     serverId,
     channelId,
@@ -162,13 +165,73 @@ export async function createChannel(
   return toFrontendChannel(data);
 }
 
+export interface AuditLogEntry {
+  id: string;
+  channelId: string;
+  actorId: string;
+  action: string;
+  oldValue: Record<string, unknown>;
+  newValue: Record<string, unknown>;
+  timestamp: string;
+  ipAddress: string;
+  userAgent: string;
+}
+
+export interface AuditLogPage {
+  entries: AuditLogEntry[];
+  total: number;
+}
+
+/** Validates an audit log entry from the API, guarding against schema changes. */
+function toAuditLogEntry(raw: Record<string, unknown>): AuditLogEntry {
+  // Warn on missing required string fields, mirroring toFrontendChannel.
+  if (typeof raw.id !== 'string') console.warn('[toAuditLogEntry] missing or non-string "id"');
+  if (typeof raw.channelId !== 'string')
+    console.warn('[toAuditLogEntry] missing or non-string "channelId"');
+  if (typeof raw.actorId !== 'string')
+    console.warn('[toAuditLogEntry] missing or non-string "actorId"');
+  if (typeof raw.action !== 'string')
+    console.warn('[toAuditLogEntry] missing or non-string "action"');
+  const ts = raw.timestamp;
+  const validTimestamp =
+    typeof ts === 'string' && !isNaN(new Date(ts).getTime())
+      ? ts
+      : (() => {
+          console.warn('[toAuditLogEntry] missing or invalid "timestamp":', ts);
+          return new Date(0).toISOString();
+        })();
+  return {
+    id: raw.id as string,
+    channelId: raw.channelId as string,
+    actorId: raw.actorId as string,
+    action: raw.action as string,
+    oldValue: raw.oldValue as Record<string, unknown>,
+    newValue: raw.newValue as Record<string, unknown>,
+    timestamp: validTimestamp,
+    ipAddress: raw.ipAddress as string,
+    userAgent: raw.userAgent as string,
+  };
+}
+
+/**
+ * Fetches paginated visibility audit log for a channel via tRPC.
+ */
+export async function getAuditLog(
+  serverId: string,
+  channelId: string,
+  options: { limit?: number; offset?: number; startDate?: string } = {},
+): Promise<AuditLogPage> {
+  const data = await trpcQuery<{ entries: Record<string, unknown>[]; total: number }>(
+    'channel.getAuditLog',
+    { serverId, channelId, ...options },
+  );
+  return { entries: data.entries.map(toAuditLogEntry), total: data.total };
+}
+
 /**
  * Deletes a channel by ID via tRPC. Returns true if deleted.
  */
-export async function deleteChannel(channelId: string, serverId?: string): Promise<boolean> {
-  if (!serverId) {
-    throw new Error('serverId is required for deleteChannel');
-  }
+export async function deleteChannel(channelId: string, serverId: string): Promise<boolean> {
   await trpcMutate('channel.deleteChannel', { serverId, channelId });
   return true;
 }

@@ -32,7 +32,8 @@ export interface VisibilityChangeResult {
   channelId: string;
   oldVisibility: ChannelVisibility;
   newVisibility: ChannelVisibility;
-  auditLogId: string;
+  /** Null when the request was a no-op (visibility unchanged — no audit entry created). */
+  auditLogId: string | null;
 }
 
 export const visibilityService = {
@@ -66,10 +67,15 @@ export const visibilityService = {
 
     // Atomic DB write: read current state inside the transaction to avoid a
     // race where two concurrent calls record stale oldVisibility.
-    const { updatedChannel, auditEntry, oldVisibility } = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const current = await tx.channel.findUnique({ where: { id: channelId } });
       if (!current || current.serverId !== serverId) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
+      }
+
+      // No-op guard: skip DB write, audit log, and event emission if visibility is unchanged.
+      if (current.visibility === visibility) {
+        return { isNoOp: true as const, oldVisibility: current.visibility };
       }
 
       // VOICE channels cannot be made PUBLIC_INDEXABLE
@@ -105,14 +111,24 @@ export const visibilityService = {
         tx,
       );
 
-      return { updatedChannel: updated, auditEntry: audit, oldVisibility: current.visibility };
+      return { isNoOp: false as const, updatedChannel: updated, auditEntry: audit, oldVisibility: current.visibility };
     });
+
+    if (result.isNoOp) {
+      return {
+        success: true,
+        channelId,
+        oldVisibility: result.oldVisibility,
+        newVisibility: visibility,
+        auditLogId: null,
+      };
+    }
 
     // Publish event after successful commit (fire-and-forget)
     void eventBus.publish(EventChannels.VISIBILITY_CHANGED, {
-      channelId: updatedChannel.id,
-      serverId: updatedChannel.serverId,
-      oldVisibility,
+      channelId: result.updatedChannel.id,
+      serverId: result.updatedChannel.serverId,
+      oldVisibility: result.oldVisibility,
       newVisibility: visibility,
       actorId,
       timestamp: new Date().toISOString(),
@@ -121,9 +137,9 @@ export const visibilityService = {
     return {
       success: true,
       channelId,
-      oldVisibility,
+      oldVisibility: result.oldVisibility,
       newVisibility: visibility,
-      auditLogId: auditEntry.id,
+      auditLogId: result.auditEntry.id,
     };
   },
 };
