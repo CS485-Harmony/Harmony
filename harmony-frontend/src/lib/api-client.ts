@@ -164,8 +164,12 @@ class ApiClient {
   }
 
   /** Call a tRPC query procedure (GET). Returns the unwrapped data. */
-  async trpcQuery<T>(procedure: string): Promise<T> {
-    const res = await this.client.get<TrpcResponse<T>>(`/trpc/${procedure}`);
+  async trpcQuery<T>(procedure: string, input?: unknown): Promise<T> {
+    const url =
+      input !== undefined
+        ? `/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
+        : `/trpc/${procedure}`;
+    const res = await this.client.get<TrpcResponse<T>>(url);
     return res.data.result.data;
   }
 

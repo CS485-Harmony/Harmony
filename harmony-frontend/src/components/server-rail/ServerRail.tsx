@@ -93,6 +93,7 @@ export function ServerRail({
   currentServerId,
   basePath,
   onAddServer,
+  onBrowseServers,
   isMobileVisible = false,
 }: {
   servers: Server[];
@@ -101,6 +102,8 @@ export function ServerRail({
   currentServerId: string;
   basePath: string;
   onAddServer?: () => void;
+  /** Opens the Browse Public Servers modal. */
+  onBrowseServers?: () => void;
   /** When true, the rail is shown on mobile (inside the menu drawer). */
   isMobileVisible?: boolean;
 }) {
@@ -175,8 +178,31 @@ export function ServerRail({
         );
       })}
 
-      {/* Divider before Add Server */}
+      {/* Divider before actions */}
       <div className='mx-auto h-0.5 w-8 rounded-full bg-[#36393f]' />
+
+      {/* Browse Public Servers */}
+      <button
+        type='button'
+        title='Browse Public Servers'
+        aria-label='Browse Public Servers'
+        className='group relative flex items-center'
+        disabled={!onBrowseServers}
+        onClick={onBrowseServers}
+      >
+        <div className='flex h-12 w-12 items-center justify-center rounded-[24px] bg-[#36393f] text-[#3ba55c] transition-all duration-200 group-hover:rounded-[16px] group-hover:bg-[#3ba55c] group-hover:text-white'>
+          {/* Compass / explore icon */}
+          <svg
+            className='h-6 w-6'
+            viewBox='0 0 24 24'
+            fill='currentColor'
+            aria-hidden='true'
+            focusable='false'
+          >
+            <path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5.5-2.5l7.51-3.49L17.5 6.5 9.99 9.99 6.5 17.5zm5.5-6.6c.61 0 1.1.49 1.1 1.1s-.49 1.1-1.1 1.1-1.1-.49-1.1-1.1.49-1.1 1.1-1.1z' />
+          </svg>
+        </div>
+      </button>
 
       {/* Add Server */}
       <button

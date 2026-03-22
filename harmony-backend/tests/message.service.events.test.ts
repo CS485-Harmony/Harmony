@@ -26,19 +26,40 @@ jest.mock('../src/events/eventBus', () => ({
 
 const mockMessageCreate = jest.fn();
 const mockMessageUpdate = jest.fn();
+const mockMessageUpdateMany = jest.fn();
 const mockMessageFindUnique = jest.fn();
 const mockChannelFindUnique = jest.fn();
+
+const mockExecuteRaw = jest.fn().mockResolvedValue(1);
+
+// $transaction: execute the callback with the same mock client
+const mockTransaction = jest.fn((cb: (tx: unknown) => Promise<unknown>) =>
+  cb({
+    message: {
+      create: mockMessageCreate,
+      update: mockMessageUpdate,
+      updateMany: mockMessageUpdateMany,
+      findUnique: mockMessageFindUnique,
+    },
+    channel: {
+      findUnique: mockChannelFindUnique,
+    },
+    $executeRaw: mockExecuteRaw,
+  }),
+);
 
 jest.mock('../src/db/prisma', () => ({
   prisma: {
     message: {
       create: mockMessageCreate,
       update: mockMessageUpdate,
+      updateMany: mockMessageUpdateMany,
       findUnique: mockMessageFindUnique,
     },
     channel: {
       findUnique: mockChannelFindUnique,
     },
+    $transaction: mockTransaction,
   },
 }));
 
@@ -82,6 +103,8 @@ const MOCK_MESSAGE = {
   isDeleted: false,
   pinned: false,
   pinnedAt: null,
+  parentMessageId: null,
+  replyCount: 0,
   author: { id: AUTHOR_ID, username: 'testuser', displayName: 'Test User', avatarUrl: null },
   attachments: [],
   channel: { serverId: SERVER_ID },

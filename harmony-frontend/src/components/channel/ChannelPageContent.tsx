@@ -2,6 +2,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getServers, getServerMembers } from '@/services/serverService';
 import { getChannels } from '@/services/channelService';
 import { getMessages } from '@/services/messageService';
+import { getCurrentUser } from '@/services/authService';
 import { HarmonyShell } from '@/components/layout/HarmonyShell';
 import { VisibilityGuard } from '@/components/channel/VisibilityGuard';
 
@@ -43,11 +44,20 @@ export async function ChannelPageContent({
   ).flat();
 
   // Service returns newest-first (both public and tRPC paths); reverse for chronological display
-  const [{ messages }, members] = await Promise.all([
+  const [{ messages }, members, currentUser] = await Promise.all([
     getMessages(channel.id, 1, { serverId: server.id }),
     getServerMembers(server.id),
+    getCurrentUser(),
   ]);
   const sortedMessages = [...messages].reverse();
+
+  // Derive the current user's server-scoped admin status from the member list.
+  // We cannot rely on AuthContext isAdmin() with no arg here because it checks
+  // the global User.role, which mapBackendUser always sets to 'member' for
+  // non-system-admin users. The member list carries the correct server-scoped role.
+  const currentMember = currentUser ? members.find(m => m.id === currentUser.id) : undefined;
+  const isServerAdmin =
+    currentMember?.role === 'admin' || currentMember?.role === 'owner';
 
   const shell = (
     <HarmonyShell
@@ -63,7 +73,12 @@ export async function ChannelPageContent({
   );
 
   return (
-    <VisibilityGuard visibility={channel.visibility} isLoading={false}>
+    <VisibilityGuard
+      visibility={channel.visibility}
+      isLoading={false}
+      serverOwnerId={server.ownerId}
+      isServerAdmin={isServerAdmin}
+    >
       {shell}
     </VisibilityGuard>
   );

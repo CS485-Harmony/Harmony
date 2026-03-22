@@ -69,9 +69,13 @@ function DateSeparator({ label }: { label: string }) {
 interface MessageListProps {
   channel: Channel;
   messages: Message[];
+  /** Server ID passed to MessageItem for pin/unpin actions. */
+  serverId?: string;
+  /** When true, shows the pin/unpin option on message hover. Grant to MODERATOR+. */
+  canPin?: boolean;
 }
 
-export function MessageList({ channel, messages }: MessageListProps) {
+export function MessageList({ channel, messages, serverId, canPin }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // #c7: only auto-scroll when user is already near the bottom
@@ -144,7 +148,7 @@ export function MessageList({ channel, messages }: MessageListProps) {
             <div key={group.messages[0]?.id || gi}>
               {showDateSeparator && <DateSeparator label={group.dateLabel} />}
               {group.messages.map((msg, mi) => (
-                <MessageItem key={msg.id} message={msg} showHeader={mi === 0} />
+                <MessageItem key={msg.id} message={msg} showHeader={mi === 0} serverId={serverId} canPin={canPin} />
               ))}
             </div>
           );

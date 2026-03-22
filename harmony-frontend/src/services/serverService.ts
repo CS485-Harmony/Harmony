@@ -5,7 +5,7 @@
  */
 
 import { cache } from 'react';
-import type { Server, User, CreateServerInput } from '@/types';
+import type { Server, User, CreateServerInput, ServerMemberInfo } from '@/types';
 import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
 
 // ─── Type adapters ────────────────────────────────────────────────────────────
@@ -25,6 +25,7 @@ function toFrontendServer(raw: Record<string, unknown>): Server {
     description: (raw.description as string | undefined) ?? undefined,
     bannerUrl: raw.bannerUrl as string | undefined,
     memberCount: (raw.memberCount as number | undefined) ?? 0,
+    isPublic: raw.isPublic as boolean | undefined,
     createdAt: raw.createdAt as string,
     updatedAt: raw.updatedAt as string | undefined,
   };
@@ -102,6 +103,19 @@ function toFrontendMember(raw: BackendServerMember): User {
 }
 
 /**
+ * Fetches a server by slug via the authenticated tRPC endpoint, ensuring ownerId is populated.
+ */
+export async function getServerAuthenticated(slug: string): Promise<Server | null> {
+  try {
+    const data = await trpcQuery<Record<string, unknown>>('server.getServer', { slug });
+    if (!data) return null;
+    return toFrontendServer(data);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Returns all members of a server by server ID.
  * Calls the authenticated tRPC `server.getMembers` endpoint.
  * Returns [] if the request fails (e.g. unauthenticated callers on guest views).
@@ -121,13 +135,14 @@ export async function getServerMembers(serverId: string): Promise<User[]> {
  */
 export async function updateServer(
   id: string,
-  patch: Partial<Pick<Server, 'name' | 'description' | 'icon'>>,
+  patch: Partial<Pick<Server, 'name' | 'description' | 'icon' | 'isPublic'>>,
 ): Promise<Server> {
   const data = await trpcMutate<Record<string, unknown>>('server.updateServer', {
     id,
     ...(patch.name !== undefined && { name: patch.name }),
     ...(patch.description !== undefined && { description: patch.description }),
     ...(patch.icon !== undefined && { iconUrl: patch.icon }),
+    ...(patch.isPublic !== undefined && { isPublic: patch.isPublic }),
   });
   return toFrontendServer(data);
 }
@@ -141,6 +156,14 @@ export async function deleteServer(id: string): Promise<boolean> {
 }
 
 /**
+ * Join a public server by ID via the tRPC API.
+ * Throws if the server is private or the user is already a member.
+ */
+export async function joinServer(serverId: string): Promise<void> {
+  await trpcMutate('serverMember.joinServer', { serverId });
+}
+
+/**
  * Creates a new server via the tRPC API.
  * The backend auto-creates a default "general" channel.
  */
@@ -148,6 +171,56 @@ export async function createServer(input: CreateServerInput): Promise<Server> {
   const data = await trpcMutate<Record<string, unknown>>('server.createServer', {
     name: input.name,
     description: input.description,
+    isPublic: input.isPublic ?? false,
   });
   return toFrontendServer(data);
+}
+
+// ─── Member management ────────────────────────────────────────────────────────
+
+const BACKEND_ROLE_MAP: Record<string, ServerMemberInfo['role']> = {
+  OWNER: 'owner',
+  ADMIN: 'admin',
+  MODERATOR: 'moderator',
+  MEMBER: 'member',
+  GUEST: 'guest',
+};
+
+/**
+ * Returns all members of a server with their role info, sorted by role hierarchy.
+ */
+export async function getServerMembersWithRole(serverId: string): Promise<ServerMemberInfo[]> {
+  const data = await trpcQuery<Array<{
+    userId: string;
+    serverId: string;
+    role: string;
+    joinedAt: string;
+    user: { id: string; username: string; displayName: string; avatarUrl: string | null };
+  }>>('serverMember.getMembers', { serverId });
+  return (data ?? []).map(m => ({
+    userId: m.userId,
+    username: m.user.username,
+    displayName: m.user.displayName ?? null,
+    avatarUrl: m.user.avatarUrl,
+    role: BACKEND_ROLE_MAP[m.role] ?? 'member',
+    joinedAt: m.joinedAt,
+  }));
+}
+
+/**
+ * Changes the role of a server member via the tRPC API.
+ */
+export async function changeMemberRole(
+  serverId: string,
+  targetUserId: string,
+  newRole: 'ADMIN' | 'MODERATOR' | 'MEMBER',
+): Promise<void> {
+  await trpcMutate('serverMember.changeRole', { serverId, targetUserId, newRole });
+}
+
+/**
+ * Removes a member from a server via the tRPC API.
+ */
+export async function removeMember(serverId: string, targetUserId: string): Promise<void> {
+  await trpcMutate('serverMember.removeMember', { serverId, targetUserId });
 }

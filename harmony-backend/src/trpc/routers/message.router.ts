@@ -121,4 +121,45 @@ export const messageRouter = router({
       }),
     )
     .query(({ input }) => messageService.getPinnedMessages(input.channelId, input.serverId)),
+
+  /** Reply to a message. Requires message:create (MEMBER+). */
+  createReply: withPermission('message:create')
+    .input(
+      z.object({
+        serverId: z.string().uuid(),
+        channelId: z.string().uuid(),
+        parentMessageId: z.string().uuid(),
+        content: z.string().min(1).max(4000),
+      }),
+    )
+    .mutation(({ input, ctx }) =>
+      messageService.createReply({
+        parentMessageId: input.parentMessageId,
+        channelId: input.channelId,
+        serverId: input.serverId,
+        authorId: ctx.userId,
+        content: input.content,
+      }),
+    ),
+
+  /** Get paginated replies for a message thread. Requires message:read (GUEST+). */
+  getThreadMessages: withPermission('message:read')
+    .input(
+      z.object({
+        serverId: z.string().uuid(),
+        channelId: z.string().uuid(),
+        parentMessageId: z.string().uuid(),
+        cursor: z.string().uuid().optional(),
+        limit: z.number().int().min(1).max(100).default(20),
+      }),
+    )
+    .query(({ input }) =>
+      messageService.getThreadMessages({
+        parentMessageId: input.parentMessageId,
+        channelId: input.channelId,
+        serverId: input.serverId,
+        cursor: input.cursor,
+        limit: input.limit,
+      }),
+    ),
 });

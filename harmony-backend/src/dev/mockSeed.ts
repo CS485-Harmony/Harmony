@@ -1,4 +1,4 @@
-import { ChannelType, ChannelVisibility, Prisma, PrismaClient } from '@prisma/client';
+import { ChannelType, ChannelVisibility, Prisma, PrismaClient, RoleType } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import rawSnapshot from './mock-seed-data.json';
 
@@ -56,6 +56,7 @@ type BuiltMockSeedData = {
   servers: Prisma.ServerCreateManyInput[];
   channels: Prisma.ChannelCreateManyInput[];
   messages: Prisma.MessageCreateManyInput[];
+  serverMembers: Prisma.ServerMemberCreateManyInput[];
 };
 
 type SeedCounts = {
@@ -64,6 +65,7 @@ type SeedCounts = {
     servers: number;
     channels: number;
     messages: number;
+    serverMembers: number;
   };
 };
 
@@ -226,7 +228,43 @@ export function buildMockSeedData(raw: RawSnapshot = snapshot): BuiltMockSeedDat
     };
   });
 
-  return { users, servers, channels, messages };
+  // Derive ServerMember records from message authorship and server ownership.
+  // Server owners get OWNER role; message authors in a server get MEMBER role.
+  // The channelId → serverId map lets us look up server from message's channelId.
+  const channelToServerLegacy = new Map<string, string>(
+    raw.channels.map((c) => [c.id, c.serverId]),
+  );
+
+  // Key: `${legacyServerId}:${legacyUserId}` → member record
+  const membershipMap = new Map<string, Prisma.ServerMemberCreateManyInput>();
+
+  for (const server of raw.servers) {
+    const key = `${server.id}:${server.ownerId}`;
+    membershipMap.set(key, {
+      userId: userIds.get(server.ownerId)!,
+      serverId: serverIds.get(server.id)!,
+      role: 'OWNER' as RoleType,
+      joinedAt: parseDate(server.createdAt, `server ${server.id} createdAt`),
+    });
+  }
+
+  for (const message of raw.messages) {
+    const legacyServerId = channelToServerLegacy.get(message.channelId);
+    if (!legacyServerId) continue;
+    const key = `${legacyServerId}:${message.authorId}`;
+    if (!membershipMap.has(key)) {
+      membershipMap.set(key, {
+        userId: userIds.get(message.authorId)!,
+        serverId: serverIds.get(legacyServerId)!,
+        role: 'MEMBER' as RoleType,
+        joinedAt: parseDate(message.timestamp, `message ${message.id} timestamp`),
+      });
+    }
+  }
+
+  const serverMembers = Array.from(membershipMap.values());
+
+  return { users, servers, channels, messages, serverMembers };
 }
 
 async function getPrismaClient(): Promise<PrismaClient> {
@@ -405,6 +443,16 @@ export async function seedMockData(db?: PrismaClient, allowMockSeed = false): Pr
         }),
       ),
     );
+
+    await Promise.all(
+      data.serverMembers.map((member) =>
+        tx.serverMember.upsert({
+          where: { userId_serverId: { userId: member.userId, serverId: member.serverId } },
+          update: { role: member.role, joinedAt: member.joinedAt },
+          create: member,
+        }),
+      ),
+    );
   });
 
   return {
@@ -413,6 +461,7 @@ export async function seedMockData(db?: PrismaClient, allowMockSeed = false): Pr
       servers: data.servers.length,
       channels: data.channels.length,
       messages: data.messages.length,
+      serverMembers: data.serverMembers.length,
     },
   };
 }

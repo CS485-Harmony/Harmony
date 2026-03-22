@@ -201,14 +201,144 @@ function OverviewSection({
   );
 }
 
-// ─── Coming-soon stub ─────────────────────────────────────────────────────────
+// ─── Permissions section ──────────────────────────────────────────────────────
+// Mirrors the permission matrix in harmony-backend/src/services/permission.service.ts.
+// This is a read-only reference view — roles are assigned at the server level,
+// not the channel level, so there is no mutation API needed here.
 
-function ComingSoonSection({ label }: { label: string }) {
+// Must stay in sync with RoleType in harmony-backend/src/services/permission.service.ts
+type PermissionRole = 'OWNER' | 'ADMIN' | 'MODERATOR' | 'MEMBER' | 'GUEST';
+
+interface PermissionRow {
+  label: string;
+  /** Which roles have this permission (all higher-privilege roles inherit it). */
+  allowedFrom: PermissionRole;
+}
+
+/** Role hierarchy: index 0 = highest privilege. */
+const ROLE_HIERARCHY: PermissionRole[] = ['OWNER', 'ADMIN', 'MODERATOR', 'MEMBER', 'GUEST'];
+
+/** Returns true if `role` is at or above `threshold` in the hierarchy. */
+function hasPermission(role: PermissionRole, threshold: PermissionRole): boolean {
+  return ROLE_HIERARCHY.indexOf(role) <= ROLE_HIERARCHY.indexOf(threshold);
+}
+
+// Channel-scoped actions only. Server-level actions (e.g. manage members, delete server)
+// are intentionally omitted — they are not channel permissions and would be misleading here.
+const CHANNEL_PERMISSIONS: PermissionRow[] = [
+  { label: 'View channel', allowedFrom: 'GUEST' },
+  { label: 'Send messages', allowedFrom: 'MEMBER' },
+  { label: 'Edit own messages', allowedFrom: 'MEMBER' },
+  { label: 'Delete own messages', allowedFrom: 'MEMBER' },
+  { label: 'Delete any message', allowedFrom: 'MODERATOR' },
+  { label: 'Pin messages', allowedFrom: 'MODERATOR' },
+  { label: 'Manage channel settings', allowedFrom: 'ADMIN' },
+  { label: 'Manage channel visibility', allowedFrom: 'ADMIN' },
+  { label: 'Create / delete channels', allowedFrom: 'ADMIN' },
+];
+
+const ROLE_LABELS: Record<PermissionRole, string> = {
+  OWNER: 'Owner',
+  ADMIN: 'Admin',
+  MODERATOR: 'Mod',
+  MEMBER: 'Member',
+  GUEST: 'Guest',
+};
+
+function CheckIcon() {
   return (
-    <div className='flex flex-col items-center justify-center py-16 text-center'>
-      <div className='mb-3 text-4xl'>🚧</div>
-      <p className='text-lg font-semibold text-white'>{label}</p>
-      <p className='mt-1 text-sm text-gray-400'>This section is coming soon.</p>
+    <svg
+      className='mx-auto h-4 w-4 text-[#3ba55c]'
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth={2.5}
+      strokeLinecap='round'
+      strokeLinejoin='round'
+      aria-hidden='true'
+    >
+      <path d='M20 6 9 17l-5-5' />
+    </svg>
+  );
+}
+
+function DashIcon() {
+  return (
+    <svg
+      className='mx-auto h-4 w-4 text-gray-600'
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth={2}
+      strokeLinecap='round'
+      strokeLinejoin='round'
+      aria-hidden='true'
+    >
+      <path d='M5 12h14' />
+    </svg>
+  );
+}
+
+function PermissionsSection() {
+  return (
+    <div className='max-w-2xl space-y-6'>
+      <div>
+        <h2 className='mb-1 text-xl font-semibold text-white'>Channel Permissions</h2>
+        <p className='text-sm text-gray-400'>
+          Permissions are determined by each member&apos;s server role. Role assignment is managed
+          in Server Settings.
+        </p>
+      </div>
+
+      {/* Permission matrix table */}
+      <div className='overflow-x-auto rounded-md border border-[#40444b]'>
+        <table className='w-full text-sm'>
+          <thead>
+            <tr className='border-b border-[#40444b] bg-[#2f3136]'>
+              {/* Empty header for the action label column */}
+              <th
+                scope='col'
+                className='px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-400'
+              >
+                Permission
+              </th>
+              {ROLE_HIERARCHY.map(role => (
+                <th
+                  key={role}
+                  scope='col'
+                  className='px-3 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-gray-400'
+                >
+                  {ROLE_LABELS[role]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {CHANNEL_PERMISSIONS.map((row, idx) => (
+              <tr
+                key={row.label}
+                className={idx % 2 === 0 ? 'bg-[#36393f]' : 'bg-[#2f3136]'}
+              >
+                <td className='px-4 py-2 text-gray-300'>{row.label}</td>
+                {ROLE_HIERARCHY.map(role => {
+                  // Compute once per cell to avoid redundant calls across the 9×5 matrix
+                  const allowed = hasPermission(role, row.allowedFrom);
+                  return (
+                    <td key={role} className='px-3 py-2 text-center'>
+                      {allowed ? <CheckIcon /> : <DashIcon />}
+                      <span className='sr-only'>{allowed ? 'Allowed' : 'Not allowed'}</span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className='text-xs text-gray-500'>
+        To change a member&apos;s role, go to <span className='text-gray-400'>Server Settings → Members</span>.
+      </p>
     </div>
   );
 }
@@ -536,7 +666,7 @@ export function ChannelSettingsPage({ channel, serverSlug, serverOwnerId }: Chan
           {activeSection === 'overview' && (
             <OverviewSection channel={channel} serverSlug={serverSlug} onSave={setDisplayName} />
           )}
-          {activeSection === 'permissions' && <ComingSoonSection label='Permissions' />}
+          {activeSection === 'permissions' && <PermissionsSection />}
           {activeSection === 'visibility' && (
             <VisibilitySection
               channel={channel}

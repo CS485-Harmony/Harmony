@@ -153,19 +153,27 @@ model Channel {
 }
 
 model Message {
-  id        String    @id @default(uuid()) @db.Uuid
-  channelId String    @map("channel_id") @db.Uuid
-  authorId  String    @map("author_id") @db.Uuid
-  content   String    @db.Text
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  editedAt  DateTime? @map("edited_at") @db.Timestamptz
-  isDeleted Boolean   @default(false) @map("is_deleted")
-  pinned    Boolean   @default(false) @map("pinned")
-  pinnedAt  DateTime? @map("pinned_at") @db.Timestamptz
+  id              String    @id @default(uuid()) @db.Uuid
+  channelId       String    @map("channel_id") @db.Uuid
+  authorId        String    @map("author_id") @db.Uuid
+  content         String    @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  editedAt        DateTime? @map("edited_at") @db.Timestamptz
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  pinned          Boolean   @default(false) @map("pinned")
+  pinnedAt        DateTime? @map("pinned_at") @db.Timestamptz
+  /// Null for top-level messages; set to the parent message id for replies.
+  parentMessageId String?   @map("parent_message_id") @db.Uuid
+  /// Denormalised count of non-deleted replies. Incremented on createReply; decremented when a reply is soft-deleted.
+  replyCount      Int       @default(0) @map("reply_count")
 
   channel     Channel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
   author      User        @relation(fields: [authorId], references: [id])
   attachments Attachment[]
+  /// The message this is a reply to (null for top-level messages).
+  parent      Message?    @relation("MessageReplies", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  /// Direct replies to this message.
+  replies     Message[]   @relation("MessageReplies")
 
   // idx_messages_channel_time (non-partial) and
   // idx_messages_channel_not_deleted (partial WHERE is_deleted = FALSE)

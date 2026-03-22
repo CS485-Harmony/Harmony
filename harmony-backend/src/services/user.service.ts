@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server';
 import { Prisma, UserStatus } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { isSystemAdmin } from '../lib/admin.utils';
+import { eventBus, EventChannels } from '../events/eventBus';
 
 export interface UpdateUserInput {
   displayName?: string;
@@ -90,7 +91,7 @@ export const userService = {
 
   async updateUser(userId: string, patch: UpdateUserInput) {
     try {
-      return await prisma.user.update({
+      const updated = await prisma.user.update({
         where: { id: userId },
         select: SELF_PROFILE_SELECT,
         data: {
@@ -100,6 +101,26 @@ export const userService = {
           ...(patch.status !== undefined && { status: patch.status }),
         },
       });
+
+      // When status changes, publish one event per server the user belongs to so
+      // all connected members of those servers can update their member sidebar in real time.
+      // Status reflects presence only (not identity), so we publish for all servers
+      // regardless of the user's publicProfile setting.
+      if (patch.status !== undefined) {
+        const memberships = await prisma.serverMember.findMany({
+          where: { userId },
+          select: { serverId: true },
+        });
+        for (const { serverId } of memberships) {
+          void eventBus.publish(EventChannels.USER_STATUS_CHANGED, {
+            userId,
+            serverId,
+            status: patch.status,
+          });
+        }
+      }
+
+      return updated;
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });

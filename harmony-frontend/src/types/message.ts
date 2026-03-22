@@ -19,6 +19,8 @@ export interface Message {
   attachments?: Attachment[];
   editedAt?: Date | string;
   reactions?: Reaction[];
+  /** True when this message has been pinned in its channel. */
+  pinned?: boolean;
 }
 
 /**

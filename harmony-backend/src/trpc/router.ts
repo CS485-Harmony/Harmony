@@ -4,6 +4,8 @@ import { serverRouter } from './routers/server.router';
 import { serverMemberRouter } from './routers/serverMember.router';
 import { messageRouter } from './routers/message.router';
 import { userRouter } from './routers/user.router';
+import { attachmentRouter } from './routers/attachment.router';
+import { voiceRouter } from './routers/voice.router';
 
 export const appRouter = router({
   health: publicProcedure.query(() => {
@@ -14,6 +16,8 @@ export const appRouter = router({
   serverMember: serverMemberRouter,
   message: messageRouter,
   user: userRouter,
+  attachment: attachmentRouter,
+  voice: voiceRouter,
 });
 
 export type AppRouter = typeof appRouter;

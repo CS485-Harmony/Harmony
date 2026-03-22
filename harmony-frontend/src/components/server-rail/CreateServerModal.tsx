@@ -24,6 +24,7 @@ function nameToSlug(name: string): string {
 export function CreateServerModal({ isOpen, onClose, onCreated }: CreateServerModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [isPublic, setIsPublic] = useState(false);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
 
@@ -36,6 +37,7 @@ export function CreateServerModal({ isOpen, onClose, onCreated }: CreateServerMo
     if (isOpen) {
       setName('');
       setDescription('');
+      setIsPublic(false);
       setError('');
       setCreating(false);
       // Delay focus so the modal has rendered
@@ -98,7 +100,7 @@ export function CreateServerModal({ isOpen, onClose, onCreated }: CreateServerMo
     setCreating(true);
 
     try {
-      const { server, defaultChannel } = await createServerAction(trimmed, description.trim() || undefined);
+      const { server, defaultChannel } = await createServerAction(trimmed, description.trim() || undefined, isPublic);
       showToast({ message: `Server "${server.name}" created!`, type: 'success' });
       onCreated(server, defaultChannel);
       onClose();
@@ -178,6 +180,39 @@ export function CreateServerModal({ isOpen, onClose, onCreated }: CreateServerMo
             rows={3}
             className='mb-4 w-full resize-none rounded bg-[#1e1f22] px-3 py-2 text-sm text-white placeholder-gray-500 outline-none focus:ring-2 focus:ring-[#5865f2] disabled:opacity-50'
           />
+
+          {/* Visibility */}
+          <p className='mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-300'>
+            Visibility
+          </p>
+          <div className='mb-4 flex gap-2'>
+            <button
+              type='button'
+              onClick={() => setIsPublic(false)}
+              disabled={creating}
+              className={`flex-1 rounded border px-3 py-2 text-sm transition-colors ${
+                !isPublic
+                  ? 'border-[#5865f2] bg-[#5865f2]/10 text-white'
+                  : 'border-[#3a3c41] bg-[#1e1f22] text-gray-400 hover:border-gray-500 hover:text-gray-300'
+              } disabled:opacity-50`}
+            >
+              <span className='font-medium'>Private</span>
+              <span className='mt-0.5 block text-[11px] opacity-70'>Invite only</span>
+            </button>
+            <button
+              type='button'
+              onClick={() => setIsPublic(true)}
+              disabled={creating}
+              className={`flex-1 rounded border px-3 py-2 text-sm transition-colors ${
+                isPublic
+                  ? 'border-[#3ba55c] bg-[#3ba55c]/10 text-white'
+                  : 'border-[#3a3c41] bg-[#1e1f22] text-gray-400 hover:border-gray-500 hover:text-gray-300'
+              } disabled:opacity-50`}
+            >
+              <span className='font-medium'>Public</span>
+              <span className='mt-0.5 block text-[11px] opacity-70'>Listed in Browse</span>
+            </button>
+          </div>
 
           {/* Error */}
           {error && (

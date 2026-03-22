@@ -9,21 +9,28 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { updateServer, deleteServer, getServer } from '@/services/serverService';
-import type { Server } from '@/types';
+import {
+  updateServer,
+  deleteServer,
+  getServerAuthenticated,
+  getServerMembersWithRole,
+  changeMemberRole,
+  removeMember,
+} from '@/services/serverService';
+import type { Server, ServerMemberInfo } from '@/types';
 
 export async function saveServerSettings(
   serverSlug: string,
-  patch: Partial<Pick<Server, 'name' | 'description' | 'icon'>>,
+  patch: Partial<Pick<Server, 'name' | 'description' | 'icon' | 'isPublic'>>,
 ): Promise<void> {
   // Resolve server by route param (don't trust a raw serverId from the client)
-  const server = await getServer(serverSlug);
+  const server = await getServerAuthenticated(serverSlug);
   if (!server) {
     throw new Error('Server not found');
   }
 
   // Build an explicit whitelist so callers cannot sneak in extra fields
-  const sanitizedPatch: Partial<Pick<Server, 'name' | 'description' | 'icon'>> = {};
+  const sanitizedPatch: Partial<Pick<Server, 'name' | 'description' | 'icon' | 'isPublic'>> = {};
 
   if (patch.name !== undefined) {
     if (typeof patch.name !== 'string') throw new Error('Invalid server name');
@@ -40,6 +47,10 @@ export async function saveServerSettings(
     if (typeof patch.icon !== 'string') throw new Error('Invalid server icon');
     sanitizedPatch.icon = patch.icon.trim();
   }
+  if (patch.isPublic !== undefined) {
+    if (typeof patch.isPublic !== 'boolean') throw new Error('Invalid visibility');
+    sanitizedPatch.isPublic = patch.isPublic;
+  }
 
   // The backend updateServer takes the server ID, not slug
   await updateServer(server.id, sanitizedPatch);
@@ -51,7 +62,7 @@ export async function saveServerSettings(
 
 export async function deleteServerAction(serverSlug: string): Promise<void> {
   // Resolve server first to confirm it exists
-  const server = await getServer(serverSlug);
+  const server = await getServerAuthenticated(serverSlug);
   if (!server) {
     throw new Error('Server not found');
   }
@@ -65,4 +76,29 @@ export async function deleteServerAction(serverSlug: string): Promise<void> {
   // redirect() throws internally — must not be inside a try/catch.
   // Redirect to root; homepage handles routing to a valid server.
   redirect('/');
+}
+
+export async function getServerMembersAction(serverId: string): Promise<ServerMemberInfo[]> {
+  return getServerMembersWithRole(serverId);
+}
+
+export async function changeMemberRoleAction(
+  serverSlug: string,
+  targetUserId: string,
+  newRole: 'ADMIN' | 'MODERATOR' | 'MEMBER',
+): Promise<void> {
+  const server = await getServerAuthenticated(serverSlug);
+  if (!server) throw new Error('Server not found');
+  await changeMemberRole(server.id, targetUserId, newRole);
+  revalidatePath(`/settings/${serverSlug}`);
+}
+
+export async function removeMemberAction(
+  serverSlug: string,
+  targetUserId: string,
+): Promise<void> {
+  const server = await getServerAuthenticated(serverSlug);
+  if (!server) throw new Error('Server not found');
+  await removeMember(server.id, targetUserId);
+  revalidatePath(`/settings/${serverSlug}`);
 }

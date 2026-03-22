@@ -6,11 +6,13 @@
 
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn, getUserErrorMessage } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { saveServerSettings, deleteServerAction } from '@/app/settings/[serverSlug]/actions';
+import { MembersSection } from '@/components/settings/MembersSection';
+import { VisibilitySection } from '@/components/settings/VisibilitySection';
 import type { Server } from '@/types';
 
 // ─── Discord colour tokens ────────────────────────────────────────────────────
@@ -24,10 +26,12 @@ const BG = {
 
 // ─── Sidebar sections ─────────────────────────────────────────────────────────
 
-type Section = 'overview' | 'danger-zone';
+type Section = 'overview' | 'members' | 'privacy' | 'danger-zone';
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: 'overview', label: 'Overview' },
+  { id: 'members', label: 'Members' },
+  { id: 'privacy', label: 'Privacy' },
   { id: 'danger-zone', label: 'Danger Zone' },
 ];
 
@@ -285,11 +289,15 @@ export function ServerSettingsPage({ server, serverSlug }: ServerSettingsPagePro
 
   const backHref = `/channels/${serverSlug}`;
 
-  if (isLoading) return <LoadingScreen />;
-  if (!isAuthenticated || !isAdmin(server.ownerId)) {
-    router.replace(backHref);
-    return <LoadingScreen />;
-  }
+  // Safe because useAuth keeps isLoading=true until role is fully resolved —
+  // shouldRedirect is never evaluated on partial auth state.
+  const shouldRedirect = !isLoading && (!isAuthenticated || !isAdmin(server.ownerId));
+
+  useEffect(() => {
+    if (shouldRedirect) router.replace(backHref);
+  }, [shouldRedirect, router, backHref]);
+
+  if (isLoading || shouldRedirect) return <LoadingScreen />;
 
   return (
     <div className={cn('flex h-screen overflow-hidden', BG.base)}>
@@ -389,6 +397,12 @@ export function ServerSettingsPage({ server, serverSlug }: ServerSettingsPagePro
             <OverviewSection key={server.id}
             server={server}
             onSave={setDisplayName} />
+          )}
+          {activeSection === 'members' && (
+            <MembersSection serverId={server.id} serverSlug={serverSlug} />
+          )}
+          {activeSection === 'privacy' && (
+            <VisibilitySection server={server} serverSlug={serverSlug} />
           )}
           {activeSection === 'danger-zone' && <DangerZoneSection server={server} />}
         </div>

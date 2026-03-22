@@ -7,12 +7,14 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { UserStatusBar } from '@/components/channel/UserStatusBar';
 import { ChannelVisibility, ChannelType } from '@/types';
 import type { Server, Channel, User } from '@/types';
+import { useVoiceOptional } from '@/contexts/VoiceContext';
 
 // ─── Colour tokens (Discord palette) ─────────────────────────────────────────
 
@@ -152,6 +154,10 @@ export interface ChannelSidebarProps {
   isAuthenticated: boolean;
   /** URL base path for channel links — defaults to "/c" */
   basePath?: string;
+  /** Server UUID — required for voice join/leave tRPC calls. */
+  serverId: string;
+  /** Members of the server — used to resolve userIds to display names in voice participant lists. */
+  members?: User[];
   /**
    * Called when an admin clicks the "+" button next to a category header.
    * Receives the default ChannelType for that category.
@@ -169,10 +175,26 @@ export function ChannelSidebar({
   onClose,
   isAuthenticated,
   basePath = '/c',
+  serverId,
+  members,
   onCreateChannel,
 }: ChannelSidebarProps) {
   const [textCollapsed, setTextCollapsed] = useState(false);
   const [voiceCollapsed, setVoiceCollapsed] = useState(false);
+
+  const voice = useVoiceOptional();
+  const connectedChannelId = voice?.connectedChannelId ?? null;
+  const allChannelParticipants = voice?.channelParticipants ?? {};
+  const dominantSpeakerId = voice?.dominantSpeakerId ?? null;
+  const localSpeaking = voice?.localSpeaking ?? false;
+  const joining = voice?.joining ?? false;
+  const joinChannel = voice?.joinChannel;
+
+  // Precompute userId → User map to avoid O(members × participants) lookups on every render.
+  const memberMap = useMemo(
+    () => new Map(members?.map(m => [m.id, m]) ?? []),
+    [members],
+  );
 
   const isAdmin =
     isAuthenticated && (currentUser.isSystemAdmin || currentUser.id === server.ownerId);
@@ -296,12 +318,78 @@ export function ChannelSidebar({
                 <ul className='list-none'>
                   {voiceChannels.map(channel => (
                     <li key={channel.id}>
-                      <div
-                        className='flex cursor-default items-center gap-1.5 rounded px-2 py-1 text-sm text-gray-400 opacity-60'
+                      <button
+                        type='button'
+                        disabled={!isAuthenticated || joining}
+                        aria-disabled={!isAuthenticated || joining}
+                        onClick={() => {
+                          if (joinChannel) void joinChannel(channel.id, serverId, channel.name);
+                        }}
+                        className={cn(
+                          'group flex w-full items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
+                          connectedChannelId === channel.id
+                            ? cn(BG_ACTIVE, 'text-white')
+                            : 'text-gray-400 hover:bg-[#393c43] hover:text-gray-200',
+                          !isAuthenticated && 'cursor-default opacity-60',
+                        )}
                       >
                         <ChannelIcon type={channel.type} />
-                        <span className='truncate'>{channel.name}</span>
-                      </div>
+                        <span className='flex-1 truncate text-left'>{channel.name}</span>
+                      </button>
+                      {/* Participant list for this voice channel — from all-channels map */}
+                      {(() => {
+                        const channelParticipants = allChannelParticipants[channel.id] ?? [];
+                        if (channelParticipants.length === 0) return null;
+                        return (
+                          <ul className='mb-1 ml-8 mt-1 list-none space-y-0.5'>
+                            {channelParticipants.map(p => {
+                              const member = memberMap.get(p.userId);
+                              const displayName =
+                                member?.displayName ?? member?.username ?? p.userId.slice(0, 8);
+                              const initial = (displayName[0] ?? '?').toUpperCase();
+                              // Show ring for Twilio's dominant speaker OR when local mic level is high.
+                              const isSpeaking =
+                                dominantSpeakerId === p.userId ||
+                                (localSpeaking && p.userId === currentUser.id);
+                              return (
+                                <li
+                                  key={p.userId}
+                                  className='flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs text-gray-400'
+                                >
+                                  {/* Avatar with green ring when speaking */}
+                                  <div
+                                    className={cn(
+                                      'h-5 w-5 flex-shrink-0 overflow-hidden rounded-full',
+                                      isSpeaking && 'ring-2 ring-green-400 ring-offset-1 ring-offset-[#2f3136]',
+                                    )}
+                                  >
+                                    {member?.avatar ? (
+                                      <Image
+                                        src={member.avatar}
+                                        alt={displayName}
+                                        width={20}
+                                        height={20}
+                                        className='h-5 w-5 rounded-full'
+                                        unoptimized
+                                      />
+                                    ) : (
+                                      <div className='flex h-5 w-5 items-center justify-center rounded-full bg-[#5865f2] text-[9px] font-bold text-white'>
+                                        {initial}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <span className={cn('flex-1 truncate', isSpeaking && 'text-green-400')}>
+                                    {displayName}
+                                  </span>
+                                  {p.muted && (
+                                    <span className='ml-auto text-[10px] opacity-60'>🔇</span>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        );
+                      })()}
                     </li>
                   ))}
                 </ul>

@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server';
 import { ChannelType, ChannelVisibility } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from './cache.service';
+import { eventBus, EventChannels } from '../events/eventBus';
 
 export interface CreateChannelInput {
   serverId: string;
@@ -65,7 +66,10 @@ export const channelService = {
       where: { serverId_slug: { serverId, slug } },
     });
     if (existing) {
-      throw new TRPCError({ code: 'CONFLICT', message: 'Channel slug already exists in this server' });
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'Channel slug already exists in this server',
+      });
     }
 
     const channel = await prisma.channel.create({
@@ -73,12 +77,23 @@ export const channelService = {
     });
 
     // Write-through: cache new visibility and invalidate server channel list (best-effort)
-    cacheService.set(
-      CacheKeys.channelVisibility(channel.id),
-      channel.visibility,
-      { ttl: CacheTTL.channelVisibility },
-    ).catch(() => {});
-    cacheService.invalidate(`server:${sanitizeKeySegment(serverId)}:public_channels`).catch(() => {});
+    cacheService
+      .set(CacheKeys.channelVisibility(channel.id), channel.visibility, {
+        ttl: CacheTTL.channelVisibility,
+      })
+      .catch(() => {});
+    cacheService
+      .invalidate(`server:${sanitizeKeySegment(serverId)}:public_channels`)
+      .catch(() => {});
+
+    // Notify connected clients (fire-and-forget)
+    eventBus
+      .publish(EventChannels.CHANNEL_CREATED, {
+        channelId: channel.id,
+        serverId: channel.serverId,
+        timestamp: new Date().toISOString(),
+      })
+      .catch(() => {});
 
     return channel;
   },
@@ -99,8 +114,21 @@ export const channelService = {
     });
 
     // Write-through: invalidate message caches and server channel list (best-effort)
-    cacheService.invalidatePattern(`channel:msgs:${sanitizeKeySegment(channelId)}:*`).catch(() => {});
-    cacheService.invalidate(`server:${sanitizeKeySegment(channel.serverId)}:public_channels`).catch(() => {});
+    cacheService
+      .invalidatePattern(`channel:msgs:${sanitizeKeySegment(channelId)}:*`)
+      .catch(() => {});
+    cacheService
+      .invalidate(`server:${sanitizeKeySegment(channel.serverId)}:public_channels`)
+      .catch(() => {});
+
+    // Notify connected clients (fire-and-forget)
+    eventBus
+      .publish(EventChannels.CHANNEL_UPDATED, {
+        channelId: updated.id,
+        serverId: updated.serverId,
+        timestamp: new Date().toISOString(),
+      })
+      .catch(() => {});
 
     return updated;
   },
@@ -115,8 +143,21 @@ export const channelService = {
 
     // Write-through: invalidate all caches for deleted channel (best-effort)
     cacheService.invalidate(CacheKeys.channelVisibility(channelId)).catch(() => {});
-    cacheService.invalidatePattern(`channel:msgs:${sanitizeKeySegment(channelId)}:*`).catch(() => {});
-    cacheService.invalidate(`server:${sanitizeKeySegment(channel.serverId)}:public_channels`).catch(() => {});
+    cacheService
+      .invalidatePattern(`channel:msgs:${sanitizeKeySegment(channelId)}:*`)
+      .catch(() => {});
+    cacheService
+      .invalidate(`server:${sanitizeKeySegment(channel.serverId)}:public_channels`)
+      .catch(() => {});
+
+    // Notify connected clients (fire-and-forget)
+    eventBus
+      .publish(EventChannels.CHANNEL_DELETED, {
+        channelId: channel.id,
+        serverId: channel.serverId,
+        timestamp: new Date().toISOString(),
+      })
+      .catch(() => {});
   },
 
   async createDefaultChannel(serverId: string) {

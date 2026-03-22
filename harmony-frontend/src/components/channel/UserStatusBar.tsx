@@ -2,7 +2,8 @@
  * Component: UserStatusBar
  * Discord-style user info bar shown at the bottom of the ChannelSidebar.
  * Displays avatar, username, discriminator tag, status indicator,
- * mic/headphone toggles (visual-only), and a settings gear icon.
+ * mic/headphone toggles (wired to VoiceContext — affect real Twilio tracks when in voice),
+ * and a settings gear icon.
  *
  * Pulls current user from the parent via props (sourced from mock auth service).
  * Ref: Issue #28
@@ -10,12 +11,12 @@
 
 'use client';
 
-import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import type { User, UserStatus } from '@/types';
 import { cn } from '@/lib/utils';
+import { useVoiceOptional } from '@/contexts/VoiceContext';
 
 // ─── Status colour map ────────────────────────────────────────────────────────
 
@@ -41,15 +42,42 @@ export interface UserStatusBarProps {
 }
 
 export function UserStatusBar({ currentUser, isAuthenticated }: UserStatusBarProps) {
-  const [isMuted, setIsMuted] = useState(false);
-  const [isDeafened, setIsDeafened] = useState(false);
   const pathname = usePathname();
+  const voice = useVoiceOptional();
+  const connectedChannelName = voice?.connectedChannelName ?? null;
+  const connectedChannelId = voice?.connectedChannelId ?? null;
+  const isMuted = voice?.isMuted ?? false;
+  const isDeafened = voice?.isDeafened ?? false;
+
+  const isInVoice = connectedChannelId !== null;
 
   const userInitial = currentUser.username?.[0]?.toUpperCase() ?? '?';
   const settingsHref = `/settings?returnTo=${encodeURIComponent(pathname)}`;
 
   return (
-    <div className='flex h-[52px] flex-shrink-0 items-center gap-2 bg-[#292b2f] px-2'>
+    <div className={cn('flex flex-shrink-0 flex-col bg-[#292b2f]', isInVoice ? 'h-auto' : 'h-[52px]')}>
+      {/* Voice channel connection indicator */}
+      {isInVoice && (
+        <div className='flex w-full items-center justify-between border-b border-black/20 px-2 py-1 text-[11px] text-green-400'>
+          <div className='min-w-0'>
+            <p className='font-semibold leading-tight'>Voice Connected</p>
+            <p className='truncate leading-tight opacity-80'>#{connectedChannelName}</p>
+          </div>
+          <button
+            type='button'
+            onClick={() => { if (voice) void voice.leaveChannel(); }}
+            title='Disconnect from voice'
+            aria-label='Disconnect from voice channel'
+            className='ml-2 flex-shrink-0 rounded p-1 text-red-400 hover:bg-red-500/10 hover:text-red-300'
+          >
+            <svg className='h-3.5 w-3.5' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+              <path d='M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z'/>
+              <line x1='1' y1='1' x2='23' y2='23' stroke='currentColor' strokeWidth='2' strokeLinecap='round'/>
+            </svg>
+          </button>
+        </div>
+      )}
+      <div className='flex h-[52px] items-center gap-2 px-2'>
       {/* Avatar + status indicator */}
       <div className='relative flex-shrink-0'>
         {currentUser.avatar ? (
@@ -85,12 +113,13 @@ export function UserStatusBar({ currentUser, isAuthenticated }: UserStatusBarPro
 
       {/* Action icons */}
       <div className='flex flex-shrink-0 items-center'>
-        {/* Mic toggle */}
+        {/* Mic toggle — only functional when connected to a voice channel */}
         <button
-          onClick={() => setIsMuted(v => !v)}
+          onClick={() => { if (voice) void voice.setMuted(!isMuted); }}
+          disabled={!isInVoice}
           title={isMuted ? 'Unmute' : 'Mute'}
           aria-label={isMuted ? 'Unmute' : 'Mute'}
-          className='rounded p-1 text-gray-400 hover:bg-[#3a3c41] hover:text-white'
+          className='rounded p-1 text-gray-400 hover:bg-[#3a3c41] hover:text-white disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400'
         >
           {isMuted ? (
             <svg
@@ -116,12 +145,13 @@ export function UserStatusBar({ currentUser, isAuthenticated }: UserStatusBarPro
           )}
         </button>
 
-        {/* Headphone toggle */}
+        {/* Headphone toggle — only functional when connected to a voice channel */}
         <button
-          onClick={() => setIsDeafened(v => !v)}
+          onClick={() => { if (voice) void voice.setDeafened(!isDeafened); }}
+          disabled={!isInVoice}
           title={isDeafened ? 'Undeafen' : 'Deafen'}
           aria-label={isDeafened ? 'Undeafen' : 'Deafen'}
-          className='rounded p-1 text-gray-400 hover:bg-[#3a3c41] hover:text-white'
+          className='rounded p-1 text-gray-400 hover:bg-[#3a3c41] hover:text-white disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400'
         >
           {isDeafened ? (
             <svg
@@ -173,6 +203,7 @@ export function UserStatusBar({ currentUser, isAuthenticated }: UserStatusBarPro
             Log In
           </Link>
         )}
+      </div>
       </div>
     </div>
   );

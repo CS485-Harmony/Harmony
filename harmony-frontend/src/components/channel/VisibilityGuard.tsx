@@ -144,12 +144,36 @@ export interface VisibilityGuardProps {
   isLoading?: boolean;
   /** Set to an error message if the channel fetch failed */
   error?: string | null;
+  /**
+   * The ownerId of the server that owns this channel. When provided,
+   * VisibilityGuard uses it to check whether the authenticated user is an
+   * admin/owner and therefore allowed to view PRIVATE channels. Authenticated
+   * non-admin members are shown AccessDeniedPage for PRIVATE channels, covering
+   * the direct-URL access path that the real-time SSE redirect cannot guard.
+   */
+  serverOwnerId?: string;
+  /**
+   * Whether the current authenticated user has admin or owner role within this
+   * server, derived from the server-scoped member list. This is required because
+   * isAdmin() with no arg checks AuthContext user.role, which is always 'member'
+   * for non-system-admin users (mapBackendUser sets role: 'member' for everyone
+   * except system admins). Passing this prop lets VisibilityGuard correctly allow
+   * access for server admins when viewing PRIVATE channels directly by URL.
+   */
+  isServerAdmin?: boolean;
   /** Content to render when the channel is accessible */
   children: React.ReactNode;
 }
 
-export function VisibilityGuard({ visibility, isLoading, error, children }: VisibilityGuardProps) {
-  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+export function VisibilityGuard({
+  visibility,
+  isLoading,
+  error,
+  serverOwnerId,
+  isServerAdmin,
+  children,
+}: VisibilityGuardProps) {
+  const { isAuthenticated, isLoading: isAuthLoading, isAdmin } = useAuth();
 
   if (isLoading) {
     return <VisibilityLoading />;
@@ -170,11 +194,26 @@ export function VisibilityGuard({ visibility, isLoading, error, children }: Visi
     return <VisibilityLoading />;
   }
 
-  // Private channels are only accessible to authenticated users
-  if (visibility === ChannelVisibility.PRIVATE && !isAuthenticated) {
-    return <AccessDeniedPage />;
+  if (visibility === ChannelVisibility.PRIVATE) {
+    // Unauthenticated users never have access to PRIVATE channels.
+    if (!isAuthenticated) {
+      return <AccessDeniedPage />;
+    }
+
+    // Authenticated non-admin members also cannot access PRIVATE channels.
+    // Admins and the server owner retain access. This guards the direct-URL
+    // path: a non-admin member who navigates to a PRIVATE channel URL after
+    // the real-time SSE redirect was missed will be blocked here.
+    // isAdmin(serverOwnerId) covers the server owner and system admins.
+    // isServerAdmin is the server-scoped member role passed from the parent,
+    // because isAdmin() with no arg checks AuthContext user.role which is always
+    // 'member' for non-system-admin users (mapBackendUser hardcodes this).
+    const userIsAdminOrOwner = isAdmin(serverOwnerId) || isServerAdmin;
+    if (!userIsAdminOrOwner) {
+      return <AccessDeniedPage />;
+    }
   }
 
-  // PUBLIC_INDEXABLE or PUBLIC_NO_INDEX — show content
+  // PUBLIC_INDEXABLE or PUBLIC_NO_INDEX, or PRIVATE + admin/owner — show content
   return <>{children}</>;
 }
