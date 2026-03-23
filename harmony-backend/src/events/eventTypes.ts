@@ -39,7 +39,8 @@ export interface VisibilityChangedPayload {
 export interface MessageCreatedPayload {
   messageId: string;
   channelId: string;
-  authorId: string;
+  authorId?: string;
+  parentMessageId?: string;
   timestamp: string;
 }
 

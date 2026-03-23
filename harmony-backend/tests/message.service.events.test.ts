@@ -90,8 +90,42 @@ const CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440001';
 const SERVER_ID = '550e8400-e29b-41d4-a716-446655440002';
 const AUTHOR_ID = '550e8400-e29b-41d4-a716-446655440003';
 const MESSAGE_ID = '550e8400-e29b-41d4-a716-446655440004';
+const REPLY_ID = '550e8400-e29b-41d4-a716-446655440005';
 
 const MOCK_CHANNEL = { id: CHANNEL_ID, serverId: SERVER_ID };
+
+// Parent message fixture for createReply tests — must include channel.id for the
+// transaction-level guard in createReply to pass.
+const MOCK_PARENT_MESSAGE = {
+  id: MESSAGE_ID,
+  channelId: CHANNEL_ID,
+  authorId: AUTHOR_ID,
+  content: 'parent',
+  createdAt: new Date('2024-01-01T00:00:00.000Z'),
+  editedAt: null,
+  isDeleted: false,
+  pinned: false,
+  pinnedAt: null,
+  parentMessageId: null,
+  replyCount: 0,
+  channel: { id: CHANNEL_ID, serverId: SERVER_ID },
+};
+
+const MOCK_REPLY = {
+  id: REPLY_ID,
+  channelId: CHANNEL_ID,
+  authorId: AUTHOR_ID,
+  content: 'reply',
+  createdAt: new Date('2024-01-01T00:01:00.000Z'),
+  editedAt: null,
+  isDeleted: false,
+  pinned: false,
+  pinnedAt: null,
+  parentMessageId: MESSAGE_ID,
+  replyCount: 0,
+  author: { id: AUTHOR_ID, username: 'testuser', displayName: 'Test User', avatarUrl: null },
+  attachments: [],
+};
 
 const MOCK_MESSAGE = {
   id: MESSAGE_ID,
@@ -270,6 +304,66 @@ describe('messageService.deleteMessage — event publishing', () => {
         messageId: '00000000-0000-0000-0000-000000000000',
         actorId: AUTHOR_ID,
         serverId: SERVER_ID,
+      }),
+    ).rejects.toThrow(TRPCError);
+
+    expect(mockPublish).not.toHaveBeenCalled();
+  });
+});
+
+// ─── createReply publishes MESSAGE_CREATED ─────────────────────────────────────
+
+describe('messageService.createReply — event publishing', () => {
+  beforeEach(() => {
+    mockMessageFindUnique.mockResolvedValue(MOCK_PARENT_MESSAGE);
+    mockMessageCreate.mockResolvedValue(MOCK_REPLY);
+    mockMessageUpdate.mockResolvedValue({ ...MOCK_PARENT_MESSAGE, replyCount: 1 });
+  });
+
+  it('publishes MESSAGE_CREATED with messageId, channelId, parentMessageId, and timestamp', async () => {
+    await messageService.createReply({
+      parentMessageId: MESSAGE_ID,
+      channelId: CHANNEL_ID,
+      serverId: SERVER_ID,
+      authorId: AUTHOR_ID,
+      content: 'reply',
+    });
+
+    expect(mockPublish).toHaveBeenCalledTimes(1);
+    expect(mockPublish).toHaveBeenCalledWith(
+      'harmony:MESSAGE_CREATED',
+      expect.objectContaining({
+        messageId: REPLY_ID,
+        channelId: CHANNEL_ID,
+        parentMessageId: MESSAGE_ID,
+        timestamp: expect.any(String),
+      }),
+    );
+  });
+
+  it('timestamp in MESSAGE_CREATED is a valid ISO 8601 string', async () => {
+    await messageService.createReply({
+      parentMessageId: MESSAGE_ID,
+      channelId: CHANNEL_ID,
+      serverId: SERVER_ID,
+      authorId: AUTHOR_ID,
+      content: 'reply',
+    });
+
+    const [, payload] = mockPublish.mock.calls[0] as [string, { timestamp: string }];
+    expect(() => new Date(payload.timestamp).toISOString()).not.toThrow();
+  });
+
+  it('does NOT publish when parent message is not found (NOT_FOUND)', async () => {
+    mockMessageFindUnique.mockResolvedValue(null);
+
+    await expect(
+      messageService.createReply({
+        parentMessageId: '00000000-0000-0000-0000-000000000000',
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: AUTHOR_ID,
+        content: 'ghost reply',
       }),
     ).rejects.toThrow(TRPCError);
 

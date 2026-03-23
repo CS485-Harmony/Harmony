@@ -458,6 +458,15 @@ export const messageService = {
       .invalidatePattern(`thread:msgs:${sanitizeKeySegment(parentMessageId)}:*`)
       .catch(() => {});
 
+    eventBus
+      .publish(EventChannels.MESSAGE_CREATED, {
+        messageId: reply.id,
+        channelId,
+        parentMessageId,
+        timestamp: reply.createdAt.toISOString(),
+      })
+      .catch(() => {});
+
     return reply;
   },
 
