@@ -140,6 +140,8 @@ beforeEach(() => {
     username: 'newmember',
     displayName: 'New Member',
     avatarUrl: null,
+    status: 'ONLINE',
+    publicProfile: true,
   });
 });
 
@@ -224,6 +226,117 @@ describe('GET /api/events/server/:serverId — member:joined event', () => {
     expect(body).toContain(JOINING_USER_ID);
     // User profile fields must be present
     expect(body).toContain('newmember');
+  });
+
+  it('anonymizes username and avatar when publicProfile is false', async () => {
+    // Override the default mock to simulate a user who has opted out of public profile
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+      id: JOINING_USER_ID,
+      username: 'privateperson',
+      displayName: 'Private Person',
+      avatarUrl: 'https://example.com/avatar.png',
+      status: 'ONLINE',
+      publicProfile: false,
+    });
+
+    let memberJoinedHandler: ((payload: unknown) => Promise<void>) | null = null;
+
+    mockSubscribe.mockImplementation((channel: string, handler: (payload: unknown) => Promise<void>) => {
+      if (channel === 'harmony:MEMBER_JOINED') {
+        memberJoinedHandler = handler;
+      }
+      return { unsubscribe: jest.fn(), ready: Promise.resolve() };
+    });
+
+    const addr = httpServer.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad address');
+    const port = (addr as { port: number }).port;
+
+    const chunks: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get(
+        { hostname: 'localhost', port, path: `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}` },
+        (res) => {
+          res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+
+          setTimeout(async () => {
+            if (memberJoinedHandler) {
+              await memberJoinedHandler({
+                userId: JOINING_USER_ID,
+                serverId: VALID_SERVER_ID,
+                role: 'MEMBER',
+                timestamp: new Date().toISOString(),
+              });
+            }
+
+            setTimeout(() => {
+              res.destroy();
+              resolve();
+            }, 50);
+          }, 50);
+
+          res.on('error', reject);
+        },
+      );
+      req.on('error', reject);
+    });
+
+    const body = chunks.join('');
+    expect(body).toContain('event: member:joined');
+    expect(body).toContain(JOINING_USER_ID);
+    // Private fields must be anonymized
+    expect(body).toContain('"username":"Anonymous"');
+    expect(body).not.toContain('privateperson');
+    expect(body).not.toContain('Private Person');
+    expect(body).not.toContain('avatar.png');
+  });
+
+  it('does not emit member:joined for a different server', async () => {
+    let memberJoinedHandler: ((payload: unknown) => Promise<void>) | null = null;
+
+    mockSubscribe.mockImplementation((channel: string, handler: (payload: unknown) => Promise<void>) => {
+      if (channel === 'harmony:MEMBER_JOINED') {
+        memberJoinedHandler = handler;
+      }
+      return { unsubscribe: jest.fn(), ready: Promise.resolve() };
+    });
+
+    const addr = httpServer.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad address');
+    const port = (addr as { port: number }).port;
+
+    const chunks: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get(
+        { hostname: 'localhost', port, path: `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}` },
+        (res) => {
+          res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+
+          setTimeout(async () => {
+            if (memberJoinedHandler) {
+              // Fire with a different serverId — should be filtered out
+              await memberJoinedHandler({
+                userId: JOINING_USER_ID,
+                serverId: 'different-server-id',
+                role: 'MEMBER',
+                timestamp: new Date().toISOString(),
+              });
+            }
+
+            setTimeout(() => {
+              res.destroy();
+              resolve();
+            }, 50);
+          }, 50);
+
+          res.on('error', reject);
+        },
+      );
+      req.on('error', reject);
+    });
+
+    const body = chunks.join('');
+    expect(body).not.toContain('event: member:joined');
   });
 });
 

@@ -363,18 +363,24 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       try {
         const user = await prisma.user.findUnique({
           where: { id: payload.userId },
-          select: { id: true, username: true, displayName: true, avatarUrl: true },
+          select: { id: true, username: true, displayName: true, avatarUrl: true, status: true, publicProfile: true },
         });
         if (!user) return;
 
+        // Respect the publicProfile privacy flag — consistent with userService.getUser().
+        // Users who have opted out of public profile display appear as Anonymous with no avatar.
+        // status reflects server presence (ONLINE/IDLE/OFFLINE), not identity — intentionally
+        // emitted even for private-profile users since it reveals no personally identifying information.
+        const isPublic = user.publicProfile;
         sendEvent(res, 'member:joined', {
           id: user.id,
-          username: user.username,
-          displayName: user.displayName,
-          avatar: user.avatarUrl ?? undefined,
+          username: isPublic ? user.username : 'Anonymous',
+          displayName: isPublic ? user.displayName : undefined,
+          avatar: isPublic ? (user.avatarUrl ?? undefined) : undefined,
           // Cast backend RoleTypeValue (e.g. 'MEMBER') to frontend UserRole (e.g. 'member')
           role: payload.role.toLowerCase(),
-          status: 'online',
+          // Cast DB UserStatus (e.g. 'ONLINE') to frontend UserStatus (e.g. 'online')
+          status: user.status.toLowerCase(),
         });
       } catch {
         // Silently ignore DB errors — the client will re-fetch on next load
