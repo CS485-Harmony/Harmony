@@ -53,8 +53,15 @@ describe('buildMockSeedData', () => {
   });
 
   it('sets synthetic email and placeholder passwordHash for every user', () => {
-    expect(data.users.every((user) => user.email === `${user.username}@mock.harmony.test`)).toBe(true);
-    expect(data.users.every((user) => user.passwordHash === '!')).toBe(true);
+    expect(data.users.every((user) => user.email === `${user.username}@mock.harmony.test`)).toBe(
+      true,
+    );
+    // alice_admin (user-001) has a real bcrypt hash so the account is loginable in dev/demo.
+    // All other mock users keep '!' (login intentionally disabled).
+    const alice = data.users.find((u) => u.username === 'alice_admin');
+    const others = data.users.filter((u) => u.username !== 'alice_admin');
+    expect(alice?.passwordHash).toMatch(/^\$2[ab]\$\d+\$/);
+    expect(others.every((u) => u.passwordHash === '!')).toBe(true);
   });
 
   it('keeps voice channels free of messages', () => {
@@ -117,18 +124,15 @@ describe('assertNoUniqueConflicts', () => {
   const expectedEmail = 'alice@mock.harmony.test';
   const expectedServerId = legacyIdToUuid('s1');
 
-  function makeDb(overrides: {
-    usersByUsername?: { id: string; username: string }[];
-    usersByEmail?: { id: string; email: string }[];
-    servers?: { id: string; slug: string }[];
-    channels?: { id: string; serverId: string; slug: string }[];
-  } = {}): PrismaClient {
-    const {
-      usersByUsername = [],
-      usersByEmail = [],
-      servers = [],
-      channels = [],
-    } = overrides;
+  function makeDb(
+    overrides: {
+      usersByUsername?: { id: string; username: string }[];
+      usersByEmail?: { id: string; email: string }[];
+      servers?: { id: string; slug: string }[];
+      channels?: { id: string; serverId: string; slug: string }[];
+    } = {},
+  ): PrismaClient {
+    const { usersByUsername = [], usersByEmail = [], servers = [], channels = [] } = overrides;
 
     return {
       user: {
