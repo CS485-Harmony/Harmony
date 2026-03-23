@@ -75,6 +75,10 @@ const VALID_CHANNEL_TYPES = new Set<string>(Object.values(ChannelType));
 const VALID_CHANNEL_VISIBILITIES = new Set<string>(Object.values(ChannelVisibility));
 const MOCK_SEED_NAMESPACE = 'harmony:mock-seed';
 
+// user-001 (alice_admin) is the only loginable mock account — keep in sync with
+// the assertion in mock-seed.test.ts that looks up this user by username.
+const ALICE_ADMIN_HASH = '$2b$12$kypwUxiUZqWl6OO4n/jHxOY8pqzxJ9rcgOU7mUSLsTfDcKdArtwY.';
+
 export function legacyIdToUuid(legacyId: string): string {
   const hash = createHash('sha1').update(`${MOCK_SEED_NAMESPACE}:${legacyId}`).digest();
   const bytes = Buffer.from(hash.subarray(0, 16));
@@ -146,6 +150,8 @@ export function buildMockSeedData(raw: RawSnapshot = snapshot): BuiltMockSeedDat
       .map((channel) => channel.serverId),
   );
 
+  // user-001 is alice_admin — the only loginable mock account (see ALICE_ADMIN_HASH above).
+  // All other mock users keep '!' (invalid hash — login intentionally disabled).
   const users = raw.users.map<Prisma.UserCreateManyInput>((user, index) => ({
     id: userIds.get(user.id)!,
     username: user.username,
@@ -153,7 +159,7 @@ export function buildMockSeedData(raw: RawSnapshot = snapshot): BuiltMockSeedDat
     avatarUrl: user.avatar,
     publicProfile: true,
     email: `${user.username}@mock.harmony.test`,
-    passwordHash: '!',
+    passwordHash: user.id === 'user-001' ? ALICE_ADMIN_HASH : '!',
     createdAt: new Date(Date.UTC(2024, 0, 1, 0, index, 0)),
   }));
 
@@ -381,6 +387,7 @@ export async function seedMockData(db?: PrismaClient, allowMockSeed = false): Pr
             displayName: user.displayName,
             avatarUrl: user.avatarUrl,
             publicProfile: user.publicProfile,
+            passwordHash: user.passwordHash,
             createdAt: user.createdAt,
           },
           create: user,
