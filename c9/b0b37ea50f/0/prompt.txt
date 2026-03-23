@@ -1,0 +1,9 @@
+Confirm that our documents in @docs/ conforms to everything in section 2 of @"P4: Backend Development | CS 485 AI-Assisted Software Engineering (Sp26).html" "Specify the backend"
+
+---
+
+Was M-B7 even built this sprint? If not then I don't think we need it
+
+---
+
+Fix the naming mismatch in a branch and raise a PR. You can ignore the draft PR rule for this one.

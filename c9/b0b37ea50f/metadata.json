@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "c9b0b37ea50f",
+  "strategy": "manual-commit",
+  "branch": "docs/fix-module-naming-mismatch",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/p4-backend-modules.md",
+    "docs/unified-backend-architecture.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c9/b0b37ea50f/0/metadata.json",
+      "transcript": "/c9/b0b37ea50f/0/full.jsonl",
+      "content_hash": "/c9/b0b37ea50f/0/content_hash.txt",
+      "prompt": "/c9/b0b37ea50f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 29,
+    "cache_creation_tokens": 89175,
+    "cache_read_tokens": 1537701,
+    "output_tokens": 13170,
+    "api_call_count": 23
+  }
+}
