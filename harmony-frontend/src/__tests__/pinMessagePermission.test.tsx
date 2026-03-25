@@ -140,14 +140,13 @@ describe('MessageItem — pin button visibility based on canPin prop', () => {
 // whole file at parse time).
 
 describe('canPinForRole — permission helper (requires fix: src/lib/permissions.ts)', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let canPinForRole: (role: UserRole) => boolean;
 
   beforeAll(async () => {
     // Dynamic import so missing module produces a clear per-test failure
     // rather than crashing the whole suite.
     try {
-      // @ts-ignore — module does not exist yet; will be created as part of the fix
+      // @ts-expect-error — module does not exist yet; will be created as part of the fix
       const mod = await import('../lib/permissions');
       canPinForRole = mod.canPinForRole;
     } catch {
