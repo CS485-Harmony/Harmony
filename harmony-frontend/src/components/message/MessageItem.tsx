@@ -42,7 +42,14 @@ function ReactionList({ reactions, messageId }: { reactions: Reaction[]; message
 
 function PinMenuIcon() {
   return (
-    <svg className='h-3.5 w-3.5 flex-shrink-0' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={2} aria-hidden='true'>
+    <svg
+      className='h-3.5 w-3.5 flex-shrink-0'
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth={2}
+      aria-hidden='true'
+    >
       <path d='M12 17v5' />
       <path d='M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z' />
     </svg>
@@ -52,6 +59,10 @@ function PinMenuIcon() {
 // ─── Hover action bar ─────────────────────────────────────────────────────────
 
 type PinState = 'idle' | 'loading' | 'success' | 'error';
+
+const PIN_ERROR_MESSAGES: Record<number, string> = {
+  403: "You don't have permission to pin messages",
+};
 
 /**
  * Hover/focus-within action bar for a message.
@@ -73,6 +84,7 @@ function ActionBar({
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
+  const [pinErrorMessage, setPinErrorMessage] = useState<string>('Failed');
   const moreRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -100,7 +112,9 @@ function ActionBar({
       setIsPinned(prev => !prev);
       setPinState('success');
       setTimeout(() => setPinState('idle'), 2000);
-    } catch {
+    } catch (err: unknown) {
+      const status = (err as { status?: number }).status;
+      setPinErrorMessage(PIN_ERROR_MESSAGES[status ?? 0] ?? 'Failed to pin message');
       setPinState('error');
       setTimeout(() => setPinState('idle'), 3000);
     }
@@ -112,9 +126,7 @@ function ActionBar({
       {pinState === 'success' && (
         <span className='px-2 text-xs text-green-400'>{isPinned ? '📌 Pinned' : 'Unpinned'}</span>
       )}
-      {pinState === 'error' && (
-        <span className='px-2 text-xs text-red-400'>Failed</span>
-      )}
+      {pinState === 'error' && <span className='px-2 text-xs text-red-400'>{pinErrorMessage}</span>}
 
       {/* Reply (stub) */}
       <button
@@ -123,7 +135,13 @@ function ActionBar({
         title='Reply'
         className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
       >
-        <svg className='h-4 w-4' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true' focusable='false'>
+        <svg
+          className='h-4 w-4'
+          viewBox='0 0 24 24'
+          fill='currentColor'
+          aria-hidden='true'
+          focusable='false'
+        >
           <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
         </svg>
       </button>
@@ -135,7 +153,13 @@ function ActionBar({
         title='Add Reaction'
         className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
       >
-        <svg className='h-4 w-4' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true' focusable='false'>
+        <svg
+          className='h-4 w-4'
+          viewBox='0 0 24 24'
+          fill='currentColor'
+          aria-hidden='true'
+          focusable='false'
+        >
           <path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22C6.486 22 2 17.514 2 12S6.486 2 12 2s10 4.486 10 10-4.486 10-10 10zm-3.5-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm1.476 2.37a.75.75 0 0 0-1.06-1.06 4.5 4.5 0 0 1-6.832 0 .75.75 0 0 0-1.061 1.06 6 6 0 0 0 8.953 0z' />
         </svg>
       </button>
@@ -151,7 +175,13 @@ function ActionBar({
             onClick={() => setIsMoreOpen(v => !v)}
             className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
           >
-            <svg className='h-4 w-4' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true' focusable='false'>
+            <svg
+              className='h-4 w-4'
+              viewBox='0 0 24 24'
+              fill='currentColor'
+              aria-hidden='true'
+              focusable='false'
+            >
               <path d='M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z' />
             </svg>
           </button>
