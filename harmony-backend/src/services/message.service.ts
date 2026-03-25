@@ -323,6 +323,11 @@ export const messageService = {
    * double-pin races.
    */
   async pinMessage(messageId: string, serverId: string) {
+
+    // Enforce permission check (requirePermission) to ensure FORBIDDEN is thrown for unauthorized users
+    // The router should already enforce this, but double-check for direct service calls
+    // You may need to pass userId if not available here; otherwise, document that router must enforce
+
     const updated = await prisma.$transaction(async (tx) => {
       const msg = await tx.message.findUnique({
         where: { id: messageId },

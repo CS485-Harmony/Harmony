@@ -52,6 +52,7 @@ function PinMenuIcon() {
 // ─── Hover action bar ─────────────────────────────────────────────────────────
 
 type PinState = 'idle' | 'loading' | 'success' | 'error';
+type PinError = null | 'permission' | 'generic';
 
 /**
  * Hover/focus-within action bar for a message.
@@ -73,6 +74,7 @@ function ActionBar({
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
+  const [pinError, setPinError] = useState<PinError>(null);
   const moreRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -91,6 +93,7 @@ function ActionBar({
     if (!serverId) return;
     setIsMoreOpen(false);
     setPinState('loading');
+    setPinError(null);
     try {
       if (isPinned) {
         await unpinMessageAction(messageId, serverId);
@@ -100,9 +103,17 @@ function ActionBar({
       setIsPinned(prev => !prev);
       setPinState('success');
       setTimeout(() => setPinState('idle'), 2000);
-    } catch {
+    } catch (err: any) {
+      let permissionDenied = false;
+      if (err && (err.code === 'FORBIDDEN' || /permission|forbidden/i.test(err.message))) {
+        permissionDenied = true;
+      }
+      setPinError(permissionDenied ? 'permission' : 'generic');
       setPinState('error');
-      setTimeout(() => setPinState('idle'), 3000);
+      setTimeout(() => {
+        setPinState('idle');
+        setPinError(null);
+      }, 3000);
     }
   }, [isPinned, messageId, serverId]);
 
@@ -113,7 +124,11 @@ function ActionBar({
         <span className='px-2 text-xs text-green-400'>{isPinned ? '📌 Pinned' : 'Unpinned'}</span>
       )}
       {pinState === 'error' && (
-        <span className='px-2 text-xs text-red-400'>Failed</span>
+        <span className='px-2 text-xs text-red-400'>
+          {pinError === 'permission'
+            ? "You don't have permission to pin messages."
+            : 'Failed to pin message. Please try again.'}
+        </span>
       )}
 
       {/* Reply (stub) */}
