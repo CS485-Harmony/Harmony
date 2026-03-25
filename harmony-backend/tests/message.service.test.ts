@@ -10,6 +10,8 @@ import { PrismaClient } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import bcrypt from 'bcryptjs';
 import { messageService } from '../src/services/message.service';
+import { createCallerFactory, type TRPCContext } from '../src/trpc/init';
+import { messageRouter } from '../src/trpc/routers/message.router';
 
 const prisma = new PrismaClient();
 
@@ -374,6 +376,56 @@ describe('messageService.pinMessage / unpinMessage', () => {
     ).rejects.toThrow(TRPCError);
 
     await prisma.server.delete({ where: { id: otherServer.id } }).catch(() => {});
+  });
+});
+
+// ─── pinMessage — RBAC via router ────────────────────────────────────────────
+//
+// messageService.pinMessage has no actor parameter — permission is enforced by
+// withPermission('message:pin') in the router (MODERATOR+ only).
+// These tests call through the TRPC caller so the middleware runs.
+
+describe('messageRouter.pinMessage — permission enforcement', () => {
+  const createCaller = createCallerFactory(messageRouter);
+
+  function callerAs(userId: string): ReturnType<typeof createCaller> {
+    const ctx: TRPCContext = { userId, ip: '127.0.0.1', userAgent: 'test-agent' };
+    return createCaller(ctx);
+  }
+
+  let messageId: string;
+  let memberId: string;
+
+  beforeAll(async () => {
+    const msg = await messageService.sendMessage({
+      serverId,
+      channelId,
+      authorId,
+      content: 'pin permission test message',
+    });
+    messageId = msg.id;
+
+    const ts = Date.now();
+    const member = await prisma.user.create({
+      data: {
+        email: `pin-member-${ts}@example.com`,
+        username: `pinmember${ts}`,
+        passwordHash: await bcrypt.hash('password', 10),
+        displayName: 'Pin Member',
+      },
+    });
+    memberId = member.id;
+    await prisma.serverMember.create({ data: { userId: memberId, serverId, role: 'MEMBER' } });
+  });
+
+  afterAll(async () => {
+    await prisma.user.delete({ where: { id: memberId } }).catch(() => {});
+  });
+
+  it('throws FORBIDDEN (403) when a MEMBER without message:pin tries to pin', async () => {
+    await expect(
+      callerAs(memberId).pinMessage({ serverId, messageId }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });
 
