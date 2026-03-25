@@ -15,6 +15,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import { formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
 import { pinMessageAction, unpinMessageAction } from '@/app/actions/pinMessage';
+import { TrpcHttpError } from '@/lib/trpc-errors';
 import type { Message, Reaction } from '@/types';
 
 // ─── ReactionList ─────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ function ActionBar({
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
+  const [pinErrorMessage, setPinErrorMessage] = useState<string | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -91,6 +93,7 @@ function ActionBar({
     if (!serverId) return;
     setIsMoreOpen(false);
     setPinState('loading');
+    setPinErrorMessage(null);
     try {
       if (isPinned) {
         await unpinMessageAction(messageId, serverId);
@@ -100,7 +103,12 @@ function ActionBar({
       setIsPinned(prev => !prev);
       setPinState('success');
       setTimeout(() => setPinState('idle'), 2000);
-    } catch {
+    } catch (err) {
+      if (err instanceof TrpcHttpError && err.status === 403) {
+        setPinErrorMessage("You don't have permission to pin messages.");
+      } else {
+        setPinErrorMessage('Failed to pin message. Please try again.');
+      }
       setPinState('error');
       setTimeout(() => setPinState('idle'), 3000);
     }
@@ -113,7 +121,7 @@ function ActionBar({
         <span className='px-2 text-xs text-green-400'>{isPinned ? '📌 Pinned' : 'Unpinned'}</span>
       )}
       {pinState === 'error' && (
-        <span className='px-2 text-xs text-red-400'>Failed</span>
+        <span className='px-2 text-xs text-red-400'>{pinErrorMessage ?? 'Failed'}</span>
       )}
 
       {/* Reply (stub) */}

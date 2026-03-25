@@ -182,11 +182,14 @@ export function HarmonyShell({
 
   const { notifyServerCreated, notifyServerJoined } = useServerListSync();
 
-  // Show the pin UI to all authenticated members — the backend enforces message:pin
-  // permission (MODERATOR+) and will reject unauthorized calls with 403.
-  // Client-side role filtering is unreliable here because localMembers carries the
-  // global platform role, not the server-scoped membership role.
-  const canPin = isAuthenticated;
+  // Issue #236: only show pin UI to MODERATOR+ members of the current server.
+  // This is a UX gate only; the backend remains the source of truth.
+  const memberRecord = localMembers.find(m => m.id === authUser?.id);
+  const canPin =
+    isAuthenticated &&
+    (memberRecord?.role === 'owner' ||
+      memberRecord?.role === 'admin' ||
+      memberRecord?.role === 'moderator');
 
   const handleServerCreated = useCallback(
     (server: Server, defaultChannel: Channel) => {
