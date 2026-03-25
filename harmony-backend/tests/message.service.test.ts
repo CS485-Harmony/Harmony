@@ -9,9 +9,10 @@
 import { PrismaClient } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import bcrypt from 'bcryptjs';
+import request from 'supertest';
+import { createApp } from '../src/app';
+import { authService } from '../src/services/auth.service';
 import { messageService } from '../src/services/message.service';
-import { createCallerFactory, type TRPCContext } from '../src/trpc/init';
-import { messageRouter } from '../src/trpc/routers/message.router';
 
 const prisma = new PrismaClient();
 
@@ -379,21 +380,17 @@ describe('messageService.pinMessage / unpinMessage', () => {
   });
 });
 
-// ─── pinMessage — RBAC via router ────────────────────────────────────────────
+// ─── pinMessage — RBAC via HTTP (issue #236) ─────────────────────────────────
 //
 // messageService.pinMessage has no actor parameter — permission is enforced by
 // withPermission('message:pin') in the router (MODERATOR+ only).
-// These tests call through the TRPC caller so the middleware runs.
+// The bug in #236 is that the HTTP response returns 500 instead of 403 when a
+// MEMBER attempts to pin. This test goes through the full HTTP stack to assert
+// the correct status code.
 
-describe('messageRouter.pinMessage — permission enforcement', () => {
-  const createCaller = createCallerFactory(messageRouter);
-
-  function callerAs(userId: string): ReturnType<typeof createCaller> {
-    const ctx: TRPCContext = { userId, ip: '127.0.0.1', userAgent: 'test-agent' };
-    return createCaller(ctx);
-  }
-
+describe('messageRouter.pinMessage — HTTP 403 for MEMBER (issue #236)', () => {
   let messageId: string;
+  let memberToken: string;
   let memberId: string;
 
   beforeAll(async () => {
@@ -406,13 +403,15 @@ describe('messageRouter.pinMessage — permission enforcement', () => {
     messageId = msg.id;
 
     const ts = Date.now();
-    const member = await prisma.user.create({
-      data: {
-        email: `pin-member-${ts}@example.com`,
-        username: `pinmember${ts}`,
-        passwordHash: await bcrypt.hash('password', 10),
-        displayName: 'Pin Member',
-      },
+    const { accessToken } = await authService.register(
+      `pin-member-${ts}@example.com`,
+      `pinmember${ts}`,
+      'password123',
+    );
+    memberToken = accessToken;
+
+    const member = await prisma.user.findUniqueOrThrow({
+      where: { email: `pin-member-${ts}@example.com` },
     });
     memberId = member.id;
     await prisma.serverMember.create({ data: { userId: memberId, serverId, role: 'MEMBER' } });
@@ -422,10 +421,15 @@ describe('messageRouter.pinMessage — permission enforcement', () => {
     await prisma.user.delete({ where: { id: memberId } }).catch(() => {});
   });
 
-  it('throws FORBIDDEN (403) when a MEMBER without message:pin tries to pin', async () => {
-    await expect(
-      callerAs(memberId).pinMessage({ serverId, messageId }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  it('returns HTTP 403 when a MEMBER without message:pin tries to pin', async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post('/trpc/message.pinMessage')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .set('Content-Type', 'application/json')
+      .send({ serverId, messageId });
+
+    expect(res.status).toBe(403);
   });
 });
 
