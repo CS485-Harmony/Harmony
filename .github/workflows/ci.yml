@@ -8,10 +8,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Each top-level package gets its own job so they run in parallel.
-  # Steps within a job are sequential and share a single install.
-  frontend:
-    name: Frontend
+  # The core CI workflow handles static validation for each package.
+  # Test execution lives in dedicated workflows so failures are easier to spot.
+  frontend-lint-build:
+    name: Frontend Lint and Build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,41 +34,12 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
-        run: npm test
-
-  backend:
-    name: Backend
+  backend-lint-build:
+    name: Backend Lint and Build
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: harmony-backend
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: harmony
-          POSTGRES_PASSWORD: harmony
-          POSTGRES_DB: harmony_dev
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      DATABASE_URL: postgresql://harmony:harmony@localhost:5432/harmony_dev
-      REDIS_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
 
@@ -84,14 +55,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Build
-        run: npm run build
-
       - name: Generate Prisma client
         run: npx prisma generate
 
-      - name: Run migrations
-        run: npx prisma migrate deploy
-
-      - name: Test
-        run: npm test
+      - name: Build
+        run: npm run build
