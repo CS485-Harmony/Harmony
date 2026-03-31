@@ -17,3 +17,9 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 ## Log
 
 <!-- Most recent entries at the top -->
+
+**Date:** 2026-03-31  
+**Caught by:** [Human: @user]  
+**Related Issue:** #269  
+**Mistake / Situation:** I assumed integration testing was blocked after the initial Docker check failed and started converting the service spec to mocked unit tests.  
+**Rule / Fix:** Before changing a test strategy because local infrastructure looks unavailable, re-check whether the dependency can be started or quickly unblocked and prefer the repo's intended environment when the user can provide it.
