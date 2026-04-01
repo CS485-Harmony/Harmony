@@ -1,0 +1,10 @@
+{
+  "name": "harmony",
+  "private": true,
+  "scripts": {
+    "test": "node ./scripts/run-root-jest.cjs",
+    "jest": "node ./scripts/run-root-jest.cjs",
+    "test:backend": "npm --prefix harmony-backend test --",
+    "test:frontend": "npm --prefix harmony-frontend test --"
+  }
+}
