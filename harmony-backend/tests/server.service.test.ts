@@ -344,9 +344,17 @@ describe('serverService.createServer', () => {
     expect(mockServer.create).not.toHaveBeenCalled();
   });
 
-  it('retries once on a transient P2002 and returns the server on the second attempt', async () => {
-    const created = makeServer({ id: 'retry-id' });
-    mockServer.count.mockResolvedValue(0);
+  it('retries once on a transient P2002, regenerates slug, and persists the new slug on the second attempt', async () => {
+    // On the retry generateUniqueSlug call, 'new-server' is now taken so it
+    // falls through to 'new-server-1'.  Sequence:
+    //   call 1 → 0   (initial: 'new-server' free  → use it)
+    //   call 2 → 1   (retry:   'new-server' taken → try next)
+    //   call 3 → 0   (retry:   'new-server-1' free → use it)
+    const created = makeServer({ id: 'retry-id', slug: 'new-server-1' });
+    mockServer.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(0);
     mockServer.create
       .mockRejectedValueOnce(p2002())
       .mockResolvedValueOnce(created);
@@ -354,6 +362,13 @@ describe('serverService.createServer', () => {
     const result = await serverService.createServer({ name: 'New Server', ownerId: 'owner-1' });
     expect(result).toEqual(created);
     expect(mockServer.create).toHaveBeenCalledTimes(2);
+    expect(mockServer.count).toHaveBeenCalledTimes(3); // 1 initial + 2 inside retry
+
+    // Verify the slug actually changed between the first and second create calls
+    const firstSlug = (mockServer.create.mock.calls[0][0] as Record<string, Record<string, unknown>>).data.slug;
+    const secondSlug = (mockServer.create.mock.calls[1][0] as Record<string, Record<string, unknown>>).data.slug;
+    expect(firstSlug).toBe('new-server');
+    expect(secondSlug).toBe('new-server-1');
   });
 
   it('rethrows the raw P2002 (not TRPCError) when withSlugRetry exhausts all 3 attempts', async () => {
@@ -377,7 +392,11 @@ describe('serverService.createServer', () => {
     expect(mockServer.create).toHaveBeenCalledTimes(1);
   });
 
-  it('propagates a createDefaultChannel rejection without swallowing it', async () => {
+  it('propagates a createDefaultChannel rejection and does not proceed to addOwner', async () => {
+    // createServer is implemented as sequential awaits (no prisma.$transaction), so a
+    // failure in createDefaultChannel stops execution at that point.  The server record
+    // created by prisma.server.create is NOT rolled back — this test documents that
+    // actual sequential behavior: addOwner is never reached when the prior step throws.
     const created = makeServer({ id: 'new-id' });
     mockServer.count.mockResolvedValue(0);
     mockServer.create.mockResolvedValue(created);
@@ -386,9 +405,14 @@ describe('serverService.createServer', () => {
 
     await expect(serverService.createServer({ name: 'New Server', ownerId: 'owner-1' }))
       .rejects.toThrow('channel creation failed');
+    // Execution must stop at createDefaultChannel; addOwner must not be called.
+    expect(serverMemberService.addOwner).not.toHaveBeenCalled();
   });
 
-  it('propagates an addOwner rejection without swallowing it', async () => {
+  it('propagates an addOwner rejection after createDefaultChannel has already succeeded', async () => {
+    // Documents that createDefaultChannel ran and completed before addOwner was called,
+    // confirming the sequential execution order.  Neither the server record nor the
+    // default channel is rolled back (no prisma.$transaction in the implementation).
     const created = makeServer({ id: 'new-id' });
     mockServer.count.mockResolvedValue(0);
     mockServer.create.mockResolvedValue(created);
@@ -397,6 +421,8 @@ describe('serverService.createServer', () => {
 
     await expect(serverService.createServer({ name: 'New Server', ownerId: 'owner-1' }))
       .rejects.toThrow('addOwner failed');
+    // createDefaultChannel was called and completed before addOwner threw.
+    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('new-id');
   });
 });
 
@@ -434,13 +460,17 @@ describe('serverService.updateServer', () => {
     expect(mockServer.count).not.toHaveBeenCalled();
   });
 
-  it('allows the owner to rename, regenerates slug, and returns updated record', async () => {
+  it('allows the owner to rename, regenerates slug, and persists the generated slug', async () => {
     const updated = { ...existing, name: 'New Name', slug: 'new-name' };
     mockServer.update.mockResolvedValue(updated);
 
     const result = await serverService.updateServer('srv-1', 'owner-1', { name: 'New Name' });
     expect(result.name).toBe('New Name');
-    expect(mockServer.count).toHaveBeenCalled(); // generateUniqueSlug probes DB
+    expect(mockServer.count).toHaveBeenCalled(); // generateUniqueSlug probed DB for the new slug
+
+    // Verify the slug written to the DB matches what generateUniqueSlug produced
+    const updateArg = mockServer.update.mock.calls[0][0] as Record<string, Record<string, unknown>>;
+    expect(updateArg.data.slug).toBe('new-name'); // generateSlug('New Name') → 'new-name'
   });
 
   it('skips slug regeneration when the name is identical to the current name', async () => {
