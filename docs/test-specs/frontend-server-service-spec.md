@@ -50,8 +50,8 @@ Purpose: return a single server by its slug via the public REST endpoint, or `nu
 Program paths:
 
 - `publicGet` resolves with a valid server record; adapted `Server` is returned.
-- `publicGet` resolves with `null` or a falsy value; the null-guard (`if (!data) return null`) causes the function to return `null`.
-- `publicGet` rejects with any error; the `catch` block logs via `console.error` and returns `null`.
+- `publicGet` resolves with `null` (e.g., 404); the null-guard (`if (!data) return null`) causes the function to return `null`.
+- `publicGet` rejects with any error (e.g., network failure, 401, 403); the `catch` block logs via `console.error` and returns `null`.
 
 ### 3.3 `getServerAuthenticated`
 
@@ -153,6 +153,7 @@ Description: fetches the full list of public servers, adapting each record from 
 | Return empty array when API returns null | `trpcQuery` resolves with `null` | Returns `[]` |
 | Return empty array when API returns undefined | `trpcQuery` resolves with `undefined` | Returns `[]` |
 | Propagate rejection to caller | `trpcQuery` rejects with a network error | The promise rejects with the same error; caller receives it without masking |
+| Propagate 401 unauthorized rejection | `trpcQuery` rejects with a 401 error (unauthenticated caller) | The promise rejects with the 401 error; caller is responsible for redirecting to login |
 | Map iconUrl to icon field | Raw record has `iconUrl: "https://example.com/icon.png"` and no `icon` field | Returned `Server.icon` equals `"https://example.com/icon.png"` |
 | Default memberCount to 0 when absent | Raw record omits `memberCount` | Returned `Server.memberCount` equals `0` |
 
@@ -163,9 +164,9 @@ Description: fetches a single server by slug via the public REST endpoint; all f
 | Test Purpose | Inputs | Expected Output |
 | --- | --- | --- |
 | Return adapted server for valid API response | `slug = "my-server"`; `publicGet` resolves with a full raw server record | Returns a `Server` with all fields correctly mapped |
-| Return null when API returns null | `slug = "my-server"`; `publicGet` resolves with `null` | Returns `null`; no further processing occurs |
-| Return null when API returns falsy | `slug = "my-server"`; `publicGet` resolves with `undefined` | Returns `null` |
-| Return null when API rejects | `slug = "my-server"`; `publicGet` rejects with a network error | Returns `null`; error is logged via `console.error`; promise does not reject |
+| Return null for 404 (publicGet resolves null) | `slug = "my-server"`; `publicGet` resolves with `null` | Returns `null`; no further processing occurs |
+| Return null when API rejects with network error | `slug = "my-server"`; `publicGet` rejects with a network error | Returns `null`; error is logged via `console.error`; promise does not reject |
+| Return null when API rejects with 401 | `slug = "my-server"`; `publicGet` rejects with a 401 error | Returns `null`; error is logged via `console.error`; promise does not reject |
 | URL-encodes the slug | `slug = "my server"`; `publicGet` resolves with a valid record | `publicGet` is called with `/servers/my%20server` |
 | Warn on missing id field | Raw record omits `id`; `publicGet` resolves | Returns a `Server`; `console.warn` is emitted mentioning `"id"` |
 | Warn on missing slug field | Raw record omits `slug`; `publicGet` resolves | Returns a `Server`; `console.warn` is emitted mentioning `"slug"` |
@@ -180,7 +181,8 @@ Description: fetches a single server via the authenticated tRPC endpoint; silent
 | Return adapted server for valid API response | `slug = "my-server"`; `trpcQuery` resolves with a full raw server record | Returns a `Server` with `ownerId` populated |
 | Return null when API returns null | `slug = "my-server"`; `trpcQuery` resolves with `null` | Returns `null` |
 | Return null when API returns falsy | `slug = "my-server"`; `trpcQuery` resolves with `false` | Returns `null` |
-| Return null when API rejects | `slug = "my-server"`; `trpcQuery` rejects with a 403 error | Returns `null`; promise does not reject |
+| Return null when API rejects with 401 | `slug = "my-server"`; `trpcQuery` rejects with a 401 error (unauthenticated) | Returns `null`; promise does not reject; no logging occurs |
+| Return null when API rejects with 403 | `slug = "my-server"`; `trpcQuery` rejects with a 403 error | Returns `null`; promise does not reject |
 | Forward slug to tRPC query | `slug = "test-server"`; `trpcQuery` resolves | `trpcQuery` called with `('server.getServer', { slug: "test-server" })` |
 
 ### 4.4 `getServerMembers`
@@ -192,7 +194,8 @@ Description: fetches all members of a server; silently returns `[]` on any failu
 | Return adapted members for valid API response | `serverId = "s1"`; `trpcQuery` resolves with two valid raw member records | Returns an array of two `User` objects with correctly mapped fields |
 | Return empty array when API returns null | `serverId = "s1"`; `trpcQuery` resolves with `null` | Returns `[]` |
 | Return empty array when API returns undefined | `serverId = "s1"`; `trpcQuery` resolves with `undefined` | Returns `[]` |
-| Return empty array when API rejects | `serverId = "s1"`; `trpcQuery` rejects with a network error | Returns `[]`; error is logged via `console.warn`; promise does not reject |
+| Return empty array when API rejects with network error | `serverId = "s1"`; `trpcQuery` rejects with a network error | Returns `[]`; error is logged via `console.warn`; promise does not reject |
+| Return empty array when API rejects with 401 | `serverId = "s1"`; `trpcQuery` rejects with a 401 error (unauthenticated caller, e.g. guest view) | Returns `[]`; error is logged via `console.warn`; promise does not reject |
 | Map OWNER role to owner | Raw member has `role: "OWNER"` | Returned `User.role` equals `"owner"` |
 | Map ADMIN role to admin | Raw member has `role: "ADMIN"` | Returned `User.role` equals `"admin"` |
 | Map unknown role to member | Raw member has `role: "SUPERUSER"` | Returned `User.role` equals `"member"` |
@@ -213,6 +216,7 @@ Description: sends partial server metadata updates; only defined patch keys are 
 | Update isPublic only | `patch = { isPublic: false }`; `trpcMutate` resolves | Returns adapted `Server`; mutation called with `{ id, isPublic: false }` only |
 | Empty patch sends no extra keys | `patch = {}`; `trpcMutate` resolves | Returns adapted `Server`; mutation called with only `id` |
 | Map icon patch key to iconUrl mutation key | `patch = { icon: "https://example.com/img.png" }`; `trpcMutate` resolves | Mutation receives `iconUrl: "https://example.com/img.png"` and no `icon` key |
+| Propagate 401 unauthorized rejection | Valid patch; `trpcMutate` rejects with a 401 error (expired or missing token) | Promise rejects with the underlying error |
 | Propagate rejection to caller | Valid patch; `trpcMutate` rejects with a 403 error | Promise rejects with the underlying error |
 
 ### 4.6 `deleteServer`
@@ -222,6 +226,7 @@ Description: deletes a server and signals success via a boolean return value.
 | Test Purpose | Inputs | Expected Output |
 | --- | --- | --- |
 | Return true on successful deletion | `id = "s1"`; `trpcMutate` resolves | Returns `true`; `trpcMutate` called with `{ id: "s1" }` |
+| Propagate 401 unauthorized rejection | `id = "s1"`; `trpcMutate` rejects with a 401 error | Promise rejects with the underlying error; `true` is never returned |
 | Propagate rejection to caller | `id = "s1"`; `trpcMutate` rejects with a 404 error | Promise rejects with the underlying error; `true` is never returned |
 
 ### 4.7 `joinServer`
@@ -231,6 +236,7 @@ Description: joins a public server; throws on private servers or duplicate membe
 | Test Purpose | Inputs | Expected Output |
 | --- | --- | --- |
 | Return void on successful join | `serverId = "s1"`; `trpcMutate` resolves | Promise resolves to `undefined`; `trpcMutate` called with `{ serverId: "s1" }` |
+| Propagate 401 unauthorized rejection | `serverId = "s1"`; `trpcMutate` rejects with a 401 error (unauthenticated) | Promise rejects with the underlying error |
 | Propagate rejection for private server | `serverId = "s1"`; `trpcMutate` rejects with a 403 error | Promise rejects with the underlying error |
 | Propagate rejection for duplicate membership | `serverId = "s1"`; `trpcMutate` rejects with a 409 error | Promise rejects with the underlying error |
 
@@ -243,6 +249,7 @@ Description: creates a new server and returns the backend-confirmed record; `isP
 | Create server with all fields | `input = { name: "My Server", description: "Desc", isPublic: true }`; `trpcMutate` resolves | Returns adapted `Server`; mutation called with `{ name, description, isPublic: true }` |
 | Default isPublic to false when omitted | `input = { name: "My Server" }`; `trpcMutate` resolves | Mutation called with `{ name, isPublic: false }`; `description` passed as `undefined` |
 | Create public server | `input = { name: "My Server", isPublic: true }`; `trpcMutate` resolves | Returned `Server` reflects the adapted backend response |
+| Propagate 401 unauthorized rejection | Valid input; `trpcMutate` rejects with a 401 error (unauthenticated) | Promise rejects with the underlying error |
 | Propagate rejection to caller | Valid input; `trpcMutate` rejects with a 400 error | Promise rejects with the underlying error |
 
 ### 4.9 `getServerMembersWithRole`
@@ -260,6 +267,7 @@ Description: fetches all server members with their role and join date as `Server
 | Preserve null avatarUrl | Raw entry's user has `avatarUrl: null` | Returned `ServerMemberInfo.avatarUrl` equals `null` |
 | Forward displayName from user | Raw entry's user has `displayName: "Alice"` | Returned `ServerMemberInfo.displayName` equals `"Alice"` |
 | Null-coerce missing displayName | Raw entry's user has `displayName: undefined` | Returned `ServerMemberInfo.displayName` equals `null` |
+| Propagate 401 unauthorized rejection | `trpcQuery` rejects with a 401 error | Promise rejects with the underlying error |
 | Propagate rejection to caller | `trpcQuery` rejects with a network error | Promise rejects with the underlying error |
 
 ### 4.10 `changeMemberRole`
@@ -271,6 +279,7 @@ Description: changes a server member's role via a tRPC mutation.
 | Change role to ADMIN | `serverId = "s1"`, `targetUserId = "u1"`, `newRole = "ADMIN"`; `trpcMutate` resolves | Promise resolves to `undefined`; `trpcMutate` called with `{ serverId, targetUserId, newRole: "ADMIN" }` |
 | Change role to MODERATOR | `serverId = "s1"`, `targetUserId = "u1"`, `newRole = "MODERATOR"`; `trpcMutate` resolves | Promise resolves to `undefined`; `trpcMutate` called with `{ serverId, targetUserId, newRole: "MODERATOR" }` |
 | Change role to MEMBER | `serverId = "s1"`, `targetUserId = "u1"`, `newRole = "MEMBER"`; `trpcMutate` resolves | Promise resolves to `undefined`; `trpcMutate` called with `{ serverId, targetUserId, newRole: "MEMBER" }` |
+| Propagate 401 unauthorized rejection | Valid args; `trpcMutate` rejects with a 401 error | Promise rejects with the underlying error |
 | Propagate rejection to caller | Valid args; `trpcMutate` rejects with a 403 error | Promise rejects with the underlying error |
 
 ### 4.11 `removeMember`
@@ -280,6 +289,7 @@ Description: removes a server member via a tRPC mutation.
 | Test Purpose | Inputs | Expected Output |
 | --- | --- | --- |
 | Return void on successful removal | `serverId = "s1"`, `targetUserId = "u1"`; `trpcMutate` resolves | Promise resolves to `undefined`; `trpcMutate` called with `{ serverId: "s1", targetUserId: "u1" }` |
+| Propagate 401 unauthorized rejection | Valid args; `trpcMutate` rejects with a 401 error | Promise rejects with the underlying error |
 | Propagate rejection to caller | Valid args; `trpcMutate` rejects with a 404 error | Promise rejects with the underlying error |
 
 ## 5. Edge Cases to Explicitly Validate
@@ -300,6 +310,8 @@ Description: removes a server member via a tRPC mutation.
 
 ## 6. Mock Strategy
 
+> **Note on `apiClient` / `ApiClient`:** Issue #260 describes the mock strategy in terms of `apiClient` / `ApiClient`. `serverService.ts` does not import `ApiClient` directly — it uses the lower-level transport helpers `trpcQuery`, `trpcMutate`, and `publicGet` exported from `@/lib/trpc-client`. This spec mocks those helpers instead, which is the correct point of interception for this service.
+
 All external dependencies are mocked at the module level with `jest.mock`:
 
 ```
@@ -312,12 +324,31 @@ jest.mock('@/lib/trpc-client', () => ({
 
 Reset all mocks in `beforeEach` with `jest.resetAllMocks()` to prevent cross-test contamination.
 
-- **`trpcQuery`** — resolve with well-formed raw objects to test happy paths; reject with an `Error` to test propagation; resolve with `null` or `undefined` to test null-guard branches in `getServers`, `getServerAuthenticated`, `getServerMembers`, and `getServerMembersWithRole`.
-- **`trpcMutate`** — resolve to test `updateServer`, `deleteServer`, `joinServer`, `createServer`, `changeMemberRole`, and `removeMember` happy paths; reject to test error propagation in each.
-- **`publicGet`** — resolve with a full raw server record to test the `getServer` happy path; resolve with `null` or `undefined` to test the null-guard early return; reject with an `Error` to test the `catch` branch.
+- **`trpcQuery`** — resolve with well-formed raw objects to test happy paths; reject with an `Error` (or a typed error with a `status` code) to test propagation; resolve with `null` or `undefined` to test null-guard branches in `getServers`, `getServerAuthenticated`, `getServerMembers`, and `getServerMembersWithRole`.
+- **`trpcMutate`** — resolve to test `updateServer`, `deleteServer`, `joinServer`, `createServer`, `changeMemberRole`, and `removeMember` happy paths; reject with an `Error` carrying a `401`, `403`, or `404` status code to test error propagation in each.
+- **`publicGet`** — resolves with `T | null` only (never `undefined`); resolve with a public server record to test the `getServer` happy path; resolve with `null` to test the 404 early-return path; reject with an `Error` to test the `catch` branch.
 - **`console.warn` / `console.error`** — use `jest.spyOn(console, 'warn')` and `jest.spyOn(console, 'error')` in tests that exercise validation warnings or error logging; restore spies in `afterEach` or use `mockImplementation(() => {})` to suppress test output noise.
 
-A minimal valid raw server record for use in test fixtures:
+### Fixture Shapes
+
+Use distinct fixtures for the two server response shapes, as the public REST endpoint omits fields only returned by the authenticated tRPC endpoint.
+
+**Public REST fixture** (for `publicGet` in `getServer` tests — omits `ownerId`, `isPublic`, `updatedAt`):
+
+```
+{
+  id: "server-1",
+  name: "Test Server",
+  slug: "test-server",
+  iconUrl: undefined,
+  description: undefined,
+  bannerUrl: undefined,
+  memberCount: 5,
+  createdAt: "2026-01-01T00:00:00.000Z",
+}
+```
+
+**Authenticated tRPC fixture** (for `trpcQuery` / `trpcMutate` in all other server tests — includes `ownerId`, `isPublic`, `updatedAt`):
 
 ```
 {
@@ -336,7 +367,7 @@ A minimal valid raw server record for use in test fixtures:
 }
 ```
 
-A minimal valid raw backend member record:
+**Member fixture** (for `trpcQuery` in `getServerMembers` and `getServerMembersWithRole` tests):
 
 ```
 {
@@ -361,7 +392,7 @@ The cases above are intended to cover:
 - all eleven exported functions,
 - every explicit null-guard and early-return branch,
 - successful transport call paths and their return value adaptation,
-- all transport rejection paths and their propagation or suppression behavior,
+- all transport rejection paths (network failures, 401 unauthorized, 403 forbidden, 404 not found) and their propagation or suppression behavior per function,
 - the `publicGet`-based REST path in `getServer` and its error swallowing,
 - both adapter functions (`toFrontendServer` and `toFrontendMember`) with valid and invalid input shapes,
 - all field-level validation warnings in `toFrontendServer` (`id`, `slug`, `createdAt`),
