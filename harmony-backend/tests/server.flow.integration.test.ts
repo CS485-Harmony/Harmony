@@ -10,6 +10,7 @@ import type { Express } from 'express';
 import { ChannelVisibility, ChannelType, RoleType } from '@prisma/client';
 import { createApp } from '../src/app';
 import { prisma } from '../src/db/prisma';
+import { generateSlug } from '../src/services/server.service';
 
 interface RegisteredUser {
   accessToken: string;
@@ -31,6 +32,10 @@ function createCredentials(label: string) {
     email: `server-flow-${suffix}@example.com`,
     username: `server_flow_${suffix}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32),
   };
+}
+
+function createServerName(base: string) {
+  return `${base} ${Date.now()} ${Math.random().toString(36).slice(2, 8)}`;
 }
 
 describe('server flow integration', () => {
@@ -123,8 +128,9 @@ describe('server flow integration', () => {
 
   it('creates a server via tRPC and wires owner membership, default channel, and member queries', async () => {
     const owner = await registerUser('create-owner');
+    const serverName = createServerName('Integration Hub');
     const created = await createServer(owner.accessToken, {
-      name: 'Integration Hub',
+      name: serverName,
       description: 'Primary integration test server',
       isPublic: true,
     });
@@ -133,7 +139,7 @@ describe('server flow integration', () => {
     expect(created.response.status).toBe(200);
     expect(created.response.body.result.data).toMatchObject({
       id: created.id,
-      name: 'Integration Hub',
+      name: serverName,
       slug: created.slug,
     });
 
@@ -152,8 +158,8 @@ describe('server flow integration', () => {
 
     expect(persistedServer).toMatchObject({
       id: created.id,
-      name: 'Integration Hub',
-      slug: 'integration-hub',
+      name: serverName,
+      slug: created.slug,
       description: 'Primary integration test server',
       isPublic: true,
       ownerId: owner.userId,
@@ -455,15 +461,18 @@ describe('server flow integration', () => {
   it('updates server metadata, resolves slug collisions, and deletes the server through tRPC', async () => {
     const owner = await registerUser('lifecycle-owner');
     const otherOwner = await registerUser('collision-owner');
+    const originalName = createServerName('Project Space');
+    const collidingName = createServerName('Renamed Project');
+    const expectedBaseSlug = generateSlug(collidingName);
 
     const created = await createServer(owner.accessToken, {
-      name: 'Project Space',
+      name: originalName,
       description: 'Original server',
       isPublic: true,
     });
 
     const colliding = await createServer(otherOwner.accessToken, {
-      name: 'Renamed Project',
+      name: collidingName,
       isPublic: true,
     });
 
@@ -471,14 +480,14 @@ describe('server flow integration', () => {
     expect(otherOwner.response.status).toBe(201);
     expect(created.response.status).toBe(200);
     expect(colliding.response.status).toBe(200);
-    expect(colliding.slug).toBe('renamed-project');
+    expect(colliding.slug).toBe(expectedBaseSlug);
 
     const updateRes = await request(app)
       .post('/trpc/server.updateServer')
       .set('Authorization', `Bearer ${owner.accessToken}`)
       .send({
         id: created.id,
-        name: 'Renamed Project',
+        name: collidingName,
         description: 'Updated description',
         isPublic: false,
       });
@@ -487,11 +496,11 @@ describe('server flow integration', () => {
     const updatedSlug = updateRes.body.result.data.slug as string;
     expect(updateRes.body.result.data).toMatchObject({
       id: created.id,
-      name: 'Renamed Project',
+      name: collidingName,
       description: 'Updated description',
       isPublic: false,
     });
-    expect(updatedSlug).toMatch(/^renamed-project-\d+$/);
+    expect(updatedSlug).toMatch(new RegExp(`^${expectedBaseSlug}-\\d+$`));
     expect(updatedSlug).not.toBe(colliding.slug);
 
     const updatedServer = await prisma.server.findUnique({
