@@ -13,9 +13,11 @@ import { attachmentRouter } from './routes/attachment.router';
 
 // ─── Auth rate limiters ───────────────────────────────────────────────────────
 
+const isE2E = process.env.NODE_ENV === 'e2e';
+
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10,
+  max: isE2E ? 1000 : 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many login attempts. Please try again later.' },
@@ -31,7 +33,7 @@ const registerLimiter = rateLimit({
 
 const refreshLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 30,
+  max: isE2E ? 1000 : 30,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many token refresh attempts. Please try again later.' },

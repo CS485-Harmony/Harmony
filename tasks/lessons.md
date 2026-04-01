@@ -18,6 +18,12 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 
 <!-- Most recent entries at the top -->
 
+**Date:** 2026-04-01  
+**Caught by:** [Human: @acabrera04]  
+**Related Issue:** N/A  
+**Mistake / Situation:** The new E2E suite passed locally but still failed in CI because production-style auth rate limits and full worker parallelism interacted badly with concurrent browser runs.  
+**Rule / Fix:** When adding full-stack E2E to CI, review backend throttles and shared-state assumptions explicitly; either relax them for `NODE_ENV=e2e` or reduce CI concurrency so auth/setup traffic cannot invalidate the suite.
+
 **Date:** 2026-03-31  
 **Caught by:** [AI Agent: Claude]  
 **Related Issue:** N/A  
