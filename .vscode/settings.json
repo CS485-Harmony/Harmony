@@ -1,0 +1,15 @@
+{
+  "jest.virtualFolders": [
+    {
+      "name": "backend",
+      "rootPath": "harmony-backend",
+      "jestCommandLine": "npm test --"
+    },
+    {
+      "name": "frontend",
+      "rootPath": "harmony-frontend",
+      "jestCommandLine": "npm test --",
+      "useJest30": true
+    }
+  ]
+}
