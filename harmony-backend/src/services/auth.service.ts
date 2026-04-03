@@ -13,6 +13,7 @@ const TIMING_DUMMY_HASH = '$2a$12$invalidhashfortimingequalizerXXXXXXXXXXXXXXXXX
 
 const ACCESS_SECRET = (() => {
   const value = process.env.JWT_ACCESS_SECRET;
+  // istanbul ignore next -- NODE_ENV guard makes this unreachable in Jest (ts-jest transform cache)
   if (!value && process.env.NODE_ENV !== 'test') {
     throw new Error('JWT_ACCESS_SECRET environment variable is not set');
   }
@@ -21,6 +22,7 @@ const ACCESS_SECRET = (() => {
 
 const REFRESH_SECRET = (() => {
   const value = process.env.JWT_REFRESH_SECRET;
+  // istanbul ignore next -- NODE_ENV guard makes this unreachable in Jest (ts-jest transform cache)
   if (!value && process.env.NODE_ENV !== 'test') {
     throw new Error('JWT_REFRESH_SECRET environment variable is not set');
   }
