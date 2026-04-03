@@ -17,3 +17,8 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 ## Log
 
 <!-- Most recent entries at the top -->
+
+**Date:** 2026-04-03  
+**Caught by:** [Human: user]  
+**Mistake / Situation:** I renamed the branch and PR for a log export when the user meant to rename the exported log file itself.  
+**Rule / Fix:** When a user asks to "rename it" during log-export/PR work, confirm whether the target is the file, branch, PR, or commit before changing GitHub metadata; if context strongly points to the artifact path, rename the file first.
