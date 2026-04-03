@@ -129,7 +129,7 @@ Description: creates a channel with type/visibility validation, server existence
 | CS-10 | Allow VOICE channel with PUBLIC_NO_INDEX visibility | `type = VOICE`, `visibility = PUBLIC_NO_INDEX`, valid server and unique slug | Returns created `Channel`; no error thrown |
 | CS-11 | Throw NOT_FOUND when server does not exist | `type = TEXT`, `visibility = PRIVATE`, unknown `serverId` | Throws `TRPCError` with `code === 'NOT_FOUND'` and message `'Server not found'` |
 | CS-12 | Throw CONFLICT when channel slug already exists in the server | Valid `serverId` and `slug` that already exists in that server | Throws `TRPCError` with `code === 'CONFLICT'` and message `'Channel slug already exists in this server'` |
-| CS-13 | Cache and event side effects do not block the return value | Spy `cacheService.set` to reject; spy `eventBus.publish` to reject | `createChannel` still resolves with the created channel; rejection does not propagate |
+| CS-13 | Cache and event side effects do not block the return value | Spy `cacheService.set` to reject; spy `cacheService.invalidate` (the `server:{serverId}:public_channels` call) to reject; spy `eventBus.publish` to reject | `createChannel` still resolves with the created channel; none of the three rejections propagate |
 
 ### 4.4 `updateChannel`
 
@@ -143,7 +143,8 @@ Description: patches mutable channel fields and invalidates caches; publishes an
 | CS-17 | Throw NOT_FOUND when channel does not exist | Unknown `channelId`; any `serverId` | Throws `TRPCError` with `code === 'NOT_FOUND'` and message `'Channel not found in this server'` |
 | CS-18 | Throw NOT_FOUND when channel belongs to a different server | Valid `channelId` that exists but under a different `serverId` | Throws `TRPCError` with `code === 'NOT_FOUND'` and message `'Channel not found in this server'` |
 | CS-19 | CHANNEL_UPDATED event payload contains channelId, serverId, and timestamp | Any successful update | `eventBus.publish` called with `EventChannels.CHANNEL_UPDATED` and payload `{ channelId, serverId, timestamp }` |
-| CS-20 | Cache and event side effects do not block the return value | Spy `cacheService.invalidatePattern` to reject; spy `eventBus.publish` to reject | `updateChannel` still resolves with the updated channel; rejection does not propagate |
+| CS-20 | Cache and event side effects do not block the return value | Spy `cacheService.invalidatePattern` to reject; spy `cacheService.invalidate` (the `server:{serverId}:public_channels` call) to reject; spy `eventBus.publish` to reject | `updateChannel` still resolves with the updated channel; none of the three rejections propagate |
+| CS-28 | All-undefined patch still applies update and fires side effects | Existing `channelId` and matching `serverId`; `patch = { name: undefined, topic: undefined, position: undefined }` | `prisma.channel.update` is still called with `data: {}`; `cacheService.invalidatePattern`, `cacheService.invalidate`, and `eventBus.publish` are each called exactly once |
 
 ### 4.5 `deleteChannel`
 
