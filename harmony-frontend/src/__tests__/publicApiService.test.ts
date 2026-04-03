@@ -102,11 +102,14 @@ describe('publicApiService', () => {
       });
     });
 
-    it('returns null when the public server request is not ok', async () => {
-      mockFetch.mockResolvedValue(makeResponse({}, { ok: false, status: 500 }));
+    it.each([403, 404, 500])(
+      'returns null when the public server request responds with %s',
+      async status => {
+        mockFetch.mockResolvedValue(makeResponse({}, { ok: false, status }));
 
-      await expect(fetchPublicServer('missing')).resolves.toBeNull();
-    });
+        await expect(fetchPublicServer('missing')).resolves.toBeNull();
+      },
+    );
 
     it('returns null when fetching the public server throws', async () => {
       mockFetch.mockRejectedValue(new Error('offline'));
@@ -120,15 +123,15 @@ describe('publicApiService', () => {
       {
         label: 'voice channels and public no-index visibility',
         response: makePublicChannelResponse({
-          name: 'announcements',
-          slug: 'announcements',
+          name: 'help and support',
+          slug: 'help-support',
           type: 'VOICE',
           visibility: 'PUBLIC_NO_INDEX',
           topic: null,
           position: 3,
         }),
         serverSlug: 'harmony hq',
-        channelSlug: 'announcements',
+        channelSlug: 'help & support',
         expectedType: ChannelType.VOICE,
         expectedVisibility: ChannelVisibility.PUBLIC_NO_INDEX,
         expectedTopic: undefined,
@@ -247,16 +250,16 @@ describe('publicApiService', () => {
         }),
       );
 
-      const result = await fetchPublicMessages('channel/1', 2);
+      const result = await fetchPublicMessages('c1', 1);
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:4000/api/public/channels/channel%2F1/messages?page=2',
+        'http://localhost:4000/api/public/channels/c1/messages?page=1',
       );
       expect(result).toEqual({
         messages: [
           {
             id: 'msg-1',
-            channelId: 'channel/1',
+            channelId: 'c1',
             authorId: 'user-1',
             author: { id: 'user-1', username: 'alice' },
             content: 'First public message',
@@ -265,7 +268,7 @@ describe('publicApiService', () => {
           },
           {
             id: 'msg-2',
-            channelId: 'channel/1',
+            channelId: 'c1',
             authorId: 'user-2',
             author: { id: 'user-2', username: 'bob' },
             content: 'Second public message',
@@ -294,13 +297,13 @@ describe('publicApiService', () => {
         }),
       );
 
-      const result = await fetchPublicMessages('channel-2');
+      const result = await fetchPublicMessages('c1', 2);
 
       expect(result).toEqual({
         messages: [
           {
             id: 'msg-3',
-            channelId: 'channel-2',
+            channelId: 'c1',
             authorId: 'user-3',
             author: { id: 'user-3', username: 'charlie' },
             content: 'Only message',
@@ -312,14 +315,53 @@ describe('publicApiService', () => {
       });
     });
 
-    it('returns an empty result when the messages request is not ok', async () => {
-      mockFetch.mockResolvedValue(makeResponse({}, { ok: false, status: 500 }));
+    it('defaults page to 1 and URL-encodes the channel id', async () => {
+      mockFetch.mockResolvedValue(
+        makeResponse({
+          messages: [],
+          page: 1,
+          pageSize: 2,
+        }),
+      );
 
-      await expect(fetchPublicMessages('channel-3')).resolves.toEqual({
+      const result = await fetchPublicMessages('channel/with space');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:4000/api/public/channels/channel%2Fwith%20space/messages?page=1',
+      );
+      expect(result).toEqual({
         messages: [],
         hasMore: false,
       });
     });
+
+    it('forwards an explicit page number in the request URL', async () => {
+      mockFetch.mockResolvedValue(
+        makeResponse({
+          messages: [],
+          page: 3,
+          pageSize: 2,
+        }),
+      );
+
+      await fetchPublicMessages('c1', 3);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:4000/api/public/channels/c1/messages?page=3',
+      );
+    });
+
+    it.each([403, 404, 500])(
+      'returns an empty result when the messages request responds with %s',
+      async status => {
+        mockFetch.mockResolvedValue(makeResponse({}, { ok: false, status }));
+
+        await expect(fetchPublicMessages('channel-3')).resolves.toEqual({
+          messages: [],
+          hasMore: false,
+        });
+      },
+    );
 
     it('returns an empty result when the messages request throws', async () => {
       mockFetch.mockRejectedValue(new Error('timeout'));
@@ -345,6 +387,15 @@ describe('publicApiService', () => {
         expected: true,
       },
       {
+        label: 'the channel is public but no-index',
+        responseBody: makePublicChannelResponse({
+          id: 'ch-5',
+          visibility: 'PUBLIC_NO_INDEX',
+          createdAt: '2026-02-18T00:00:00.000Z',
+        }),
+        expected: true,
+      },
+      {
         label: 'the channel is private',
         responseBody: {},
         responseInit: { ok: false, status: 403 },
@@ -356,10 +407,22 @@ describe('publicApiService', () => {
         responseInit: { ok: false, status: 404 },
         expected: false,
       },
-    ])('returns $expected when $label', async ({ responseBody, responseInit, expected }) => {
-      mockFetch.mockResolvedValue(makeResponse(responseBody, responseInit));
+      {
+        label: 'the channel lookup fails',
+        rejectWith: new Error('network down'),
+        expected: false,
+      },
+    ])(
+      'returns $expected when $label',
+      async ({ responseBody, responseInit, rejectWith, expected }) => {
+        if (rejectWith) {
+          mockFetch.mockRejectedValue(rejectWith);
+        } else {
+          mockFetch.mockResolvedValue(makeResponse(responseBody, responseInit));
+        }
 
-      await expect(isChannelGuestAccessible('harmony-hq', 'general')).resolves.toBe(expected);
-    });
+        await expect(isChannelGuestAccessible('harmony-hq', 'general')).resolves.toBe(expected);
+      },
+    );
   });
 });
