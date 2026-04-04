@@ -29,3 +29,7 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 **Related Issue:** N/A  
 **Mistake / Situation:** I initially called a mocked page-level test an integration test and also let a backend integration suite depend on state created in a prior `it` block.  
 **Rule / Fix:** In this repo, only call a test "integration" when it crosses real module boundaries without mocking application internals, and keep each integration test self-contained so it does not rely on execution order across `it` blocks.
+**Date:** 2026-04-03  
+**Caught by:** [Human: user]  
+**Mistake / Situation:** I renamed the branch and PR for a log export when the user meant to rename the exported log file itself.  
+**Rule / Fix:** When a user asks to "rename it" during log-export/PR work, confirm whether the target is the file, branch, PR, or commit before changing GitHub metadata; if context strongly points to the artifact path, rename the file first.
