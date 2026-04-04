@@ -56,7 +56,7 @@ reachable execution paths when the cases below are run.
   use the real `cacheMiddleware` with a mocked `cacheService`.
 - **tokenBucketRateLimiter** — mock `tokenBucketRateLimiter` to call `next()`
   immediately for all tests except those explicitly targeting rate-limiting
-  behavior (PR-22 and PR-23). This prevents per-IP bucket state from leaking
+  behavior (PR-47 and PR-48). This prevents per-IP bucket state from leaking
   between tests.
 - All mocks are reset between tests (`jest.resetAllMocks()` in `beforeEach`).
 - **Visibility enum values** used throughout:
@@ -230,6 +230,7 @@ Description: stale-while-revalidate behavior exercised via the real
 | PR-19 | Fall through to handler on cache MISS | `cacheService.get` returns `null` | `X-Cache: MISS` header set; route handler executes; Prisma is called |
 | PR-20 | Fall through to handler when Redis throws | `cacheService.get` throws | No crash; route handler executes normally |
 | PR-21 | Cache key for message list includes channelId and page | Request to `/channels/ch-abc/messages?page=2` | `cacheService.get` called with key `channel:msgs:ch-abc:page:2` |
+| PR-21b | Cache key for single message uses distinct schema (no `s`, no `page`) | Request to `/channels/ch-abc/messages/msg-xyz` | `cacheService.get` called with key `channel:msg:ch-abc:msg-xyz` |
 
 ### 4.4 `GET /servers`
 
@@ -291,8 +292,8 @@ Description: token bucket rate limiter applied globally to `publicRouter`.
 
 | Test ID | Test Purpose | Inputs | Expected Output / Side Effects |
 | ------- | ------------ | ------ | ------------------------------ |
-| PR-22 | Allow requests within rate limit | Real `tokenBucketRateLimiter`; requests from a single IP within the bucket capacity | All requests pass through to the handler; HTTP 200 responses |
-| PR-23 | Reject requests that exceed rate limit | Real `tokenBucketRateLimiter`; burst more requests than the bucket capacity allows | Excess requests receive HTTP 429 (Too Many Requests) before reaching the handler |
+| PR-47 | Allow requests within rate limit | Real `tokenBucketRateLimiter`; requests from a single IP within the bucket capacity | All requests pass through to the handler; HTTP 200 responses |
+| PR-48 | Reject requests that exceed rate limit | Real `tokenBucketRateLimiter`; burst more requests than the bucket capacity allows | Excess requests receive HTTP 429 (Too Many Requests) before reaching the handler |
 
 ---
 
