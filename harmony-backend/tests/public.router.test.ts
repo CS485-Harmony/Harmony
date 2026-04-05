@@ -653,13 +653,21 @@ describe('Rate limiting on publicRouter', () => {
   it('PR-23: returns 429 after exhausting the token bucket', async () => {
     mockPrisma.server.findMany.mockResolvedValue([]);
 
-    // Exhaust the 100-token human bucket
-    for (let i = 0; i < 100; i++) {
-      await request(app).get('/api/public/servers');
-    }
+    // Freeze time so the token bucket cannot partially refill between requests,
+    // making the 101st call deterministically return 429 on any CI speed.
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
 
-    const res = await request(app).get('/api/public/servers');
-    expect(res.status).toBe(429);
-    expect(res.body).toHaveProperty('error');
+    try {
+      // Exhaust the 100-token human bucket at a fixed instant so no refill occurs
+      for (let i = 0; i < 100; i++) {
+        await request(app).get('/api/public/servers');
+      }
+
+      const res = await request(app).get('/api/public/servers');
+      expect(res.status).toBe(429);
+      expect(res.body).toHaveProperty('error');
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });
