@@ -210,7 +210,7 @@ describe('GET /api/public/channels/:channelId/messages', () => {
     expect(res.body).toHaveProperty('pageSize', 50);
   });
 
-  it('returns 200 respecting the ?page query parameter', async () => {
+  it('PR-2: returns correct page and passes skip/take to Prisma when ?page=3', async () => {
     mockPrisma.channel.findUnique.mockResolvedValue({
       id: CHANNEL.id,
       visibility: ChannelVisibility.PUBLIC_INDEXABLE,
@@ -221,9 +221,12 @@ describe('GET /api/public/channels/:channelId/messages', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('page', 3);
+    expect(mockPrisma.message.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 100, take: 50 }),
+    );
   });
 
-  it('clamps invalid ?page values to 1', async () => {
+  it('PR-3/PR-4: clamps invalid ?page values to 1 and passes skip:0 to Prisma', async () => {
     mockPrisma.channel.findUnique.mockResolvedValue({
       id: CHANNEL.id,
       visibility: ChannelVisibility.PUBLIC_INDEXABLE,
@@ -233,8 +236,17 @@ describe('GET /api/public/channels/:channelId/messages', () => {
     const zeroPage = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages?page=0`);
     expect(zeroPage.status).toBe(200);
     expect(zeroPage.body).toHaveProperty('page', 1);
+    expect(mockPrisma.message.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 50 }),
+    );
 
+    jest.clearAllMocks();
     _clearBucketsForTesting();
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([]);
 
     const negPage = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages?page=-5`);
     expect(negPage.status).toBe(200);
@@ -445,6 +457,8 @@ describe('Cache middleware behavior (routes 1 and 2)', () => {
     expect(res.status).toBe(200);
     expect(res.headers['x-cache']).toBe('STALE');
     expect(res.body).toMatchObject(staleBody);
+    // Background revalidation: handler must have reached Prisma to refresh the cache
+    expect(mockPrisma.channel.findUnique).toHaveBeenCalled();
   });
 
   it('PR-19: sets X-Cache: MISS and calls through to handler on a cache miss', async () => {
