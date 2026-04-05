@@ -342,6 +342,23 @@ describe('GET /api/public/channels/:channelId/messages/:messageId', () => {
     expect(res.body).toHaveProperty('error');
   });
 
+  it('PR-15: returns 404 when message is soft-deleted (isDeleted: false filter)', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    // findFirst returns null because the soft-deleted message is excluded by isDeleted: false
+    mockPrisma.message.findFirst.mockResolvedValue(null);
+
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty('error', 'Message not found');
+    expect(mockPrisma.message.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ isDeleted: false }) }),
+    );
+  });
+
   it('PR-16: returns 500 on unexpected Prisma error', async () => {
     mockPrisma.channel.findUnique.mockRejectedValue(new Error('DB down'));
 
@@ -355,6 +372,19 @@ describe('GET /api/public/channels/:channelId/messages/:messageId', () => {
 // ─── GET /api/public/channels/:channelId/messages — additional assertions ─────
 
 describe('GET /api/public/channels/:channelId/messages — additional', () => {
+  it('PR-5: defaults page to 1 when ?page is non-numeric', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([]);
+
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages?page=abc`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('page', 1);
+  });
+
   it('PR-9: only queries non-deleted messages (isDeleted: false filter)', async () => {
     mockPrisma.channel.findUnique.mockResolvedValue({
       id: CHANNEL.id,
@@ -376,6 +406,98 @@ describe('GET /api/public/channels/:channelId/messages — additional', () => {
 
     expect(res.status).toBe(500);
     expect(res.body).toHaveProperty('error', 'Internal server error');
+  });
+});
+
+// ─── Cache middleware behavior (routes 1 and 2) ───────────────────────────────
+
+describe('Cache middleware behavior (routes 1 and 2)', () => {
+  it('PR-17: sets X-Cache: HIT and does not call Prisma on a fresh cache entry', async () => {
+    const cachedBody = { messages: [MESSAGE], page: 1, pageSize: 50 };
+    mockCacheService.get.mockResolvedValueOnce({ data: cachedBody, createdAt: Date.now() });
+    mockCacheService.isStale.mockReturnValueOnce(false);
+
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers['x-cache']).toBe('HIT');
+    expect(mockPrisma.channel.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('PR-18: sets X-Cache: STALE and serves stale body on a stale cache entry', async () => {
+    // Use pre-serialized plain objects (no Date instances) to match what the HTTP
+    // response body looks like after JSON round-trip.
+    const staleBody = {
+      messages: [{ id: MESSAGE.id, content: MESSAGE.content }],
+      page: 1,
+      pageSize: 50,
+    };
+    mockCacheService.get.mockResolvedValueOnce({ data: staleBody, createdAt: Date.now() - 999999 });
+    mockCacheService.isStale.mockReturnValueOnce(true);
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([MESSAGE]);
+
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers['x-cache']).toBe('STALE');
+    expect(res.body).toMatchObject(staleBody);
+  });
+
+  it('PR-19: sets X-Cache: MISS and calls through to handler on a cache miss', async () => {
+    // Default: cacheService.get returns null (cache miss)
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([MESSAGE]);
+
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers['x-cache']).toBe('MISS');
+    expect(mockPrisma.channel.findUnique).toHaveBeenCalled();
+  });
+
+  it('PR-20: falls through to handler without crashing when Redis throws on cache read', async () => {
+    mockCacheService.get.mockRejectedValueOnce(new Error('Redis down'));
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([MESSAGE]);
+
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages`);
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.channel.findUnique).toHaveBeenCalled();
+  });
+
+  it('PR-21: cache key for message list includes channelId and page number', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: 'ch-abc',
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([]);
+
+    await request(app).get('/api/public/channels/ch-abc/messages?page=2');
+
+    expect(mockCacheService.get).toHaveBeenCalledWith('channel:msgs:ch-abc:page:2');
+  });
+
+  it('PR-21b: cache key for single message uses channelId and messageId', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findFirst.mockResolvedValue(MESSAGE);
+
+    await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`);
+
+    expect(mockCacheService.get).toHaveBeenCalledWith(`channel:msg:${CHANNEL.id}:${MESSAGE.id}`);
   });
 });
 
@@ -470,6 +592,28 @@ describe('GET /api/public/servers/:serverSlug — cache headers', () => {
     expect(res.status).toBe(200);
     expect(res.headers['x-cache']).toBe('MISS');
     expect(mockCacheService.getOrRevalidate).toHaveBeenCalled();
+  });
+
+  it('PR-29: returns 200 with X-Cache: MISS and X-Cache-Key on a cache miss', async () => {
+    mockPrisma.server.findUnique.mockResolvedValue(SERVER);
+    // Default: cacheService.get returns null (cache miss)
+
+    const res = await request(app).get(`/api/public/servers/${SERVER.slug}`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers['x-cache']).toBe('MISS');
+    expect(res.headers['x-cache-key']).toBe(`server:${SERVER.id}:info`);
+    expect(res.headers['cache-control']).toContain('max-age=300');
+  });
+
+  it('PR-33: returns 404 and never calls cacheService.getOrRevalidate when server slug does not exist', async () => {
+    mockPrisma.server.findUnique.mockResolvedValue(null);
+
+    const res = await request(app).get('/api/public/servers/no-such-server');
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty('error', 'Server not found');
+    expect(mockCacheService.getOrRevalidate).not.toHaveBeenCalled();
   });
 
   it('PR-34: returns 500 when getOrRevalidate throws', async () => {
