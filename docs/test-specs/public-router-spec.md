@@ -58,7 +58,12 @@ reachable execution paths when the cases below are run.
   immediately for all tests except those explicitly targeting rate-limiting
   behavior (PR-47 and PR-48). This prevents per-IP bucket state from leaking
   between tests.
-- All mocks are reset between tests (`jest.resetAllMocks()` in `beforeEach`).
+- All mocks are cleared between tests (`jest.clearAllMocks()` in `beforeEach`).
+  Use `clearAllMocks` rather than `resetAllMocks`: `clearAllMocks` wipes call
+  history and return-value queues but preserves mock implementations, so the
+  default pass-through implementations for `tokenBucketRateLimiter` and
+  `cacheService` remain active across tests without needing to be re-declared
+  after every reset.
 - **Visibility enum values** used throughout:
   - `PUBLIC_INDEXABLE` — channel is visible to guests and indexed by search engines.
   - `PUBLIC_NO_INDEX` — channel is visible to guests but carries `noindex`
@@ -290,10 +295,16 @@ PRIVATE, 200 for PUBLIC_INDEXABLE and PUBLIC_NO_INDEX.
 
 Description: token bucket rate limiter applied globally to `publicRouter`.
 
+**Setup note:** The limiter stores per-IP buckets in module scope. Any suite that
+exercises the real `tokenBucketRateLimiter` (i.e., PR-47 and PR-48) must call
+`_clearBucketsForTesting()` in `beforeEach` to drain leftover tokens from prior
+tests. Without this reset the tests become order-dependent and PR-48's 429
+assertion may trigger unexpectedly early or never fire at all.
+
 | Test ID | Test Purpose | Inputs | Expected Output / Side Effects |
 | ------- | ------------ | ------ | ------------------------------ |
-| PR-47 | Allow requests within rate limit | Real `tokenBucketRateLimiter`; requests from a single IP within the bucket capacity | All requests pass through to the handler; HTTP 200 responses |
-| PR-48 | Reject requests that exceed rate limit | Real `tokenBucketRateLimiter`; burst more requests than the bucket capacity allows | Excess requests receive HTTP 429 (Too Many Requests) before reaching the handler |
+| PR-47 | Allow requests within rate limit | Real `tokenBucketRateLimiter`; `_clearBucketsForTesting()` called in `beforeEach`; requests from a single IP within the bucket capacity | All requests pass through to the handler; HTTP 200 responses |
+| PR-48 | Reject requests that exceed rate limit | Real `tokenBucketRateLimiter`; `_clearBucketsForTesting()` called in `beforeEach`; burst more requests than the bucket capacity allows | Excess requests receive HTTP 429 (Too Many Requests) before reaching the handler |
 
 ---
 
