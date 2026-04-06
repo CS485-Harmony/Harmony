@@ -1,0 +1,50 @@
+name: Frontend E2E
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  frontend-e2e:
+    name: Run Frontend E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            harmony-frontend/package-lock.json
+            harmony-backend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: harmony-frontend
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: harmony-backend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: harmony-frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run frontend E2E tests
+        working-directory: harmony-frontend
+        run: npm run test:e2e
+
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            harmony-frontend/playwright-report
+            harmony-frontend/test-results
+          if-no-files-found: ignore

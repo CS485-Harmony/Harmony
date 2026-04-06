@@ -2,6 +2,10 @@
 
 # dependencies
 /node_modules
+/.next
+/playwright-report
+/test-results
+/.cache/ms-playwright
 /.pnp
 .pnp.*
 .yarn/*
