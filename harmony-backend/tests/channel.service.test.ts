@@ -44,6 +44,7 @@ jest.mock('../src/services/cache.service', () => ({
 
 import { PrismaClient, ChannelType, ChannelVisibility } from '@prisma/client';
 import { channelService } from '../src/services/channel.service';
+import { prisma as servicePrisma } from '../src/db/prisma';
 
 const prisma = new PrismaClient();
 const ts = Date.now();
@@ -243,6 +244,9 @@ describe('channelService.createChannel', () => {
   });
 
   it('CS-8: throws BAD_REQUEST for VOICE + PUBLIC_INDEXABLE before any DB call', async () => {
+    const serverSpy = jest.spyOn(servicePrisma.server, 'findUnique');
+    const channelCreateSpy = jest.spyOn(servicePrisma.channel, 'create');
+
     await expect(
       channelService.createChannel({
         serverId,
@@ -257,6 +261,13 @@ describe('channelService.createChannel', () => {
         message: 'VOICE channels cannot have PUBLIC_INDEXABLE visibility',
       }),
     );
+
+    // Guard fires before any Prisma call
+    expect(serverSpy).not.toHaveBeenCalled();
+    expect(channelCreateSpy).not.toHaveBeenCalled();
+
+    serverSpy.mockRestore();
+    channelCreateSpy.mockRestore();
   });
 
   it('CS-9: allows VOICE channel with PRIVATE visibility', async () => {
