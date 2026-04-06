@@ -27,6 +27,8 @@ cd ..
 
 The root package exposes convenience scripts that delegate to each app:
 
+Commands that execute backend tests still depend on the PostgreSQL, Redis, `.env`, and Prisma setup documented in the backend section below.
+
 ```bash
 # Run frontend and backend tests
 npm run test
