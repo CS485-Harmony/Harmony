@@ -106,6 +106,16 @@ const MESSAGE = {
 
 let app: ReturnType<typeof createApp>;
 
+async function withSilencedConsoleError<T>(run: () => Promise<T>): Promise<T> {
+  const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+  try {
+    return await run();
+  } finally {
+    consoleErrorSpy.mockRestore();
+  }
+}
+
 beforeAll(() => {
   app = createApp();
 });
@@ -374,7 +384,9 @@ describe('GET /api/public/channels/:channelId/messages/:messageId', () => {
   it('PR-16: returns 500 on unexpected Prisma error', async () => {
     mockPrisma.channel.findUnique.mockRejectedValue(new Error('DB down'));
 
-    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`);
+    const res = await withSilencedConsoleError(() =>
+      request(app).get(`/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`),
+    );
 
     expect(res.status).toBe(500);
     expect(res.body).toHaveProperty('error', 'Internal server error');
@@ -414,7 +426,9 @@ describe('GET /api/public/channels/:channelId/messages — additional', () => {
   it('PR-10: returns 500 on unexpected Prisma error', async () => {
     mockPrisma.channel.findUnique.mockRejectedValue(new Error('DB down'));
 
-    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages`);
+    const res = await withSilencedConsoleError(() =>
+      request(app).get(`/api/public/channels/${CHANNEL.id}/messages`),
+    );
 
     expect(res.status).toBe(500);
     expect(res.body).toHaveProperty('error', 'Internal server error');
@@ -565,7 +579,7 @@ describe('GET /api/public/servers', () => {
   it('PR-28: returns 500 on unexpected Prisma error', async () => {
     mockPrisma.server.findMany.mockRejectedValue(new Error('DB down'));
 
-    const res = await request(app).get('/api/public/servers');
+    const res = await withSilencedConsoleError(() => request(app).get('/api/public/servers'));
 
     expect(res.status).toBe(500);
     expect(res.body).toHaveProperty('error', 'Internal server error');
@@ -634,7 +648,9 @@ describe('GET /api/public/servers/:serverSlug — cache headers', () => {
     mockPrisma.server.findUnique.mockResolvedValue(SERVER);
     mockCacheService.getOrRevalidate.mockRejectedValueOnce(new Error('Cache failure'));
 
-    const res = await request(app).get(`/api/public/servers/${SERVER.slug}`);
+    const res = await withSilencedConsoleError(() =>
+      request(app).get(`/api/public/servers/${SERVER.slug}`),
+    );
 
     expect(res.status).toBe(500);
     expect(res.body).toHaveProperty('error', 'Internal server error');
@@ -699,7 +715,9 @@ describe('GET /api/public/servers/:serverSlug/channels — additional', () => {
     mockPrisma.server.findUnique.mockResolvedValue({ id: SERVER.id });
     mockCacheService.getOrRevalidate.mockRejectedValueOnce(new Error('Cache failure'));
 
-    const res = await request(app).get(`/api/public/servers/${SERVER.slug}/channels`);
+    const res = await withSilencedConsoleError(() =>
+      request(app).get(`/api/public/servers/${SERVER.slug}/channels`),
+    );
 
     expect(res.status).toBe(500);
     expect(res.body).toHaveProperty('error', 'Internal server error');
@@ -802,8 +820,8 @@ describe('GET /api/public/servers/:serverSlug/channels/:channelSlug', () => {
   it('PR-46: returns 500 on unexpected Prisma error', async () => {
     mockPrisma.server.findUnique.mockRejectedValue(new Error('DB down'));
 
-    const res = await request(app).get(
-      `/api/public/servers/${SERVER.slug}/channels/${CHANNEL.slug}`,
+    const res = await withSilencedConsoleError(() =>
+      request(app).get(`/api/public/servers/${SERVER.slug}/channels/${CHANNEL.slug}`),
     );
 
     expect(res.status).toBe(500);
