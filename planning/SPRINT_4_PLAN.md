@@ -100,12 +100,15 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Document production env vars for frontend, backend API, and worker
 - Define domain plan (`frontend` domain + `api` subdomain)
 - Define promotion flow for preview vs production
-- Produce a short architecture section for the sprint and README
+- Produce and save a reference document at `docs/deployment/deployment-architecture.md`
+  - this document is the canonical reference for service topology, domain ownership, env vars, deploy authority, and preview vs production behavior
+  - later deployment issues should link to and update this document instead of redefining architecture assumptions
 - Acceptance criteria:
   - Clear service inventory
   - Clear env var matrix
   - Clear ownership of public vs internal services
   - Explicit decision that `backend-api` scales to 2+ replicas and `backend-worker` stays singleton
+  - `docs/deployment/deployment-architecture.md` exists and is usable as the canonical reference for downstream issues
 - Assignee: **acabrera04**
 - Backup owner: **declanblanc**
 - Due: April 9
@@ -120,11 +123,15 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - duplicate startup subscribers / background jobs
   - SSE behavior behind load balancing
   - proxy/IP handling
-- Produce a concrete "replica-safe backend" checklist for implementation
+- Produce and save a reference document at `docs/deployment/replica-readiness-audit.md`
+  - include the concrete "replica-safe backend" checklist for implementation
+  - include must-fix items, acceptable demo-time risks, and explicit ownership boundaries between `backend-api` and `backend-worker`
+  - later scaling/deployment issues should cite this document when implementing or validating replica-safe behavior
 - Acceptance criteria:
   - Checklist references the actual code areas that must change
   - Risks are prioritized into must-fix vs acceptable-for-demo
   - `backend-api` vs `backend-worker` responsibilities are finalized
+  - `docs/deployment/replica-readiness-audit.md` exists and is detailed enough for downstream implementation/validation issues to reference directly
 - Assignee: **declanblanc**
 - Backup owner: **acabrera04**
 - Due: April 9
@@ -138,6 +145,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - public-route token bucket limiting
 - Ensure auth and public API rate limits remain correct across 2+ replicas
 - Configure Express proxy awareness so client IP handling works correctly behind Railway
+- Use `docs/deployment/replica-readiness-audit.md` as the implementation checklist and update it with final decisions
 - Acceptance criteria:
   - Public and auth rate limits are shared across replicas
   - No process-local auth or public-route limit counters remain in production code paths
@@ -152,6 +160,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Keep local storage available for development only
 - Add env-driven provider selection and document required secrets
 - Ensure uploaded files remain accessible regardless of which API replica serves subsequent requests
+- Follow `docs/deployment/replica-readiness-audit.md` for replica-safe storage requirements and update `docs/deployment/deployment-architecture.md` with the final env/config contract
 - Acceptance criteria:
   - Production does not rely on local filesystem attachment serving
   - The chosen production provider is Cloudflare R2, documented as such in code and setup docs
@@ -170,6 +179,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - instance identity in structured logs
   - instance/replica identity on health output and/or response headers
 - Add startup commands for both Railway backend services
+- Use `docs/deployment/replica-readiness-audit.md` to drive the split and record the final `backend-api` / `backend-worker` ownership model there and in `docs/deployment/deployment-architecture.md`
 - Acceptance criteria:
   - `backend-api` can run with 2+ replicas without duplicate singleton background side effects
   - `backend-worker` runs with 1 replica and owns singleton event-driven tasks
@@ -195,6 +205,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - backend SEO routes may continue to generate sitemap/XML data as an internal or transitional source, but they are not the canonical crawler-facing host in production
   - no SEO artifact should require crawlers to use the API subdomain as the primary source of truth
 - Ensure frontend still supports localhost development cleanly
+- Use `docs/deployment/deployment-architecture.md` as the source of truth for domain ownership, public URLs, and SEO host decisions
 - Acceptance criteria:
   - Public pages generate correct production metadata
   - Canonical host ownership is explicit and consistent across frontend and backend docs/code
@@ -213,6 +224,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - `redis`
 - Configure internal networking, service env vars, health checks, deploy commands, and domains
 - Ensure `backend-api` and `backend-worker` both connect to the same Postgres and Redis instances
+- Provision services and env vars to match `docs/deployment/deployment-architecture.md`, and use `docs/deployment/replica-readiness-audit.md` for replica-safety requirements
 - Acceptance criteria:
   - Railway project is provisioned
   - Domains/env vars/health checks are configured
@@ -232,6 +244,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - visibility change impact on public indexing behavior
   - attachment path if production storage is in scope
   - SSE/realtime smoke behavior if kept in deployed flow
+- Reference `docs/deployment/deployment-architecture.md` for deployment topology and `docs/deployment/replica-readiness-audit.md` for replica-sensitive scenarios that need validation
 - Acceptance criteria:
   - Every FE-BE pathway has at least one test case
   - Spec includes local-only vs cloud-only notes where relevant
@@ -252,6 +265,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - local-only because they depend on reset/seed control
   - cloud-only because they validate deployed behavior
 - Capture/structure output for both local and cloud runs
+- Keep target URLs, environment contracts, and replica-sensitive validations aligned with `docs/deployment/deployment-architecture.md` and `docs/deployment/replica-readiness-audit.md`
 - Acceptance criteria:
   - Tests run in a local configuration
   - Tests run in a cloud configuration
@@ -271,6 +285,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Run the local-target integration suite in CI
 - Keep the workflow name and job names stable so they can be required in branch protection
 - Document how cloud-target integration tests are invoked outside CI when deployed URLs are available
+- Reference `docs/deployment/deployment-architecture.md` for environment inputs and `docs/deployment/replica-readiness-audit.md` for any replica-sensitive checks excluded from local CI
 - Acceptance criteria:
   - Workflow passes on a PR
   - Workflow is usable as a required status check
@@ -286,6 +301,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Ensure migrations / build / deploy ordering is safe
 - Use GitHub secrets for Railway authentication
 - Treat GitHub Actions as the production deploy authority and document any provider-native auto-deploy settings that must be disabled or restricted
+- Implement the workflow against the service topology and env contract defined in `docs/deployment/deployment-architecture.md`
 - Acceptance criteria:
   - Workflow deploys backend services without manual intervention
   - Production deploy authority is unambiguous and documented
@@ -303,6 +319,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Ensure preview/production environment variables are configured properly
 - Use GitHub secrets/tokens safely
 - Treat GitHub Actions as the production deploy authority and document any provider-native auto-deploy settings that must be disabled or restricted
+- Implement the workflow against the domain/env decisions in `docs/deployment/deployment-architecture.md`
 - Acceptance criteria:
   - Workflow deploys frontend without manual intervention
   - Production deploy authority is unambiguous and documented
@@ -321,6 +338,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Record the exact required checks to enable:
   - existing unit test workflows
   - `run-integration-tests`
+- Reference `docs/deployment/deployment-architecture.md` when documenting the production deploy authority and required checks tied to production promotion
 - Acceptance criteria:
   - Direct pushes to `main` are blocked
   - PR review is required
@@ -336,6 +354,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Bind the production domain
 - Configure preview and production environment variables
 - Verify frontend is talking to the correct Railway backend in production
+- Configure domains and env vars to match `docs/deployment/deployment-architecture.md`
 - Acceptance criteria:
   - Preview deployment works
   - Production deployment works
@@ -360,6 +379,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Run the cloud-target integration/smoke suite against the deployed system
 - Use the replica observability added in #5 to prove requests were served across 2+ API replicas via headers, health output, and/or structured logs
 - Capture logs/screenshots/test output needed for submission
+- Validate against the expected topology in `docs/deployment/deployment-architecture.md` and the replica-safety checklist in `docs/deployment/replica-readiness-audit.md`
 - Acceptance criteria:
   - Live deployment is stable with `backend-api` at 2+ replicas
   - No replica-specific failures are observed for required paths
@@ -377,6 +397,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - how to run the app locally
   - how a forked user sets up Vercel + Railway deployment
   - how CI/CD and branch protection are expected to work
+- Fold in the final decisions captured in `docs/deployment/deployment-architecture.md` and `docs/deployment/replica-readiness-audit.md`
 - Compile the final P6-equivalent artifact checklist:
   - frontend deployment URL
   - backend deployment URL
