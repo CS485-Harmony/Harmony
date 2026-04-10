@@ -1,4 +1,4 @@
-# Deployment Sprint Plan — April 8–19, 2026
+# Deployment Sprint Plan — April 10–19, 2026
 
 ## Context
 Harmony is a search-engine-indexable chat application with a Next.js frontend and an Express + tRPC backend backed by PostgreSQL and Redis. Sprint 4 adapts the P6 deployment assignment to a **Vercel + Railway** production stack:
@@ -100,7 +100,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 
 > **Note:** Issues are written so they can be opened directly on GitHub with the dependency notes preserved in the body. "Blocked by" means the issue should not be considered complete until those upstream issues land. "Unblocks" is included to make sequencing explicit for the team.
 
-### Phase 1: Architecture, Production Readiness, and Scaling Design — April 8–11
+### Phase 1: Architecture, Production Readiness, and Scaling Design — April 10–11
 
 **1. Deployment Architecture + Environment Matrix**
 - Define the final Vercel + Railway topology:
@@ -124,7 +124,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - `docs/deployment/deployment-architecture.md` exists and is usable as the canonical reference for downstream issues
 - Assignee: **acabrera04**
 - Backup owner: **declanblanc**
-- Due: April 9
+- Due: April 10
 - Blocked by: none
 - Unblocks: #2, #6, #7, #8, #16
 
@@ -147,7 +147,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - `docs/deployment/replica-readiness-audit.md` exists and is detailed enough for downstream implementation/validation issues to reference directly
 - Assignee: **declanblanc**
 - Backup owner: **acabrera04**
-- Due: April 9
+- Due: April 10
 - Blocked by: #1
 - Unblocks: #3, #4, #5, #14
 
@@ -209,7 +209,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Blocked by: #2
 - Unblocks: #7, #11, #14
 
-### Phase 2: Frontend and Integration Foundations — April 9–13
+### Phase 2: Frontend and Integration Foundations — April 10–13
 
 **6. Frontend Production Configuration for Vercel**
 - Add production-safe frontend configuration:
@@ -231,7 +231,8 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - Frontend/API cross-origin auth behavior is consistent with the documented auth and CORS contract
   - Frontend can target local and cloud backends without code edits
   - SEO-critical pages render correctly on the public domain
-- Assignee: **AvanishKulkarni**
+- Assignee: **declanblanc**
+- Backup owner: **AvanishKulkarni**
 - Due: April 11
 - Blocked by: #1
 - Unblocks: #12, #16
@@ -252,8 +253,8 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - Backend CORS and auth-related env/config are aligned with the documented frontend/API contract
   - `backend-worker` has a health check and restart-on-failure behavior configured
   - `backend-api` and `backend-worker` both boot successfully in Railway
-- Assignee: **acabrera04**
-- Backup owner: **FardeenI**
+- Assignee: **FardeenI**
+- Backup owner: **Aiden-Barrera**
 - Due: April 13
 - Blocked by: #1, #5
 - Unblocks: #11, #14, #15
@@ -310,7 +311,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Blocked by: #8, #6, #7
 - Unblocks: #10, #14, #15
 
-### Phase 3: CI/CD and Deployment Automation — April 12–16
+### Phase 3: CI/CD and Deployment Automation — April 10–14
 
 **10. GitHub Action — `run-integration-tests.yml`**
 - Create `.github/workflows/run-integration-tests.yml`
@@ -331,11 +332,13 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 
 **11. GitHub Action — `deploy-railway.yml`**
 - Create backend CD workflow for Railway
+- Start from the already-provisioned Railway project tied to the current project state so the workflow can be scaffolded and dry-run this weekend
 - Deploy `backend-api` and `backend-worker` on pushes to `main`
 - Ensure migrations / build / deploy ordering is safe
 - Use GitHub secrets for Railway authentication
 - Treat GitHub Actions as the production deploy authority and document any provider-native auto-deploy settings that must be disabled or restricted
 - Implement the workflow against the service topology and env contract defined in `docs/deployment/deployment-architecture.md`
+- If final backend service split details are still landing, create the workflow early and finish the final production wiring immediately after #5 and #7
 - Acceptance criteria:
   - Workflow deploys backend services without manual intervention
   - Production deploy authority is unambiguous and documented
@@ -343,26 +346,29 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - Schema rollout rules follow an **expand/contract** convention so destructive migrations are not introduced in the same deploy that must coexist with old API replicas during rolling restart
   - Deploys target the correct Railway environment
   - Deployment process is documented in README
-- Assignee: **acabrera04**
-- Backup owner: **declanblanc**
-- Due: April 15
+- Assignee: **FardeenI**
+- Backup owner: **Aiden-Barrera**
+- Due: April 12
 - Blocked by: #5, #7
 - Unblocks: #14, #15
 
 **12. GitHub Action — `deploy-vercel.yml`**
 - Create frontend CD workflow for Vercel
+- Start from the already-provisioned Vercel project tied to the current project state so the workflow can be scaffolded and dry-run this weekend
 - Build/deploy frontend on pushes to `main`
 - Ensure preview/production environment variables are configured properly
 - Use GitHub secrets/tokens safely
 - Treat GitHub Actions as the production deploy authority and document any provider-native auto-deploy settings that must be disabled or restricted
 - Implement the workflow against the domain/env decisions in `docs/deployment/deployment-architecture.md`
+- If final frontend production config is still landing, create the workflow early and finish the final production wiring immediately after #6 and #16
 - Acceptance criteria:
   - Workflow deploys frontend without manual intervention
   - Production deploy authority is unambiguous and documented
   - Production deploy points at the production backend URL
   - Deployment process is documented in README
-- Assignee: **AvanishKulkarni**
-- Due: April 15
+- Assignee: **declanblanc**
+- Backup owner: **AvanishKulkarni**
+- Due: April 12
 - Blocked by: #6, #16
 - Unblocks: #15
 
@@ -395,7 +401,8 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - Preview deployment works
   - Production deployment works
   - Domain and environment configuration are documented
-- Assignee: **FardeenI**
+- Assignee: **declanblanc**
+- Backup owner: **FardeenI**
 - Due: April 14
 - Blocked by: #1, #6
 - Unblocks: #12, #14, #15
@@ -464,11 +471,11 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 
 | Developer | Issues | Focus Area |
 |-----------|--------|------------|
-| acabrera04 | #1, #7, #11, #15 | Architecture/env matrix, Railway provisioning, backend CD, final packaging |
+| acabrera04 | #1, #15 | Architecture/env matrix, final packaging |
 | Aiden-Barrera | #3, #9, #13 | Shared rate limiting, integration test implementation, branch protection |
-| AvanishKulkarni | #4, #6, #12 | Production storage, Vercel-ready frontend config, frontend CD |
-| declanblanc | #2, #5, #14 | Replica-safety audit, API/worker split, multi-replica validation |
-| FardeenI | #8, #10, #16 | Integration test spec, integration-test CI, Vercel project/domain setup |
+| AvanishKulkarni | #4 | Production storage |
+| declanblanc | #2, #5, #6, #12, #14, #16 | Replica-safety audit, API/worker split, Vercel config/deploy, multi-replica validation |
+| FardeenI | #7, #8, #10, #11 | Railway provisioning, integration test spec, integration-test CI, backend CD |
 
 ## Critical Path Backup Coverage
 
@@ -477,8 +484,8 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 | #1 Deployment Architecture + Environment Matrix | acabrera04 | declanblanc |
 | #2 Backend Scale Audit for Railway Replicas | declanblanc | acabrera04 |
 | #5 Split `backend-api` and Singleton `backend-worker` | declanblanc | acabrera04 |
-| #7 Railway Project Provisioning and Service Wiring | acabrera04 | FardeenI |
-| #11 `deploy-railway.yml` | acabrera04 | declanblanc |
+| #7 Railway Project Provisioning and Service Wiring | FardeenI | Aiden-Barrera |
+| #11 `deploy-railway.yml` | FardeenI | Aiden-Barrera |
 | #14 Railway Multi-Replica Validation and Deployment Evidence | declanblanc | Aiden-Barrera |
 | #15 README, Final Artifact Collection, and Submission Package | acabrera04 | FardeenI |
 
@@ -531,13 +538,11 @@ Submission
 
 | Date | Milestone |
 |------|-----------|
-| April 8 (Wed) | Sprint kickoff, architecture alignment, issue creation |
-| April 9 (Thu) | Issue #1 and #2 complete; deployment/scaling approach locked |
-| April 11 (Sat) | Replica-safety implementation issues (#3, #4, #6, #8) complete |
-| April 12 (Sun) | API/worker split complete; backend ready for Railway service split |
-| April 13 (Mon) | Railway provisioning complete |
-| April 14 (Tue) | Vercel project live; integration tests running locally and against cloud env |
-| April 15 (Wed) | `run-integration-tests.yml`, `deploy-railway.yml`, and `deploy-vercel.yml` complete |
+| April 10 (Fri) | Sprint kickoff, architecture alignment, issue creation, and start of Issues #1 and #2 |
+| April 11 (Sat) | Issues #1 and #2 complete; deployment/scaling approach locked; `deploy-railway.yml` and `deploy-vercel.yml` scaffolded against the existing Railway/Vercel projects; dry-run verification started |
+| April 12 (Sun) | API/worker split complete; backend ready for Railway service split; `deploy-railway.yml` and `deploy-vercel.yml` finalized for the current project state |
+| April 13 (Mon) | Railway provisioning/service wiring confirmed against the finalized CD workflows |
+| April 14 (Tue) | Vercel project live; integration tests running locally and against cloud env; `run-integration-tests.yml` complete |
 | April 16 (Thu) | Branch protection enabled; CD path verified through PR merge |
 | April 18 (Sat) | Railway running with 2+ API replicas; deployment evidence captured |
 | April 19 (Sun) | README finalized; submission package and reflection/log checklist complete |
