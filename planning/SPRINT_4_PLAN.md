@@ -66,9 +66,15 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - **SSE strategy:** multi-replica realtime uses **Redis pub/sub fan-out on every `backend-api` replica**. Each replica subscribes to the shared event bus and pushes matching events to its own connected SSE clients. The production design must not depend on sticky sessions at the Railway load balancer.
 - **Migration ownership:** exactly **one migration runner** owns `prisma migrate deploy` during production rollout. `backend-api` replicas must not run Prisma migrations on startup. The migration runner may be a one-shot Railway job or a controlled pre-deploy step attached to the worker rollout.
 - **Railway service networking:** `backend-api` and `backend-worker` must use **Railway private/internal connection strings** for Postgres and Redis in production, not public TCP proxy endpoints.
+- **Auth & CORS contract:** production frontend and API traffic is cross-origin across sibling subdomains, so the deployment architecture must explicitly define:
+  - the backend CORS allowlist for production and preview frontend origins
+  - **browser-to-backend auth uses Bearer access tokens in the `Authorization` header**, matching the current application model; API authentication must not depend on browser cookies being sent cross-origin to the backend
+  - any frontend-only session cookie used for Next.js middleware remains a frontend concern and is not the backend auth transport
+  - the CSRF posture for the chosen auth transport; with bearer-header auth as the primary backend mechanism, CSRF protection focuses on avoiding cookie-authenticated state-changing backend routes
 - **Proxy trust model:** production Express instances run with **one trusted proxy hop** (`trust proxy = 1` or equivalent one-hop behavior) so rate limiting uses real client IPs without trusting arbitrary forwarded chains.
 - **Worker resilience:** `backend-worker` is configured with a health check and restart-on-failure behavior. If the worker is unavailable, API request handling should remain available while worker-owned side effects degrade gracefully rather than crashing request paths.
 - **Deploy authority:** **GitHub Actions** is the single source of truth for production deploys. Provider-native Git auto-deploys may be used for previews, but production promotion must be driven by the GitHub workflows in this sprint.
+- **Cloud test data hygiene:** cloud-target validation uses **read-only smoke checks against deployed URLs** unless a separate isolated staging environment is provisioned. Cloud-mode tests must not mutate the instructor-reviewed production dataset.
 
 ---
 
@@ -114,6 +120,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - Clear env var matrix
   - Clear ownership of public vs internal services
   - Explicit decision that `backend-api` scales to 2+ replicas and `backend-worker` stays singleton
+  - `docs/deployment/deployment-architecture.md` records the production auth transport, cookie/header contract, CORS allowlist, and CSRF posture for the frontend/API split
   - `docs/deployment/deployment-architecture.md` exists and is usable as the canonical reference for downstream issues
 - Assignee: **acabrera04**
 - Backup owner: **declanblanc**
@@ -155,6 +162,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Acceptance criteria:
   - Public and auth rate limits are shared across replicas
   - No process-local auth or public-route limit counters remain in production code paths
+  - Redis-backed limiter mutations are atomic; non-atomic `INCR` + separate `EXPIRE` style patterns are explicitly disallowed for production rate-limit state
   - Production proxy trust is explicitly configured for a **single Railway hop** (`trust proxy = 1` or equivalent) and documented in deployment docs
   - Rate limit behavior is covered by tests or verification notes
 - Assignee: **Aiden-Barrera**
@@ -220,6 +228,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
 - Acceptance criteria:
   - Public pages generate correct production metadata
   - Canonical host ownership is explicit and consistent across frontend and backend docs/code
+  - Frontend/API cross-origin auth behavior is consistent with the documented auth and CORS contract
   - Frontend can target local and cloud backends without code edits
   - SEO-critical pages render correctly on the public domain
 - Assignee: **AvanishKulkarni**
@@ -240,6 +249,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - Railway project is provisioned
   - Domains/env vars/health checks are configured
   - Postgres and Redis env vars use Railway private/internal connection strings for service-to-service traffic
+  - Backend CORS and auth-related env/config are aligned with the documented frontend/API contract
   - `backend-worker` has a health check and restart-on-failure behavior configured
   - `backend-api` and `backend-worker` both boot successfully in Railway
 - Assignee: **acabrera04**
@@ -257,10 +267,14 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - visibility change impact on public indexing behavior
   - attachment path if production storage is in scope
   - SSE/realtime smoke behavior if kept in deployed flow
+- Declare the cloud-mode data-isolation strategy:
+  - default choice for this sprint is **read-only cloud smoke coverage** against deployed URLs
+  - any write-path cloud tests require a separately documented isolated environment before they are allowed
 - Reference `docs/deployment/deployment-architecture.md` for deployment topology and `docs/deployment/replica-readiness-audit.md` for replica-sensitive scenarios that need validation
 - Acceptance criteria:
   - Every FE-BE pathway has at least one test case
   - Spec includes local-only vs cloud-only notes where relevant
+  - Cloud-mode tests are explicitly classified as read-only or isolated-environment-only
   - Spec is stored under `docs/test-specs/`
 - Assignee: **FardeenI**
 - Due: April 11
@@ -277,12 +291,19 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - portable across both targets
   - local-only because they depend on reset/seed control
   - cloud-only because they validate deployed behavior
+- Keep cloud-target coverage read-only by default:
+  - health and reachability
+  - guest public channel rendering
+  - public SSR metadata and canonical URL fetches
+  - sitemap/robots fetches
+  - SSE connect/disconnect smoke checks without mutating shared production state
 - Capture/structure output for both local and cloud runs
 - Keep target URLs, environment contracts, and replica-sensitive validations aligned with `docs/deployment/deployment-architecture.md` and `docs/deployment/replica-readiness-audit.md`
 - Acceptance criteria:
   - Tests run in a local configuration
   - Tests run in a cloud configuration
   - Cloud mode does not require local frontend/backend startup
+  - Cloud-mode tests cannot mutate non-isolated deployed state unless a separately documented isolated environment exists
   - Any environment-specific exceptions are documented
 - Assignee: **Aiden-Barrera**
 - Due: April 14
@@ -319,6 +340,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - Workflow deploys backend services without manual intervention
   - Production deploy authority is unambiguous and documented
   - Exactly one migration runner performs `prisma migrate deploy`, and `backend-api` replicas are prevented from racing migrations on startup
+  - Schema rollout rules follow an **expand/contract** convention so destructive migrations are not introduced in the same deploy that must coexist with old API replicas during rolling restart
   - Deploys target the correct Railway environment
   - Deployment process is documented in README
 - Assignee: **acabrera04**
@@ -391,6 +413,7 @@ To safely support 2+ backend replicas, the sprint must remove or isolate process
   - cache invalidation / indexing behavior via singleton worker
   - SSE/realtime smoke verification in deployed environment
 - Run the cloud-target integration/smoke suite against the deployed system
+- Keep deployed-environment smoke verification read-only unless a separate isolated cloud test environment is explicitly provisioned
 - Use the replica observability added in #5 to prove requests were served across 2+ API replicas via headers, health output, and/or structured logs
 - Capture logs/screenshots/test output needed for submission
 - Validate against the expected topology in `docs/deployment/deployment-architecture.md` and the replica-safety checklist in `docs/deployment/replica-readiness-audit.md`
