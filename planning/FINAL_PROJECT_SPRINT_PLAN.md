@@ -68,6 +68,12 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - Implement `MetaTagService`, `TitleGenerator`, `DescriptionGenerator`, `OpenGraphGenerator`, `StructuredDataGen`, and `MetaTagCache` per dev spec §3/§4
 - Wire Redis-backed `MetaTagCache` with configurable TTL
 - Unit tests for template application, length limits (AC-2), sanitization, fallback behavior (AC-9)
+- Acceptance criteria:
+  - Classes C2.1–C2.6 exist with the method signatures named in dev spec §3/§4
+  - `TitleGenerator` enforces ≤60 char auto-generated titles; `DescriptionGenerator` enforces 50–160 char auto-generated descriptions (AC-2)
+  - `MetaTagCache` is backed by Redis (not process memory) and honors a configurable TTL
+  - On NLP/timeout failure, `MetaTagService` returns fallback tags and flags `needsRegeneration=true` (AC-9)
+  - Unit tests cover template application, length limits, sanitization, and fallback paths and pass in CI
 - Assignee: **declanblanc**
 - Backup: **acabrera04**
 - Due: Apr 22
@@ -77,6 +83,11 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - Implement `ContentAnalyzer`, `KeywordExtractor`, `TextSummarizer`, `TopicClassifier`
 - Ensure deterministic fallbacks so `MetaTagService` can degrade to template-only output on NLP timeout
 - Unit tests covering keyword extraction, summarization, and fallback paths
+- Acceptance criteria:
+  - Classes C3.1–C3.4 exist with the method signatures named in dev spec §3/§4
+  - `ContentAnalyzer.analyzeThread()` returns keywords, summary, and topic category for a fixture thread
+  - Deterministic fallback returns a valid (non-null) result within the configured timeout budget when the NLP path is stubbed to fail
+  - Unit tests cover stop-word filtering, frequency scoring, summarization, topic classification, and timeout/fallback paths
 - Assignee: **Aiden-Barrera**
 - Backup: **declanblanc**
 - Due: Apr 22
@@ -86,6 +97,11 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - Prisma migration for meta tag storage fields (`customTitle`, `customDescription`, `needsRegeneration`, cache metadata) per dev spec §11
 - Respect Sprint 4 expand/contract migration rules so rollout is safe with 2+ API replicas
 - Custom overrides must never be overwritten by background regeneration (AC-7)
+- Acceptance criteria:
+  - Prisma migration adds all fields in dev spec §11 and applies cleanly via the single Sprint 4 migration runner
+  - Migration is expand-only (no destructive drops) so it coexists with old `backend-api` replicas during rolling restart
+  - Persistence layer enforces that a background regeneration write cannot overwrite a non-null `customTitle` or `customDescription` (AC-7), verified by an integration test
+  - Schema is documented in `docs/deployment/deployment-architecture.md` or the SEO dev spec appendix
 - Assignee: **FardeenI**
 - Backup: **AvanishKulkarni**
 - Due: Apr 22
@@ -97,6 +113,13 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - `POST /api/channels/:id/meta-tags/regenerate` returning `jobId` with idempotency key (AC-5, AC-6)
 - `GET /api/channels/:id/meta-tags/regenerate/:jobId` status polling
 - API integration tests for each endpoint
+- Acceptance criteria:
+  - All four endpoints are reachable and documented in dev spec §9/§10 terms
+  - `PUT` rejects `customTitle >70` and `customDescription >200` with a validation error (AC-3)
+  - `POST .../regenerate` returns a `jobId` and the status endpoint reports terminal states `succeeded`/`failed` (AC-5)
+  - Repeat `POST` with the same idempotency key within 60s returns the existing `jobId` and does not enqueue a duplicate job (AC-6)
+  - All endpoints enforce channel-creator authorization; non-owners get 403
+  - Supertest integration tests cover success, validation failure, auth failure, and idempotency
 - Assignee: **FardeenI**
 - Due: Apr 23
 - Blocked by: S1, S3
@@ -110,6 +133,12 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - Subscribe to `MessageCreated`, `MessageEdited`, `MessageDeleted`, `VisibilityChanged` events on the shared Redis event bus
 - Worker must run as singleton only (enforced by Sprint 4 topology)
 - Debounce/batch regeneration so noisy channels don't overwhelm the pipeline
+- Acceptance criteria:
+  - `MetaTagUpdateWorker` runs only inside the `backend-worker` process; `backend-api` replicas do not subscribe to regeneration events
+  - Worker consumes `MessageCreated`, `MessageEdited`, `MessageDeleted`, `VisibilityChanged` events and schedules regeneration jobs
+  - Debounce/batch window collapses repeated events for the same channel into a single regeneration job within the configured window
+  - Worker restart does not duplicate in-flight jobs (job queue dedupes by channel + idempotency key)
+  - Integration test simulates burst traffic and asserts a single regeneration job is produced per debounce window
 - Assignee: **Aiden-Barrera**
 - Backup: **declanblanc**
 - Due: Apr 24
@@ -119,6 +148,11 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - On `VISIBILITY_CHANGED → PRIVATE`: invalidate `MetaTagCache`, remove sitemap URL, flip `noindex`
 - On `VISIBILITY_CHANGED → PUBLIC_INDEXABLE`: re-enqueue regeneration
 - Integration tests covering both directions and cache/sitemap side effects
+- Acceptance criteria:
+  - Flipping a channel from `PUBLIC_INDEXABLE` to `PRIVATE` invalidates the `MetaTagCache` entry and removes the URL from the sitemap within one regeneration cycle (AC-4, AC-10)
+  - Subsequent SSR requests for that channel return `noindex` meta and 404/403 public body as appropriate
+  - Flipping back to `PUBLIC_INDEXABLE` re-enqueues a regeneration job and the channel reappears in the sitemap
+  - End-to-end integration test covers `PUBLIC_INDEXABLE → PRIVATE → PUBLIC_INDEXABLE` transition and asserts cache + sitemap state at each step
 - Assignee: **declanblanc**
 - Due: Apr 25
 - Blocked by: S5
@@ -127,6 +161,11 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - PII and profanity filters on generated titles/descriptions
 - Ensure overrides and generated tags cannot inject HTML/attributes into rendered `<head>`
 - Unit tests with fixture content covering PII/profanity/XSS
+- Acceptance criteria:
+  - Generated tags for the PII/profanity fixture corpus contain no flagged content (AC-8)
+  - HTML/attribute injection attempts in `customTitle`/`customDescription` are escaped or rejected on write and on render
+  - `<head>` output for a crafted XSS fixture passes a snapshot test showing escaped output
+  - Filter behavior is covered by unit tests and documented in `docs/dev-spec-seo-meta-tag-generation.md` §12 cross-reference
 - Assignee: **AvanishKulkarni**
 - Backup: **Aiden-Barrera**
 - Due: Apr 25
@@ -141,6 +180,12 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - Use `getServerSideProps` / Next.js route handlers to fetch meta tags from backend at request time
 - Canonical host is the frontend apex domain per Sprint 4 SEO ownership decision — no crawler-facing artifact may point at the API subdomain
 - Unit/E2E tests: every public channel page serves non-empty `<title>` and `<meta name="description">` (AC-1)
+- Acceptance criteria:
+  - Every public channel page SSR-renders non-empty `<title>` and `<meta name="description">` for the fixture corpus (AC-1)
+  - Open Graph, Twitter card, and JSON-LD `DiscussionForumPosting` tags are present and validate against Google Rich Results test
+  - Canonical URL is the frontend apex domain; no `<link rel="canonical">` or sitemap URL points at the API subdomain
+  - Meta tag fetch uses the backend API at request time and degrades to template fallback if the backend is unreachable
+  - E2E test (Playwright or crawler UA fetch) asserts tags on at least 3 representative public channels
 - Assignee: **declanblanc**
 - Due: Apr 26
 - Blocked by: S4, Sprint 4 #6 (frontend prod config)
@@ -149,6 +194,12 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - Ensure Next.js route handlers for sitemap/sitemap index fetch from backend at request time and serve under the frontend apex domain
 - `robots.txt` respects `PUBLIC_NO_INDEX` and `PRIVATE` visibility
 - Smoke test that private channels do not appear in sitemap
+- Acceptance criteria:
+  - `https://<frontend-apex>/sitemap.xml` and `https://<frontend-apex>/robots.txt` resolve on the frontend apex domain (not the API subdomain)
+  - Sitemap includes only `PUBLIC_INDEXABLE` channels; `PUBLIC_NO_INDEX` and `PRIVATE` channels are excluded
+  - Channels flipped to `PRIVATE` disappear from sitemap on the next regeneration cycle
+  - `robots.txt` allows crawling of public paths and disallows non-public areas
+  - Smoke test asserts sitemap exclusion behavior for a fixture private channel
 - Assignee: **AvanishKulkarni**
 - Backup: **FardeenI**
 - Due: Apr 27
@@ -157,6 +208,12 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 **S10. Meta tag admin UI (creator override flow)**
 - UI under channel settings for creator to view generated tags, override title/description, and trigger manual regeneration with job status polling
 - Respect `customTitle`/`customDescription` length limits with client-side validation
+- Acceptance criteria:
+  - Channel settings page exposes a "SEO Preview" section showing current generated + override values
+  - Creator can submit `customTitle` (≤70) and `customDescription` (≤200) with inline validation matching server-side rules
+  - Creator can trigger regeneration and sees live job status transitioning through `pending` → `succeeded`/`failed`
+  - Non-creators do not see the override UI (or see it disabled)
+  - Frontend unit tests cover validation, submit, and job polling flows
 - Assignee: **acabrera04**
 - Backup: **declanblanc**
 - Due: Apr 27
@@ -170,6 +227,12 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - Extend the Sprint 4 integration test suite with cases covering AC-1 through AC-10
 - Cloud-mode coverage stays read-only (reuse Sprint 4 isolation rules) — no mutation of the instructor-reviewed production dataset
 - Add test cases for crawler view of public pages (fetch as Googlebot UA, assert tags present)
+- Acceptance criteria:
+  - Test cases exist and are traceable one-to-one to AC-1 through AC-10 in dev spec §14
+  - Suite runs in `local` mode via `run-integration-tests.yml` and passes on PR
+  - Suite runs in `cloud` mode against deployed URLs and is read-only (no writes to production dataset)
+  - Crawler-UA fetches (`User-Agent: Googlebot`) of at least 3 public channels return non-empty `<title>`/`<meta name="description">` and valid JSON-LD
+  - Test output is captured as an artifact for submission evidence
 - Assignee: **Aiden-Barrera**
 - Due: Apr 29
 - Blocked by: S8, S9, S10
@@ -179,6 +242,12 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - Verify: meta tags render through the Vercel edge, cache hits are served from Redis, background regeneration triggered by worker reaches the cache observable by both API replicas, `noindex`/sitemap removal works on visibility flip
 - Use Sprint 4 replica observability (instance identity headers/logs) to confirm tags render consistently regardless of which `backend-api` replica served the SSR fetch
 - Capture screenshots, crawler-view HTML, and structured-data validator output (Google Rich Results test) for submission
+- Acceptance criteria:
+  - Cloud integration suite passes against the deployed Vercel + Railway stack
+  - Evidence bundle exists under `docs/submission/seo-evidence/` containing: crawler-view HTML, Rich Results test screenshots, replica-identity headers from at least two distinct `backend-api` replicas, and a cache-hit log sample
+  - Visibility flip scenario (`PUBLIC_INDEXABLE → PRIVATE`) is verified live and captured as evidence (AC-4, AC-10)
+  - Tag output is identical across both API replicas for the same channel within one cache TTL
+  - Every AC-1..AC-10 item has at least one linked piece of evidence in the bundle
 - Assignee: **declanblanc**
 - Backup: **Aiden-Barrera**
 - Due: Apr 30
@@ -188,6 +257,12 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 - Full-team bug bash across deployed app: auth, channels, messaging, attachments, SEO, realtime
 - Triage to `must-fix-for-submission` vs `accept-as-known-limitation`
 - Fix must-fix items only; document the rest in the reflection
+- Acceptance criteria:
+  - Each developer logs at least one bug-bash session against the deployed stack and files GitHub issues for findings
+  - Every finding is triaged with a label (`must-fix-for-submission` or `known-limitation`)
+  - All `must-fix-for-submission` issues are merged to `main` and redeployed before S15 starts
+  - `known-limitation` issues are summarized in the reflection document
+  - Post-bash smoke run of the cloud integration suite is green
 - Assignee: **whole team**, coordinator: **FardeenI**
 - Due: May 1
 - Blocked by: S12
@@ -199,6 +274,11 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 **S14. README + deployer guide final pass**
 - Fold SEO feature usage, override flow, and regeneration behavior into README
 - Update deployer guide with any new env vars introduced in Phase A–C (NLP keys, R2 bucket for OG images if any, etc.)
+- Acceptance criteria:
+  - README documents: how to view generated SEO tags, how a creator overrides them, and how regeneration is triggered
+  - Deployer guide lists every new env var added during Sprint 5 with purpose and example value
+  - README links to the deployed frontend URL, backend URL, and submission evidence bundle
+  - A fresh contributor can follow README instructions to run the app locally and see SEO tags on a public channel
 - Assignee: **acabrera04**
 - Due: May 2
 - Blocked by: S10
@@ -214,6 +294,12 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
   - Acceptance criteria AC-1..AC-10 verification evidence (from S12)
   - Reflection document (lessons learned, what worked, what didn't, per-developer contributions)
   - LLM interaction logs under `llm-logs/` with model/version labels
+- Acceptance criteria:
+  - Every checklist item above has a resolved link or committed artifact (no TBDs)
+  - Submission document lives in `planning/FINAL_SUBMISSION.md` or `docs/submission/` and is linked from the README
+  - All AC-1..AC-10 items map to evidence produced in S12
+  - Each developer is named against at least one deliverable in the contributions section
+  - Submission is reviewed and signed off by at least one other teammate before May 3 EOD
 - Assignee: **acabrera04**
 - Backup: **FardeenI**
 - Due: May 3
@@ -222,6 +308,11 @@ Dev spec: `docs/dev-spec-seo-meta-tag-generation.md`
 **S16. Final reflection + retrospective**
 - Team retrospective on the full project (Sprints 1–5)
 - Each developer contributes a short written reflection to the submission doc
+- Acceptance criteria:
+  - Retrospective meeting held with all 5 developers attending (synchronously or async with written input)
+  - Each developer submits a ≥150-word written reflection covering what they built, what they learned, and what they would change
+  - Consolidated retrospective section merged into `FINAL_SUBMISSION.md` before S15 sign-off
+  - Known limitations from S13 are captured in the reflection with mitigation notes
 - Assignee: **whole team**, coordinator: **declanblanc**
 - Due: May 3
 - Blocked by: S15 draft
