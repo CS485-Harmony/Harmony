@@ -44,7 +44,14 @@ export function createApp() {
   // X-Forwarded-For safely. Gated on TRUST_PROXY_HOPS so running the backend
   // without a proxy in front (local dev, direct port exposure) doesn't let
   // clients spoof XFF and poison rate-limit buckets. Set to `1` on Railway.
-  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+  const trustProxyHopsEnv = process.env.TRUST_PROXY_HOPS;
+  const trustProxyHops =
+    trustProxyHopsEnv === undefined ? 0 : Number(trustProxyHopsEnv);
+  if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
+    throw new Error(
+      `Invalid TRUST_PROXY_HOPS value "${trustProxyHopsEnv}". Expected a non-negative integer.`,
+    );
+  }
   if (trustProxyHops > 0) {
     app.set('trust proxy', trustProxyHops);
   }
