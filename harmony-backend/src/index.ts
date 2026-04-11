@@ -7,9 +7,12 @@ const PORT =
   rawPort === undefined
     ? 4000
     : (() => {
+        if (rawPort.trim() === '') {
+          throw new Error(`Invalid PORT environment variable: value is blank. Expected an integer between 1 and 65535.`);
+        }
         const port = Number(rawPort);
-        if (!Number.isInteger(port) || port < 0 || port > 65535) {
-          throw new Error(`Invalid PORT environment variable: ${rawPort}`);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          throw new Error(`Invalid PORT environment variable: "${rawPort}". Expected an integer between 1 and 65535.`);
         }
         return port;
       })();
