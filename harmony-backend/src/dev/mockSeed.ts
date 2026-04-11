@@ -78,7 +78,7 @@ const MOCK_SEED_NAMESPACE = 'harmony:mock-seed';
 // user-001 (alice_admin) is the only loginable mock account — keep in sync with
 // the assertion in mock-seed.test.ts that looks up this user by username.
 const ALICE_ADMIN_HASH =
-  'v1$00112233445566778899aabbccddeeff$$2b$12$4Mtfiy1iIr4Vov208qG2ROaaN.XiRgPEJOBCNiDshMMEnZP7G0KRC';
+  'v1$00112233445566778899aabbccddeeff$$2b$12$7dsAhX/sljIDw06Uqxs/WeqI0pnUJn.IcWyoSbO29nuvXbepdwGrq';
 
 export function legacyIdToUuid(legacyId: string): string {
   const hash = createHash('sha1').update(`${MOCK_SEED_NAMESPACE}:${legacyId}`).digest();

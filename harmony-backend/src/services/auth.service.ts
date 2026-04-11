@@ -88,9 +88,13 @@ function createDummyPasswordSalt(email: string): string {
     .slice(0, PASSWORD_SALT_BYTES * 2);
 }
 
+function decodePasswordSalt(passwordSalt: string): Buffer {
+  return Buffer.from(passwordSalt, 'hex');
+}
+
 function createDevAdminPasswordVerifier(): string {
   return crypto
-    .pbkdf2Sync('admin', DEV_ADMIN_PASSWORD_SALT, 310000, 32, 'sha256')
+    .pbkdf2Sync('admin', decodePasswordSalt(DEV_ADMIN_PASSWORD_SALT), 310000, 32, 'sha256')
     .toString('base64');
 }
 

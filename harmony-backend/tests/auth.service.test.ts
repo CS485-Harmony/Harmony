@@ -45,7 +45,9 @@ const PASSWORD_SALT = '00112233445566778899aabbccddeeff';
 const DEV_ADMIN_SALT = 'f6f0e4f9f5f841caa4dd4ac4ef0bf9e8';
 
 function derivePasswordVerifier(password: string, passwordSalt = PASSWORD_SALT): string {
-  return crypto.pbkdf2Sync(password, passwordSalt, 310000, 32, 'sha256').toString('base64');
+  return crypto
+    .pbkdf2Sync(password, Buffer.from(passwordSalt, 'hex'), 310000, 32, 'sha256')
+    .toString('base64');
 }
 
 const mockPrisma = prisma as unknown as {

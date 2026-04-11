@@ -14,7 +14,9 @@ import bcrypt from 'bcryptjs';
 const PASSWORD_SALT = '00112233445566778899aabbccddeeff';
 
 function derivePasswordVerifier(password: string, passwordSalt = PASSWORD_SALT): string {
-  return crypto.pbkdf2Sync(password, passwordSalt, 310000, 32, 'sha256').toString('base64');
+  return crypto
+    .pbkdf2Sync(password, Buffer.from(passwordSalt, 'hex'), 310000, 32, 'sha256')
+    .toString('base64');
 }
 
 const mockUser = {

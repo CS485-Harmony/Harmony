@@ -21,6 +21,12 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 **Date:** 2026-04-11  
 **Caught by:** [Human: user]  
 **Related Issue:** #313  
+**Mistake / Situation:** I changed the password verifier flow but left backend-only PBKDF2 helpers and E2E bootstrap code deriving with the literal hex salt string instead of decoded salt bytes, so browser auth and E2E diverged from local service tests.  
+**Rule / Fix:** When introducing a client/server crypto contract, centralize or explicitly mirror the byte-level encoding rules across backend helpers, tests, seed data, and E2E bootstraps; verify at least one browser-facing path, not just service-level tests.
+
+**Date:** 2026-04-11  
+**Caught by:** [Human: user]  
+**Related Issue:** #313  
 **Mistake / Situation:** I updated auth-related tests for the new verifier contract but missed another backend suite that still called `authService.register` with the old 3-argument signature, which broke CI.  
 **Rule / Fix:** After changing any shared service contract, grep the full repo for old call sites and run at least the affected package typecheck before pushing so stale compile-time usages do not escape to CI.
 

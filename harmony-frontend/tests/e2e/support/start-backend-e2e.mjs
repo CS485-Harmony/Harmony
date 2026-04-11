@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import {
   backendEnv,
   BACKEND_URL,
@@ -82,12 +83,33 @@ async function verifySeedPreconditions() {
   );
 
   await waitForCondition(async () => {
+    const challengeResponse = await fetch(`${BACKEND_URL}/api/auth/login/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: DEV_ADMIN_EMAIL,
+      }),
+    });
+    if (!challengeResponse.ok) {
+      return false;
+    }
+
+    const challengePayload = await challengeResponse.json();
+    const passwordSalt = challengePayload.passwordSalt;
+    if (typeof passwordSalt !== 'string') {
+      return false;
+    }
+
+    const passwordVerifier = crypto
+      .pbkdf2Sync(DEV_ADMIN_PASSWORD, Buffer.from(passwordSalt, 'hex'), 310000, 32, 'sha256')
+      .toString('base64');
+
     const loginResponse = await fetch(`${BACKEND_URL}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: DEV_ADMIN_EMAIL,
-        password: DEV_ADMIN_PASSWORD,
+        passwordVerifier,
       }),
     });
 

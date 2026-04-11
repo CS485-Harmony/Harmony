@@ -46,7 +46,7 @@ async function deriveRegistrationPayload(app: Express, email: string, password: 
   return {
     passwordSalt,
     passwordVerifier: crypto
-      .pbkdf2Sync(password, passwordSalt, 310000, 32, 'sha256')
+      .pbkdf2Sync(password, Buffer.from(passwordSalt, 'hex'), 310000, 32, 'sha256')
       .toString('base64'),
   };
 }

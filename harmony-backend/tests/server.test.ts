@@ -12,7 +12,9 @@ import type { ServerMemberWithUser } from '../src/services/server.service';
 const TEST_PASSWORD_SALT = '00112233445566778899aabbccddeeff';
 
 function derivePasswordVerifier(password: string, salt = TEST_PASSWORD_SALT): string {
-  return crypto.pbkdf2Sync(password, salt, 310000, 32, 'sha256').toString('base64');
+  return crypto
+    .pbkdf2Sync(password, Buffer.from(salt, 'hex'), 310000, 32, 'sha256')
+    .toString('base64');
 }
 
 // ─── Unit tests: slug generation ─────────────────────────────────────────────
