@@ -18,7 +18,7 @@ Each feature spec was authored independently and defines its own modules, classe
 | **Database** | PostgreSQL 16+ | ACID guarantees for visibility state transitions; native `ENUM` types for visibility; `JSONB` for flexible audit payloads; partial indexes for efficient public-channel queries. |
 | **Cache / EventBus** | Redis 7.2+ | Sub-millisecond reads for visibility checks on every public page load; Pub/Sub for cross-module event propagation (`VISIBILITY_CHANGED`, `MESSAGE_CREATED`, etc.) without tight coupling. |
 | **Authenticated APIs** | tRPC 11 | End-to-end type inference between Next.js client and Express server; eliminates hand-written API clients for admin operations. |
-| **Public APIs** | REST (Express) | Search-engine crawlers, social-media link unfurlers, and external consumers require plain HTTP. tRPC's binary protocol is invisible to these consumers. |
+| **Public APIs** | REST (Express) | Search-engine crawlers, social-media link unfurlers, and external consumers require plain HTTP. tRPC's binary protocol is invisible to these consumers. Authentication also uses REST challenge endpoints so the browser can fetch salts and submit password verifiers without sending raw passwords in request bodies. |
 | **Real-time Transport** | SSE (Server-Sent Events) | Native browser `EventSource` requires no client library; unidirectional server→client push fits message delivery perfectly; works over existing HTTP infrastructure with no WebSocket upgrade negotiation. |
 | **ORM** | Prisma 5.8+ | Type-safe schema definitions; auto-generated migrations; integrates with PostgreSQL enums. |
 | **Runtime Validation** | Zod 3.22+ | Composes with tRPC for automatic request/response validation; shared between client and server. |
@@ -43,6 +43,8 @@ Each feature spec was authored independently and defines its own modules, classe
 ```
 
 **Why the split?** Crawlers (Googlebot, Bingbot) and social-media unfurlers (Facebook, Twitter/X, Slack) make standard HTTP requests. They cannot consume tRPC. Admin operations (visibility toggling, meta-tag overrides) benefit from tRPC's type inference and are only used by authenticated Harmony clients.
+
+For authentication specifically, the REST surface also includes `/api/auth/register/challenge` and `/api/auth/login/challenge`. The browser uses these endpoints to fetch salts, derive a PBKDF2-SHA256 `passwordVerifier` locally, and then submit the verifier to `/api/auth/register` or `/api/auth/login` instead of the raw password.
 
 ---
 
@@ -122,7 +124,7 @@ The `M-B`/`M-D` IDs are architectural groupings (by technical role). The detaile
 | *M-CV2* | *Public Channel Viewer* | *Client* | *Channel Visibility Toggle* | *Specified in [channel visibility spec](./dev-spec-channel-visibility-toggle.md)* | *—* |
 | *M-GV1* | *Public View (SSR)* | *Client* | *Guest Public Channel View* | *Specified in [guest public channel spec](./dev-spec-guest-public-channel-view.md)* | *—* |
 | *M-GV2* | *Client Interaction* | *Client* | *Guest Public Channel View* | *Specified in [guest public channel spec](./dev-spec-guest-public-channel-view.md)* | *—* |
-| M-B1 | API Gateway | Server | Shared | tRPC router (authenticated) + REST controllers (public) | Cross-cutting infrastructure (all modules) |
+| M-B1 | API Gateway | Server | Shared | tRPC router (authenticated) + REST controllers (public and auth challenge endpoints) | Cross-cutting infrastructure (all modules) |
 | M-B2 | Access Control | Server | Shared | Visibility guard, content filter, rate limiter, anonymous sessions | Module 1 (Auth middleware), Module 11 (Permission System) |
 | M-B3 | Visibility Management | Server | Channel Visibility Toggle | Visibility state machine, permission checks, audit logging | Module 3 (Channel Management — visibility ops) |
 | M-B4 | Content Delivery | Server | Guest Public Channel View | Message retrieval, author privacy, attachment processing | Module 9 (Public API & SEO — public delivery) |

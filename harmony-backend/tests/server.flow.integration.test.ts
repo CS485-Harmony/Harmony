@@ -5,6 +5,7 @@
  * auth, permission checks, service side effects, and Prisma persistence.
  */
 
+import crypto from 'crypto';
 import request from 'supertest';
 import type { Express } from 'express';
 import { ChannelVisibility, ChannelType, RoleType } from '@prisma/client';
@@ -38,6 +39,18 @@ function createServerName(base: string) {
   return `${base} ${Date.now()} ${Math.random().toString(36).slice(2, 8)}`;
 }
 
+async function deriveRegistrationPayload(app: Express, email: string, password: string) {
+  const challengeRes = await request(app).post('/api/auth/register/challenge').send({});
+  const passwordSalt = challengeRes.body.passwordSalt as string;
+
+  return {
+    passwordSalt,
+    passwordVerifier: crypto
+      .pbkdf2Sync(password, passwordSalt, 310000, 32, 'sha256')
+      .toString('base64'),
+  };
+}
+
 describe('server flow integration', () => {
   let app: Express;
   const createdUserIds = new Set<string>();
@@ -64,10 +77,11 @@ describe('server flow integration', () => {
 
   async function registerUser(label: string): Promise<RegisteredUser> {
     const { email, username } = createCredentials(label);
+    const verifierPayload = await deriveRegistrationPayload(app, email, 'password123');
 
     const response = await request(app)
       .post('/api/auth/register')
-      .send({ email, username, password: 'password123' });
+      .send({ email, username, ...verifierPayload });
 
     const user = await prisma.user.findUnique({
       where: { email },

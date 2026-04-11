@@ -6,6 +6,7 @@
  * and Prisma persistence against a real database.
  */
 
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import type { Express } from 'express';
@@ -29,6 +30,26 @@ function createCredentials(label: string) {
   return {
     email: `auth-flow-${suffix}@example.com`,
     username: `auth_flow_${suffix}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32),
+  };
+}
+
+async function derivePasswordVerifier(
+  app: Express,
+  path: '/api/auth/register/challenge' | '/api/auth/login/challenge',
+  email: string,
+  password: string,
+) {
+  const challengeRes =
+    path === '/api/auth/register/challenge'
+      ? await request(app).post(path).send({})
+      : await request(app).post(path).send({ email });
+
+  const passwordSalt = challengeRes.body.passwordSalt as string;
+  return {
+    passwordSalt,
+    passwordVerifier: crypto
+      .pbkdf2Sync(password, passwordSalt, 310000, 32, 'sha256')
+      .toString('base64'),
   };
 }
 
@@ -58,9 +79,15 @@ describe('auth flow integration', () => {
 
   async function registerUser(label: string): Promise<RegisteredUser> {
     const { email, username } = createCredentials(label);
+    const { passwordSalt, passwordVerifier } = await derivePasswordVerifier(
+      app,
+      '/api/auth/register/challenge',
+      email,
+      'password123',
+    );
     const response = await request(app)
       .post('/api/auth/register')
-      .send({ email, username, password: 'password123' });
+      .send({ email, username, passwordSalt, passwordVerifier });
 
     const createdUser = await prisma.user.findUnique({
       where: { email },
@@ -135,10 +162,16 @@ describe('auth flow integration', () => {
 
   it('rejects duplicate registration for the same email and username', async () => {
     const { email, username } = createCredentials('duplicate');
+    const firstVerifier = await derivePasswordVerifier(
+      app,
+      '/api/auth/register/challenge',
+      email,
+      'password123',
+    );
 
     const firstRes = await request(app)
       .post('/api/auth/register')
-      .send({ email, username, password: 'password123' });
+      .send({ email, username, ...firstVerifier });
 
     expect(firstRes.status).toBe(201);
 
@@ -149,9 +182,15 @@ describe('auth flow integration', () => {
     expect(createdUser).not.toBeNull();
     createdUserIds.push(createdUser!.id);
 
+    const duplicateVerifier = await derivePasswordVerifier(
+      app,
+      '/api/auth/register/challenge',
+      email,
+      'password123',
+    );
     const duplicateRes = await request(app)
       .post('/api/auth/register')
-      .send({ email, username, password: 'password123' });
+      .send({ email, username, ...duplicateVerifier });
 
     expect(duplicateRes.status).toBe(409);
     expect(duplicateRes.body.error).toMatch(/email|username/i);
@@ -161,9 +200,15 @@ describe('auth flow integration', () => {
     const registered = await registerUser('wrong-password');
 
     expect(registered.response.status).toBe(201);
+    const wrongVerifier = await derivePasswordVerifier(
+      app,
+      '/api/auth/login/challenge',
+      registered.email,
+      'wrong-password',
+    );
     const loginRes = await request(app)
       .post('/api/auth/login')
-      .send({ email: registered.email, password: 'wrong-password' });
+      .send({ email: registered.email, passwordVerifier: wrongVerifier.passwordVerifier });
 
     expect(loginRes.status).toBe(401);
     expect(loginRes.body.error).toMatch(/invalid credentials/i);
@@ -181,9 +226,15 @@ describe('auth flow integration', () => {
 
     expect(initialLogoutRes.status).toBe(204);
 
+    const loginVerifier = await derivePasswordVerifier(
+      app,
+      '/api/auth/login/challenge',
+      registered.email,
+      'password123',
+    );
     const loginRes = await request(app)
       .post('/api/auth/login')
-      .send({ email: registered.email, password: 'password123' });
+      .send({ email: registered.email, passwordVerifier: loginVerifier.passwordVerifier });
 
     expect(loginRes.status).toBe(200);
 

@@ -60,7 +60,7 @@ model User {
   id            String     @id @default(uuid()) @db.Uuid
   email         String     @unique @db.VarChar(254)
   username      String     @unique @db.VarChar(32)
-  passwordHash  String     @map("password_hash") @db.VarChar(72)
+  passwordHash  String     @map("password_hash") @db.VarChar(255)
   displayName   String     @map("display_name") @db.VarChar(100)
   avatarUrl     String?    @map("avatar_url") @db.VarChar(500)
   publicProfile Boolean    @default(true) @map("public_profile")

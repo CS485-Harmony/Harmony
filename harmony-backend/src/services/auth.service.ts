@@ -10,6 +10,9 @@ import { ADMIN_EMAIL } from '../lib/admin.utils';
 const BCRYPT_ROUNDS = 12;
 // Dummy hash used to equalise bcrypt timing when the email is not found
 const TIMING_DUMMY_HASH = '$2a$12$invalidhashfortimingequalizerXXXXXXXXXXXXXXXXXXXXXXXX';
+const PASSWORD_VERIFIER_PREFIX = 'v1';
+const PASSWORD_SALT_BYTES = 16;
+const DEV_ADMIN_PASSWORD_SALT = 'f6f0e4f9f5f841caa4dd4ac4ef0bf9e8';
 
 const ACCESS_SECRET = (() => {
   const value = process.env.JWT_ACCESS_SECRET;
@@ -51,6 +54,46 @@ export interface JwtPayload {
   jti?: string; // unique token ID (present on refresh tokens)
 }
 
+function encodePasswordVerifierRecord(passwordSalt: string, bcryptHash: string): string {
+  return `${PASSWORD_VERIFIER_PREFIX}$${passwordSalt}$${bcryptHash}`;
+}
+
+function decodePasswordVerifierRecord(
+  record: string,
+): { passwordSalt: string; bcryptHash: string } | null {
+  const prefix = `${PASSWORD_VERIFIER_PREFIX}$`;
+  if (!record.startsWith(prefix)) {
+    return null;
+  }
+
+  const firstSeparator = record.indexOf('$', prefix.length);
+  if (firstSeparator === -1) {
+    return null;
+  }
+
+  const passwordSalt = record.slice(prefix.length, firstSeparator);
+  const bcryptHash = record.slice(firstSeparator + 1);
+  if (!passwordSalt || !bcryptHash) {
+    return null;
+  }
+
+  return { passwordSalt, bcryptHash };
+}
+
+function createDummyPasswordSalt(email: string): string {
+  return crypto
+    .createHash('sha256')
+    .update(`missing-user:${email.toLowerCase()}`)
+    .digest('hex')
+    .slice(0, PASSWORD_SALT_BYTES * 2);
+}
+
+function createDevAdminPasswordVerifier(): string {
+  return crypto
+    .pbkdf2Sync('admin', DEV_ADMIN_PASSWORD_SALT, 310000, 32, 'sha256')
+    .toString('base64');
+}
+
 // ─── Token helpers ────────────────────────────────────────────────────────────
 
 function signAccessToken(userId: string): string {
@@ -89,16 +132,17 @@ async function storeRefreshToken(userId: string, rawToken: string): Promise<void
  * existing server. Called on admin login only.
  */
 async function ensureAdminUser() {
-  const passwordHash = await bcrypt.hash('admin', BCRYPT_ROUNDS);
+  const passwordHash = await bcrypt.hash(createDevAdminPasswordVerifier(), BCRYPT_ROUNDS);
+  const encodedPasswordHash = encodePasswordVerifierRecord(DEV_ADMIN_PASSWORD_SALT, passwordHash);
 
   const admin = await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
-    update: { passwordHash },
+    update: { passwordHash: encodedPasswordHash },
     create: {
       email: ADMIN_EMAIL,
       username: 'admin',
       displayName: 'System Admin',
-      passwordHash,
+      passwordHash: encodedPasswordHash,
     },
   });
 
@@ -118,7 +162,29 @@ async function ensureAdminUser() {
 // ─── Auth service ─────────────────────────────────────────────────────────────
 
 export const authService = {
-  async register(email: string, username: string, password: string): Promise<AuthTokens> {
+  generatePasswordSalt(): string {
+    return crypto.randomBytes(PASSWORD_SALT_BYTES).toString('hex');
+  },
+
+  async getLoginPasswordSalt(email: string): Promise<string> {
+    if (process.env.NODE_ENV !== 'production' && email === ADMIN_EMAIL) {
+      return DEV_ADMIN_PASSWORD_SALT;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { passwordHash: true },
+    });
+    const decoded = user ? decodePasswordVerifierRecord(user.passwordHash) : null;
+    return decoded?.passwordSalt ?? createDummyPasswordSalt(email);
+  },
+
+  async register(
+    email: string,
+    username: string,
+    passwordSalt: string,
+    passwordVerifier: string,
+  ): Promise<AuthTokens> {
     const existingEmail = await prisma.user.findUnique({ where: { email } });
     if (existingEmail) {
       throw new TRPCError({ code: 'CONFLICT', message: 'Email already in use' });
@@ -129,7 +195,12 @@ export const authService = {
       throw new TRPCError({ code: 'CONFLICT', message: 'Username already taken' });
     }
 
-    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    // Store a bcrypt hash of the client-derived verifier so the raw password
+    // never traverses the wire or lands in request-body logs.
+    const passwordHash = encodePasswordVerifierRecord(
+      passwordSalt,
+      await bcrypt.hash(passwordVerifier, BCRYPT_ROUNDS),
+    );
 
     let user: Awaited<ReturnType<typeof prisma.user.create>>;
     try {
@@ -168,11 +239,15 @@ export const authService = {
     return { accessToken, refreshToken };
   },
 
-  async login(email: string, password: string): Promise<AuthTokens> {
+  async login(email: string, passwordVerifier: string): Promise<AuthTokens> {
     // ── Dev-only admin override ────────────────────────────────────────────
     // Login as admin@harmony.dev / admin to get a system-admin account that
     // bypasses all permission and ownership checks. Remove before production.
-    if (process.env.NODE_ENV !== 'production' && email === ADMIN_EMAIL && password === 'admin') {
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      email === ADMIN_EMAIL &&
+      passwordVerifier === createDevAdminPasswordVerifier()
+    ) {
       const admin = await ensureAdminUser();
       const accessToken = signAccessToken(admin.id);
       const refreshToken = signRefreshToken(admin.id);
@@ -183,11 +258,19 @@ export const authService = {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
       // Equalise timing so unknown emails are indistinguishable from wrong passwords
-      await bcrypt.compare(password, TIMING_DUMMY_HASH);
+      await bcrypt.compare(passwordVerifier, TIMING_DUMMY_HASH);
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
     }
 
-    const valid = await bcrypt.compare(password, user.passwordHash);
+    const decoded = decodePasswordVerifierRecord(user.passwordHash);
+    if (!decoded) {
+      throw new TRPCError({
+        code: 'UNAUTHORIZED',
+        message: 'This account must reset its password before signing in.',
+      });
+    }
+
+    const valid = await bcrypt.compare(passwordVerifier, decoded.bcryptHash);
     if (!valid) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
     }

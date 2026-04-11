@@ -7,6 +7,20 @@ export const authRouter = Router();
 
 // ─── Input schemas ────────────────────────────────────────────────────────────
 
+const passwordSaltSchema = z
+  .string()
+  .length(32, { message: 'Password salt must be 32 hexadecimal characters' })
+  .regex(/^[0-9a-f]+$/i, { message: 'Password salt must be hexadecimal' });
+
+const passwordVerifierSchema = z
+  .string()
+  .min(20, { message: 'Password verifier is required' })
+  .max(128, { message: 'Password verifier is too long' });
+
+const challengeSchema = z.object({
+  email: z.string().email({ message: 'Please enter a valid email address' }),
+});
+
 const registerSchema = z.object({
   email: z.string().email({ message: 'Please enter a valid email address' }),
   username: z
@@ -16,15 +30,13 @@ const registerSchema = z.object({
     .regex(/^[a-zA-Z0-9_-]+$/, {
       message: 'Username may only contain letters, numbers, underscores, and hyphens',
     }),
-  password: z
-    .string()
-    .min(8, { message: 'Password must be at least 8 characters' })
-    .max(72, { message: 'Password must be at most 72 characters' }),
+  passwordSalt: passwordSaltSchema,
+  passwordVerifier: passwordVerifierSchema,
 });
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Please enter a valid email address' }),
-  password: z.string().min(1, { message: 'Password is required' }),
+  passwordVerifier: passwordVerifierSchema,
 });
 
 const logoutSchema = z.object({
@@ -70,6 +82,14 @@ function handleError(res: Response, err: unknown): void {
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 /**
+ * POST /api/auth/register/challenge
+ * Returns a fresh salt for client-side verifier derivation during signup.
+ */
+authRouter.post('/register/challenge', (_req: Request, res: Response) => {
+  res.status(200).json({ passwordSalt: authService.generatePasswordSalt() });
+});
+
+/**
  * POST /api/auth/register
  * Creates a new user account and returns access + refresh tokens.
  */
@@ -81,9 +101,29 @@ authRouter.post('/register', async (req: Request, res: Response) => {
   }
 
   try {
-    const { email, username, password } = parsed.data;
-    const tokens = await authService.register(email, username, password);
+    const { email, username, passwordSalt, passwordVerifier } = parsed.data;
+    const tokens = await authService.register(email, username, passwordSalt, passwordVerifier);
     res.status(201).json(tokens);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+/**
+ * POST /api/auth/login/challenge
+ * Returns the stored password salt (or a deterministic dummy salt).
+ */
+authRouter.post('/login/challenge', async (req: Request, res: Response) => {
+  const parsed = challengeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Validation failed', details: parsed.error.errors });
+    return;
+  }
+
+  try {
+    res.status(200).json({
+      passwordSalt: await authService.getLoginPasswordSalt(parsed.data.email),
+    });
   } catch (err) {
     handleError(res, err);
   }
@@ -101,8 +141,8 @@ authRouter.post('/login', async (req: Request, res: Response) => {
   }
 
   try {
-    const { email, password } = parsed.data;
-    const tokens = await authService.login(email, password);
+    const { email, passwordVerifier } = parsed.data;
+    const tokens = await authService.login(email, passwordVerifier);
     res.status(200).json(tokens);
   } catch (err) {
     handleError(res, err);

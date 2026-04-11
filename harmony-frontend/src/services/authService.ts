@@ -13,13 +13,24 @@
  */
 
 import type { User, UserStatus } from '@/types';
-import { apiClient, setTokens, clearTokens, getAccessToken, getRefreshToken } from '@/lib/api-client';
+import {
+  apiClient,
+  setTokens,
+  clearTokens,
+  getAccessToken,
+  getRefreshToken,
+} from '@/lib/api-client';
+import { derivePasswordVerifier } from '@/lib/passwordAuth';
 
 // ─── Backend response shapes ──────────────────────────────────────────────────
 
 interface AuthTokensResponse {
   accessToken: string;
   refreshToken: string;
+}
+
+interface PasswordChallengeResponse {
+  passwordSalt: string;
 }
 
 /** Shape returned by tRPC user.getCurrentUser (SELF_PROFILE_SELECT) */
@@ -84,7 +95,17 @@ export async function getCurrentUser(): Promise<User | null> {
  * Stores the returned JWT tokens and returns the fetched user profile.
  */
 export async function login(email: string, password: string): Promise<User> {
-  const tokens = await apiClient.post<AuthTokensResponse>('/api/auth/login', { email, password });
+  const { passwordSalt } = await apiClient.post<PasswordChallengeResponse>(
+    '/api/auth/login/challenge',
+    {
+      email,
+    },
+  );
+  const passwordVerifier = await derivePasswordVerifier(password, passwordSalt);
+  const tokens = await apiClient.post<AuthTokensResponse>('/api/auth/login', {
+    email,
+    passwordVerifier,
+  });
   setTokens(tokens.accessToken, tokens.refreshToken);
 
   const user = await apiClient.trpcQuery<BackendUser>('user.getCurrentUser');
@@ -102,10 +123,15 @@ export async function register(
   displayName: string,
   password: string,
 ): Promise<User> {
+  const { passwordSalt } = await apiClient.post<PasswordChallengeResponse>(
+    '/api/auth/register/challenge',
+  );
+  const passwordVerifier = await derivePasswordVerifier(password, passwordSalt);
   const tokens = await apiClient.post<AuthTokensResponse>('/api/auth/register', {
     email,
     username,
-    password,
+    passwordSalt,
+    passwordVerifier,
   });
   setTokens(tokens.accessToken, tokens.refreshToken);
 
@@ -169,4 +195,3 @@ export async function isAuthenticated(): Promise<boolean> {
   const user = await getCurrentUser();
   return user !== null;
 }
-

@@ -14,8 +14,8 @@ This document provides the P4 specification for every backend module in the Harm
 
 | Capability | Description |
 |---|---|
-| User registration | Creates a new account with email, username, and password. Validates email format, username (3–32 chars, alphanumeric + underscore/hyphen), and password (8–72 chars). |
-| Login | Authenticates a user by email and password, returns an access token and a refresh token. Uses constant-time comparison to prevent timing attacks. |
+| User registration | Creates a new account with email, username, and a client-derived password verifier. The client first fetches a registration salt, derives a PBKDF2-SHA256 verifier locally, and sends `{ passwordSalt, passwordVerifier }` instead of the raw password. |
+| Login | Authenticates a user by email and client-derived password verifier, returns an access token and a refresh token. The client first fetches the login salt, derives the verifier locally, and the backend uses constant-time comparison to prevent timing attacks and enumeration. |
 | Token refresh | Rotates an existing refresh token into a new access/refresh pair. The old token is revoked atomically. |
 | Logout | Revokes a single refresh token. |
 | Rate limiting (planned) | Login: 10 attempts / 15 min. Registration: 5 attempts / hour (production). Not yet implemented — no rate-limiting middleware is present in `auth.router.ts`. |
@@ -29,15 +29,16 @@ The Authentication module follows a stateless JWT pattern with server-side refre
 ```mermaid
 flowchart TD
     Client -->|POST /api/auth/*| AuthRouter
-    AuthRouter -->|validate body via Zod| AuthService
-    AuthService -->|hash password / verify| Bcrypt
+    AuthRouter -->|issue salt + validate body via Zod| AuthService
+    Client -->|derive PBKDF2 verifier locally| Client
+    AuthService -->|hash verifier / verify| Bcrypt
     AuthService -->|sign / verify JWT| jsonwebtoken
     AuthService -->|store / revoke refresh tokens| Prisma[(PostgreSQL)]
     AuthService -->|return AuthTokens| AuthRouter
     AuthRouter -->|JSON response| Client
 ```
 
-**Design justification:** Stateless access tokens (short-lived, 15 min) keep the API horizontally scalable — no shared session store is required for read requests. Refresh tokens are stored hashed in PostgreSQL so that token revocation is authoritative and survives server restarts. bcrypt with 12 rounds provides adequate brute-force resistance without excessive CPU cost at current scale.
+**Design justification:** Stateless access tokens (short-lived, 15 min) keep the API horizontally scalable — no shared session store is required for read requests. Refresh tokens are stored hashed in PostgreSQL so that token revocation is authoritative and survives server restarts. For credentials, the browser now derives a PBKDF2-SHA256 verifier from a server-issued salt before submission, and the backend bcrypt-hashes that verifier. This avoids sending raw passwords in request bodies while still preserving bcrypt-based storage and verification on the server.
 
 ### 3. Data Abstraction
 
@@ -46,7 +47,7 @@ The module's core abstraction is the **AuthTokens** pair:
 - `accessToken` — a short-lived JWT (15 min) containing `{ sub: userId }`. Used by all other modules via the `requireAuth` middleware.
 - `refreshToken` — a long-lived JWT (7 days) containing `{ sub: userId, jti: uniqueId }`. Stored as a SHA-256 hash in the database.
 
-Internally, the module treats password hashes as opaque strings produced and consumed only by bcrypt. No plaintext passwords are ever persisted.
+Internally, the module stores password credentials as opaque verifier records with the shape `v1$<passwordSalt>$<bcrypt(passwordVerifier)>`. No plaintext passwords are persisted, and the raw password is no longer sent to `/api/auth/register` or `/api/auth/login`.
 
 ### 4. Stable Storage
 
@@ -82,8 +83,10 @@ model User {
 
 | Method | Endpoint | Request Body | Response | Auth |
 |---|---|---|---|---|
-| POST | `/api/auth/register` | `{ email, username, password }` | `{ accessToken, refreshToken }` | None |
-| POST | `/api/auth/login` | `{ email, password }` | `{ accessToken, refreshToken }` | None |
+| POST | `/api/auth/register/challenge` | `{}` | `{ passwordSalt }` | None |
+| POST | `/api/auth/register` | `{ email, username, passwordSalt, passwordVerifier }` | `{ accessToken, refreshToken }` | None |
+| POST | `/api/auth/login/challenge` | `{ email }` | `{ passwordSalt }` | None |
+| POST | `/api/auth/login` | `{ email, passwordVerifier }` | `{ accessToken, refreshToken }` | None |
 | POST | `/api/auth/logout` | `{ refreshToken }` | `204 No Content` | None |
 | POST | `/api/auth/refresh` | `{ refreshToken }` | `{ accessToken, refreshToken }` | None |
 
@@ -107,8 +110,15 @@ interface JwtPayload {
 }
 
 export const authService = {
-  register(email: string, username: string, password: string): Promise<AuthTokens>;
-  login(email: string, password: string): Promise<AuthTokens>;
+  generatePasswordSalt(): string;
+  getLoginPasswordSalt(email: string): Promise<string>;
+  register(
+    email: string,
+    username: string,
+    passwordSalt: string,
+    passwordVerifier: string,
+  ): Promise<AuthTokens>;
+  login(email: string, passwordVerifier: string): Promise<AuthTokens>;
   logout(rawRefreshToken: string): Promise<void>;
   refreshTokens(rawRefreshToken: string): Promise<AuthTokens>;
   verifyAccessToken(token: string): JwtPayload;
@@ -142,15 +152,19 @@ function ensureAdminUser(): Promise<User>;
 ```mermaid
 classDiagram
     class authService {
-        +register(email, username, password) AuthTokens
-        +login(email, password) AuthTokens
+        +generatePasswordSalt() string
+        +getLoginPasswordSalt(email) string
+        +register(email, username, passwordSalt, passwordVerifier) AuthTokens
+        +login(email, passwordVerifier) AuthTokens
         +logout(rawRefreshToken) void
         +refreshTokens(rawRefreshToken) AuthTokens
         +verifyAccessToken(token) JwtPayload
     }
 
     class AuthRouter {
+        +POST /register/challenge
         +POST /register
+        +POST /login/challenge
         +POST /login
         +POST /logout
         +POST /refresh

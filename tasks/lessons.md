@@ -18,6 +18,12 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 
 <!-- Most recent entries at the top -->
 
+**Date:** 2026-04-11  
+**Caught by:** [Human: user]  
+**Related Issue:** #313  
+**Mistake / Situation:** I began patching the auth implementation in the same pass as test creation instead of first proving the security regression with a failing test run.  
+**Rule / Fix:** For every non-trivial Harmony code change, especially security work, do strict red-green-refactor: write or update the regression tests first, run them to capture the red state, and only then modify implementation.
+
 **Date:** 2026-04-04  
 **Caught by:** [Human: @acabrera04]  
 **Related Issue:** N/A  

@@ -210,9 +210,9 @@ describe('Fix 3 — BrowseServersModal: onJoined prop is called on successful jo
     const callOrder: string[] = [];
     const serverId = 'srv-abc';
 
-    const onJoined = jest.fn(() => callOrder.push('onJoined'));
-    const onClose = jest.fn(() => callOrder.push('onClose'));
-    const routerPush = jest.fn(() => callOrder.push('routerPush'));
+    const onJoined = jest.fn<void, [string]>(_id => callOrder.push('onJoined'));
+    const onClose = jest.fn<void, []>(() => callOrder.push('onClose'));
+    const routerPush = jest.fn<void, [string]>(_href => callOrder.push('routerPush'));
 
     // Replicate the success path of handleJoin in BrowseServersModal
     onJoined(serverId);
@@ -224,12 +224,16 @@ describe('Fix 3 — BrowseServersModal: onJoined prop is called on successful jo
   });
 
   it('onJoined is optional — omitting it does not throw', () => {
-    const onJoined: ((id: string) => void) | undefined = undefined;
-    expect(() => onJoined?.('srv-xyz')).not.toThrow();
+    let onJoined: ((id: string) => void) | undefined;
+    expect(() => {
+      if (onJoined) {
+        onJoined('srv-xyz');
+      }
+    }).not.toThrow();
   });
 
   it('onJoined is called exactly once per successful join', () => {
-    const onJoined = jest.fn();
+    const onJoined = jest.fn<void, [string]>();
     onJoined('srv-123');
     expect(onJoined).toHaveBeenCalledTimes(1);
     expect(onJoined).toHaveBeenCalledWith('srv-123');

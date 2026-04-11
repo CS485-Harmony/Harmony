@@ -4,10 +4,14 @@
 
 This document defines the English-language test specification for `harmony-backend/src/services/auth.service.ts`.
 
+Last updated: 2026-04-11
+
 It covers all exported service functions:
 
 - `authService.register`
 - `authService.login`
+- `authService.generatePasswordSalt`
+- `authService.getLoginPasswordSalt`
 - `authService.logout`
 - `authService.refreshTokens`
 - `authService.verifyAccessToken`
@@ -61,13 +65,13 @@ The goal is to cover the main success cases, all explicit error branches, and th
 
 ### 3.1 `register`
 
-Purpose: create a new user account, hash the password with bcrypt, auto-join the default `harmony-hq` server, and return authentication tokens.
+Purpose: create a new user account, bcrypt-hash a client-derived password verifier together with its server-issued salt, auto-join the default `harmony-hq` server, and return authentication tokens.
 
 Program paths:
 
 - Email already in use: pre-checked with `findUnique`, throws `TRPCError` with code `CONFLICT`.
 - Username already taken: pre-checked with `findUnique`, throws `TRPCError` with code `CONFLICT`.
-- User creation succeeds: password is hashed with bcrypt (12 rounds), user is persisted, `displayName` defaults to `username`.
+- User creation succeeds: the client-supplied `passwordVerifier` is bcrypt-hashed (12 rounds), combined with `passwordSalt` into a versioned verifier record, user is persisted, `displayName` defaults to `username`.
 - Race condition on email or username uniqueness: Prisma `P2002` error is caught and mapped to `TRPCError` with code `CONFLICT`.
 - Auto-join default server `harmony-hq`: `serverMemberService.joinServer` is called; if it fails, the error is caught and registration continues (soft fail).
 - Tokens are generated and stored: `signAccessToken` and `signRefreshToken` are called; refresh token is stored in DB with hash and expiry.
@@ -75,16 +79,35 @@ Program paths:
 
 ### 3.2 `login`
 
-Purpose: authenticate a user by email and password, returning authentication tokens.
+Purpose: authenticate a user by email and client-derived password verifier, returning authentication tokens.
 
 Program paths:
 
-- Dev admin override: if `NODE_ENV !== 'production'`, `email === ADMIN_EMAIL`, and `password === 'admin'`, the admin user is upserted and tokens are issued (bypasses all password checks).
+- Dev admin override: if `NODE_ENV !== 'production'`, `email === ADMIN_EMAIL`, and the submitted verifier matches the verifier derived from the dev admin password, the admin user is upserted and tokens are issued.
 - User does not exist: timing-safe check using a dummy bcrypt hash comparison, throws `TRPCError` with code `UNAUTHORIZED` with message "Invalid credentials".
-- Password does not match: bcrypt comparison fails, throws `TRPCError` with code `UNAUTHORIZED` with message "Invalid credentials".
-- Login succeeds: user is found, password is valid, new tokens are generated and refresh token is stored.
+- Password verifier does not match: bcrypt comparison fails, throws `TRPCError` with code `UNAUTHORIZED` with message "Invalid credentials".
+- Legacy password record has no verifier metadata: throws `TRPCError` with code `UNAUTHORIZED` and message instructing the account to reset its password before sign-in.
+- Login succeeds: user is found, verifier is valid, new tokens are generated and refresh token is stored.
 - Tokens are issued and refresh token is persisted in DB.
 - Return value is `{ accessToken, refreshToken }`.
+
+### 3.0 `generatePasswordSalt`
+
+Purpose: generate a new random hex salt for registration challenge responses.
+
+Program paths:
+
+- Success path: returns a 16-byte random salt encoded as 32 lowercase hexadecimal characters.
+
+### 3.0.1 `getLoginPasswordSalt`
+
+Purpose: return the stored password salt for an existing account, or a deterministic dummy salt for unknown emails to avoid account enumeration.
+
+Program paths:
+
+- Existing verifier record: extracts and returns the stored `passwordSalt`.
+- Unknown user: returns a deterministic dummy salt derived from the email.
+- Dev admin login in non-production: returns the fixed dev-admin salt used by the override path.
 
 ### 3.3 `logout`
 
@@ -126,18 +149,18 @@ Program paths:
 
 ### 4.1 `register`
 
-Description: creates a new user, persists the account, auto-joins default server, and returns tokens.
+Description: creates a new user from `{ email, username, passwordSalt, passwordVerifier }`, persists the account, auto-joins default server, and returns tokens.
 
 | Test Purpose | Inputs | Expected Output |
 |---|---|---|
-| Register with valid email, username, password | email: `"user@example.com"`, username: `"newuser"`, password: `"SecurePass123!"` | Returns `{ accessToken, refreshToken }` where both are non-empty strings; user is created in DB with hashed password; refresh token is stored with hash and expiry |
-| Reject duplicate email | email: `"existing@example.com"` (already in DB), username: `"newname"`, password: `"pass"` | Throws `TRPCError` with code `CONFLICT` and message `"Email already in use"` |
-| Reject duplicate username | email: `"newemail@example.com"`, username: `"existingname"` (already in DB), password: `"pass"` | Throws `TRPCError` with code `CONFLICT` and message `"Username already taken"` |
+| Register with valid email, username, password verifier | email: `"user@example.com"`, username: `"newuser"`, passwordSalt: `<32-char hex>`, passwordVerifier: `<base64 verifier>` | Returns `{ accessToken, refreshToken }` where both are non-empty strings; user is created in DB with a versioned verifier record; refresh token is stored with hash and expiry |
+| Reject duplicate email | email: `"existing@example.com"` (already in DB), username: `"newname"`, passwordSalt + passwordVerifier valid | Throws `TRPCError` with code `CONFLICT` and message `"Email already in use"` |
+| Reject duplicate username | email: `"newemail@example.com"`, username: `"existingname"` (already in DB), passwordSalt + passwordVerifier valid | Throws `TRPCError` with code `CONFLICT` and message `"Username already taken"` |
 | Catch Prisma P2002 race on email/username | Mock `prisma.user.create` to throw P2002 on first call | Throws `TRPCError` with code `CONFLICT` and message `"Email or username already in use"` |
 | Auto-join default server succeeds | Valid inputs; default server `harmony-hq` exists | `serverMemberService.joinServer` is called with correct userId and server id; registration completes successfully |
 | Auto-join when default server does not exist | Valid inputs; no server with slug=`"harmony-hq"` in DB | Registration succeeds, tokens returned, no error; `joinServer` is never called |
 | Continue on joinServer failure | Valid inputs; `serverMemberService.joinServer` throws an error | Registration succeeds and tokens are returned; error is caught and not propagated |
-| Hash password with 12 bcrypt rounds | Valid inputs | Stored password hash is a bcrypt hash; plaintext password is never stored |
+| Hash verifier with 12 bcrypt rounds | Valid inputs | Stored password hash is `v1$<passwordSalt>$<bcryptHash>`; plaintext password is never stored and never submitted to `authService.register` |
 | displayName defaults to username | Valid inputs; no explicit `displayName` parameter | User record has `displayName === username` |
 | Empty email input (router-level validation) | email: `""`, username: `"user"`, password: `"pass"` | `authService.register` does not perform this validation; this case is validated by Zod in `auth.router.ts` and should be covered in auth-router tests |
 | Malformed email input (router-level validation) | email: `"notanemail"`, username: `"user"`, password: `"pass"` | `authService.register` does not enforce email format; malformed emails are rejected in the router via Zod schema, not at the service layer |
@@ -148,16 +171,17 @@ Description: creates a new user, persists the account, auto-joins default server
 
 ### 4.2 `login`
 
-Description: authenticates user by email and password, with dev-only admin override.
+Description: authenticates user by email and password verifier, with dev-only admin override.
 
 | Test Purpose | Inputs | Expected Output |
 |---|---|---|
-| Login with valid credentials | email: `"user@example.com"`, password: `"correctPassword"` (user exists with matching hash) | Returns `{ accessToken, refreshToken }`; both are non-empty and JWT-signed; refresh token is stored in DB |
-| Reject login with wrong password | email: `"user@example.com"` (exists), password: `"wrongPassword"` | Throws `TRPCError` with code `UNAUTHORIZED` and message `"Invalid credentials"` |
-| Reject login for non-existent email | email: `"nonexistent@example.com"`, password: `"anypass"` | Throws `TRPCError` with code `UNAUTHORIZED` and message `"Invalid credentials"`; timing-safe dummy hash check is performed |
-| Timing-safe bcrypt comparison on non-existent email | Non-existent email + any password | Spy on `bcrypt.compare()` verifies it is called with (password, TIMING_DUMMY_HASH) even though user lookup failed (prevents timing-based user enumeration) |
-| Admin override in non-production | `NODE_ENV = 'development'`, email: `"admin@harmony.dev"`, password: `"admin"` | Returns valid tokens; admin user is created or updated in DB; admin is added as OWNER to all servers |
-| Disable admin override in production | `NODE_ENV = 'production'`, email: `"admin@harmony.dev"`, password: `"admin"` | Throws `TRPCError` with code `UNAUTHORIZED` (normal credential check applies, admin user likely does not exist) |
+| Login with valid credentials | email: `"user@example.com"`, passwordVerifier: `<correct verifier>` (user exists with matching hash) | Returns `{ accessToken, refreshToken }`; both are non-empty and JWT-signed; refresh token is stored in DB |
+| Reject login with wrong verifier | email: `"user@example.com"` (exists), passwordVerifier: `<wrong verifier>` | Throws `TRPCError` with code `UNAUTHORIZED` and message `"Invalid credentials"` |
+| Reject login for non-existent email | email: `"nonexistent@example.com"`, passwordVerifier: `<any verifier>` | Throws `TRPCError` with code `UNAUTHORIZED` and message `"Invalid credentials"`; timing-safe dummy hash check is performed |
+| Timing-safe bcrypt comparison on non-existent email | Non-existent email + any verifier | Spy on `bcrypt.compare()` verifies it is called with (passwordVerifier, TIMING_DUMMY_HASH) even though user lookup failed (prevents timing-based user enumeration) |
+| Reject legacy bcrypt-only credential records | email exists, `passwordHash` lacks the `v1$<salt>$...` prefix | Throws `TRPCError` with code `UNAUTHORIZED` and message instructing a password reset |
+| Admin override in non-production | `NODE_ENV = 'development'`, email: `"admin@harmony.dev"`, passwordVerifier derived from `"admin"` and the dev-admin salt | Returns valid tokens; admin user is created or updated in DB; admin is added as OWNER to all servers |
+| Disable admin override in production | `NODE_ENV = 'production'`, email: `"admin@harmony.dev"`, verifier derived from `"admin"` | Throws `TRPCError` with code `UNAUTHORIZED` (normal credential check applies, admin user likely does not exist) |
 | Admin override creates user if not exists | `NODE_ENV = 'development'`, admin email provided | User is created with `email = ADMIN_EMAIL`, `username = 'admin'`, `displayName = 'System Admin'` |
 | Admin override makes admin OWNER of all servers | `NODE_ENV = 'development'`, admin login, 3+ servers exist | For each server in the database, a serverMember record is created or updated with role `OWNER` |
 | Admin user creation fails on DB error | `NODE_ENV = 'development'`, `admin@harmony.dev`/`admin`, but `prisma.user.upsert()` throws error | Throws error (does not silently fail); login fails |
@@ -206,11 +230,20 @@ Description: validates an access token and returns the decoded payload (pure ver
 | No database interaction | Any token | Function does not call any database methods; verification is pure |
 | Reject malformed token | accessToken: `"not.a.jwt"`, `"invalid"`, or `""` | Throws `TRPCError` with code `UNAUTHORIZED` |
 
+### 4.0 Helper coverage
+
+| Test Purpose | Inputs | Expected Output |
+|---|---|---|
+| Generate registration salt | none | Returns a 32-character hexadecimal string |
+| Return stored login salt | email for existing user with `v1$<salt>$...` password hash | Returns the embedded `passwordSalt` |
+| Return deterministic dummy login salt | unknown email, same input repeated twice | Returns the same 32-character hexadecimal string both times |
+
 ## 5. Edge Cases to Explicitly Validate
 
 ### Security & Timing
 - **Timing attacks on login**: ensure `bcrypt.compare()` is ALWAYS called for non-existent emails, even though the user lookup fails early. Spy on bcrypt to verify this.
 - **No user enumeration**: both "user not found" and "wrong password" return identical error message and timing.
+- **No raw password transport in service contract**: callers must derive and submit `passwordVerifier`; service tests should not pass raw passwords into `register` or `login`.
 - **JWT secret enforcement**: tokens signed with a different secret are rejected. Note: `jsonwebtoken` does not enforce an algorithm allowlist by default, so algorithm mismatch tests (e.g., HS512 vs HS256) may not fail with a shared HMAC secret.
 - **No plaintext password storage**: verify password is never logged, returned, or stored unencrypted.
 

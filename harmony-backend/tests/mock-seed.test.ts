@@ -61,7 +61,7 @@ describe('buildMockSeedData', () => {
     // Keep in sync with the ALICE_ADMIN_HASH constant in mockSeed.ts.
     const alice = data.users.find((u) => u.username === 'alice_admin');
     const others = data.users.filter((u) => u.username !== 'alice_admin');
-    expect(alice?.passwordHash).toMatch(/^\$2[ab]\$\d+\$/);
+    expect(alice?.passwordHash).toMatch(/^v1\$[0-9a-f]{32}\$\$2[ab]\$\d+\$/);
     expect(others.every((u) => u.passwordHash === '!')).toBe(true);
   });
 
