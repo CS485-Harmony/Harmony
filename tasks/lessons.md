@@ -21,6 +21,12 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 **Date:** 2026-04-11  
 **Caught by:** [Human: user]  
 **Related Issue:** #313  
+**Mistake / Situation:** I updated auth-related tests for the new verifier contract but missed another backend suite that still called `authService.register` with the old 3-argument signature, which broke CI.  
+**Rule / Fix:** After changing any shared service contract, grep the full repo for old call sites and run at least the affected package typecheck before pushing so stale compile-time usages do not escape to CI.
+
+**Date:** 2026-04-11  
+**Caught by:** [Human: user]  
+**Related Issue:** #313  
 **Mistake / Situation:** I began patching the auth implementation in the same pass as test creation instead of first proving the security regression with a failing test run.  
 **Rule / Fix:** For every non-trivial Harmony code change, especially security work, do strict red-green-refactor: write or update the regression tests first, run them to capture the red state, and only then modify implementation.
 

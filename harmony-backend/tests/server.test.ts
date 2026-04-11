@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import request from 'supertest';
 import { PrismaClient } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
@@ -7,6 +8,12 @@ import { authService } from '../src/services/auth.service';
 import type { Express } from 'express';
 import type { Server } from '@prisma/client';
 import type { ServerMemberWithUser } from '../src/services/server.service';
+
+const TEST_PASSWORD_SALT = '00112233445566778899aabbccddeeff';
+
+function derivePasswordVerifier(password: string, salt = TEST_PASSWORD_SALT): string {
+  return crypto.pbkdf2Sync(password, salt, 310000, 32, 'sha256').toString('base64');
+}
 
 // ─── Unit tests: slug generation ─────────────────────────────────────────────
 
@@ -280,7 +287,8 @@ describe('server tRPC router', () => {
     const { accessToken } = await authService.register(
       `getmembers-nonmember-${ts}@example.com`,
       `gm_nonmember_${ts}`,
-      'password123',
+      TEST_PASSWORD_SALT,
+      derivePasswordVerifier('password123'),
     );
     const user = await prismaLocal.user.findUnique({
       where: { email: `getmembers-nonmember-${ts}@example.com` },
@@ -303,7 +311,8 @@ describe('server tRPC router', () => {
     const { accessToken } = await authService.register(
       `getmembers-member-${ts}@example.com`,
       `gm_member_${ts}`,
-      'password123',
+      TEST_PASSWORD_SALT,
+      derivePasswordVerifier('password123'),
     );
     const user = await prismaLocal.user.findUniqueOrThrow({
       where: { email: `getmembers-member-${ts}@example.com` },
