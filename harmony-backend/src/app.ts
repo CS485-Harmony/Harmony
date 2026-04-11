@@ -45,6 +45,11 @@ export function createApp() {
   // without a proxy in front (local dev, direct port exposure) doesn't let
   // clients spoof XFF and poison rate-limit buckets. Set to `1` on Railway.
   const trustProxyHopsEnv = process.env.TRUST_PROXY_HOPS;
+  if (trustProxyHopsEnv !== undefined && trustProxyHopsEnv.trim() === '') {
+    throw new Error(
+      `Invalid TRUST_PROXY_HOPS value "${trustProxyHopsEnv}". Expected a non-negative integer.`,
+    );
+  }
   const trustProxyHops =
     trustProxyHopsEnv === undefined ? 0 : Number(trustProxyHopsEnv);
   if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
