@@ -5,7 +5,9 @@
  * Visibility rules:
  *   PUBLIC_INDEXABLE  → render children
  *   PUBLIC_NO_INDEX   → render children (same guest experience)
- *   PRIVATE           → render AccessDeniedPage
+ *   PRIVATE           → unauthenticated: AccessDeniedPage (with login/signup CTAs)
+ *                       authenticated non-admin/non-owner: NoPermissionPage
+ *                       authenticated admin/owner: render children
  *
  * Ref: dev-spec-guest-public-channel-view.md — VisibilityGuard (C1.2)
  */
@@ -191,7 +193,7 @@ export interface VisibilityGuardProps {
    * The ownerId of the server that owns this channel. When provided,
    * VisibilityGuard uses it to check whether the authenticated user is an
    * admin/owner and therefore allowed to view PRIVATE channels. Authenticated
-   * non-admin members are shown AccessDeniedPage for PRIVATE channels, covering
+   * non-admin members are shown NoPermissionPage for PRIVATE channels, covering
    * the direct-URL access path that the real-time SSE redirect cannot guard.
    */
   serverOwnerId?: string;
