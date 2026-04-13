@@ -29,6 +29,7 @@ import {
 } from 'react';
 import { apiClient, getAccessToken } from '@/lib/api-client';
 import { useToast } from '@/hooks/useToast';
+import { getApiBaseUrl } from '@/lib/runtime-config';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -628,7 +629,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
       const token = getAccessToken();
       if (!channelId || !serverId || !token) return;
 
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+      const baseUrl = getApiBaseUrl();
       fetch(`${baseUrl}/trpc/voice.leave`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

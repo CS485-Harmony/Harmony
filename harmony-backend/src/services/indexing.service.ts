@@ -4,6 +4,7 @@
  * Provides:
  *   - addToSitemap(channelId)   — marks a channel for sitemap inclusion
  *   - removeFromSitemap(channelId) — removes a channel from sitemap
+ *   - generateSitemapIndex() — builds the sitemap index consumed by the frontend
  *   - generateSitemap(serverSlug)  — builds XML sitemap for a server
  *
  * Listens to VISIBILITY_CHANGED events to keep sitemap data in sync.
@@ -18,10 +19,31 @@ const SITEMAP_CACHE_TTL = 300; // 5 minutes
 const BASE_URL = process.env.BASE_URL ?? 'https://harmony.chat';
 
 export const CacheKeys_Sitemap = {
+  index: 'sitemap:index',
   serverSitemap: (serverSlug: string) => `sitemap:${sanitizeKeySegment(serverSlug)}`,
 };
 
 export const indexingService = {
+  /**
+   * Generate the sitemap index consumed by the frontend apex-domain route
+   * handler. The backend remains the XML producer, while the frontend owns the
+   * crawler-facing hostname in production.
+   */
+  async generateSitemapIndex(): Promise<string> {
+    return cacheService.getOrRevalidate(
+      CacheKeys_Sitemap.index,
+      async () => {
+        const servers = await prisma.server.findMany({
+          where: { isPublic: true },
+          orderBy: { memberCount: 'desc' },
+          select: { slug: true },
+        });
+        return buildSitemapIndexXml(servers.map((server) => server.slug));
+      },
+      { ttl: SITEMAP_CACHE_TTL },
+    );
+  },
+
   /**
    * Invalidate the sitemap cache for the channel's server so the channel
    * appears in the next generated sitemap.
@@ -115,6 +137,17 @@ function buildSitemapXml(
     .join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`;
+}
+
+function buildSitemapIndexXml(serverSlugs: string[]): string {
+  const sitemaps = serverSlugs
+    .map(
+      (serverSlug) =>
+        `  <sitemap>\n    <loc>${escapeXml(BASE_URL)}/sitemap/${encodeURIComponent(serverSlug)}</loc>\n  </sitemap>`,
+    )
+    .join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemaps}\n</sitemapindex>`;
 }
 
 function escapeXml(str: string): string {

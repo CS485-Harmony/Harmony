@@ -1244,8 +1244,8 @@ Implementation code is located in:
 | Public channel detail | Returns a public channel's metadata. |
 | Public messages | Paginated messages from `PUBLIC_INDEXABLE` channels only (50/page). |
 | Single message | Returns a single message from a `PUBLIC_INDEXABLE` channel. |
-| robots.txt | Allows crawling of `/c/` routes; disallows `/api/`, `/trpc/`. |
-| Dynamic sitemap | Generates per-server XML sitemaps of `PUBLIC_INDEXABLE` channels. |
+| robots.txt | Transitional backend source for crawler directives; the frontend apex domain is the canonical public host. |
+| Dynamic sitemap | Generates XML data that frontend sitemap entrypoints proxy to crawlers on the apex domain. |
 | Caching | Stale-while-revalidate pattern. Adds `Cache-Control` and `X-Cache` headers. |
 | Rate limiting | 100 req/min for humans; 1000 req/min for verified bots. |
 
@@ -1256,7 +1256,8 @@ Implementation code is located in:
 ```mermaid
 flowchart TD
     Crawler[Search Engine / Browser] -->|HTTP GET| PublicRouter
-    Crawler -->|GET robots.txt / sitemap| SEORouter
+    Crawler -->|GET robots.txt / sitemap| Frontend["Frontend apex domain"]
+    Frontend -->|SEO XML fetch| SEORouter
     PublicRouter -->|rate limit| RateLimiter[Token Bucket]
     PublicRouter -->|cache check| CacheService[Redis]
     PublicRouter -->|query| Prisma[(PostgreSQL)]
@@ -1266,7 +1267,7 @@ flowchart TD
     IndexingService -->|query channels| Prisma
 ```
 
-**Design justification:** The public API is completely separate from the tRPC layer because crawlers and external consumers require plain HTTP with standard caching headers. The stale-while-revalidate pattern ensures fast responses for frequently-accessed public pages while keeping data fresh in the background. Per-server sitemaps keep XML file sizes manageable and allow incremental re-crawling.
+**Design justification:** The public API is completely separate from the tRPC layer because crawlers and external consumers require plain HTTP with standard caching headers. The frontend apex domain owns canonical SEO artifacts in production, while backend SEO routes continue to generate the underlying XML/text that frontend route handlers proxy on the public host. The stale-while-revalidate pattern ensures fast responses for frequently-accessed public pages while keeping data fresh in the background. Per-server sitemaps keep XML file sizes manageable and allow incremental re-crawling.
 
 ### 3. Data Abstraction
 
@@ -1291,8 +1292,9 @@ This module reads from the same PostgreSQL tables as the authenticated modules (
 | GET | `/api/public/servers/:serverSlug/channels/:channelSlug` | Public channel info |
 | GET | `/api/public/channels/:channelId/messages` | Paginated messages (PUBLIC_INDEXABLE only) |
 | GET | `/api/public/channels/:channelId/messages/:messageId` | Single message |
-| GET | `/robots.txt` | Crawler directives |
-| GET | `/sitemap/:serverSlug.xml` | Dynamic XML sitemap |
+| GET | `/robots.txt` | Transitional crawler directives source for frontend proxying |
+| GET | `/sitemap-index.xml` | Sitemap index XML consumed by the frontend sitemap entrypoint |
+| GET | `/sitemap/:serverSlug.xml` | Dynamic XML sitemap consumed by frontend per-server sitemap entrypoints |
 
 ### 6. Class/Method/Field Declarations
 
@@ -1305,11 +1307,13 @@ export const seoRouter: Router;      // Express
 export const indexingService = {
   addToSitemap(channelId: string): Promise<void>;
   removeFromSitemap(channelId: string): Promise<void>;
+  generateSitemapIndex(): Promise<string>;
   generateSitemap(serverSlug: string): Promise<string | null>;
   onVisibilityChanged(payload: { channelId; oldVisibility; newVisibility }): Promise<void>;
 };
 
 export const CacheKeys_Sitemap = {
+  index: string;
   serverSitemap(serverSlug: string): string;
 };
 
@@ -1353,6 +1357,7 @@ classDiagram
     }
 
     class seoRouter {
+        +GET /sitemap-index.xml
         +GET /robots.txt
         +GET /sitemap/:serverSlug.xml
     }
@@ -1360,6 +1365,7 @@ classDiagram
     class indexingService {
         +addToSitemap(channelId) void
         +removeFromSitemap(channelId) void
+        +generateSitemapIndex() string
         +generateSitemap(serverSlug) string
         +onVisibilityChanged(payload) void
     }

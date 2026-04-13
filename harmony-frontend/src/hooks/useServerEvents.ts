@@ -29,6 +29,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { Channel, ChannelVisibility } from '@/types/channel';
 import type { User, UserStatus } from '@/types/user';
 import { getAccessToken } from '@/lib/api-client';
+import { getApiBaseUrl } from '@/lib/runtime-config';
 
 export interface UseServerEventsOptions {
   serverId: string;
@@ -84,7 +85,7 @@ export function useServerEvents({
   useEffect(() => {
     if (!enabled || !serverId) return;
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
+    const apiUrl = getApiBaseUrl();
     const token = getAccessToken();
     if (!token) return;
 

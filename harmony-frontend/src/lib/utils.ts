@@ -1,6 +1,7 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { isAxiosError } from 'axios';
+import { getChannelUrl as getCanonicalChannelUrl } from './runtime-config';
 
 /**
  * Utility function to merge Tailwind CSS classes
@@ -84,15 +85,16 @@ export function formatTimeOnly(date: Date | string): string {
  *   - Plain Error instances with a message
  *   - Falls back to the provided `fallback` string
  */
-export function getUserErrorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
+export function getUserErrorMessage(
+  err: unknown,
+  fallback = 'Something went wrong. Please try again.',
+): string {
   if (isAxiosError(err)) {
     const data = err.response?.data;
     if (data) {
       // Validation errors: { error: "Validation failed", details: [{ message: "..." }] }
       if (Array.isArray(data.details) && data.details.length > 0) {
-        const messages = data.details
-          .map((d: { message?: string }) => d.message)
-          .filter(Boolean);
+        const messages = data.details.map((d: { message?: string }) => d.message).filter(Boolean);
         if (messages.length > 0) return messages.join('. ');
       }
       // REST endpoints: { error: "Invalid credentials" }
@@ -123,6 +125,5 @@ export function truncate(text: string, maxLength: number): string {
  * Generate a canonical URL for a public channel
  */
 export function getChannelUrl(serverSlug: string, channelSlug: string): string {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-  return `${baseUrl}/c/${serverSlug}/${channelSlug}`;
+  return getCanonicalChannelUrl(serverSlug, channelSlug);
 }
