@@ -25,7 +25,7 @@ class TestResponse {
   readonly status: number;
   readonly ok: boolean;
   readonly headers: TestHeaders;
-  private readonly body: string;
+  readonly body: string;
 
   constructor(body = '', init: { status?: number; headers?: Record<string, string> } = {}) {
     this.body = body;

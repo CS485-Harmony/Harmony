@@ -40,4 +40,16 @@ describe('runtime-config', () => {
       'https://harmony.chat/c/server%20slug/general%20chat',
     );
   });
+
+  it('throws when a configured public base URL is malformed', () => {
+    process.env.NEXT_PUBLIC_BASE_URL = 'harmony.chat';
+
+    expect(() => getPublicBaseUrl()).toThrow('Invalid NEXT_PUBLIC_BASE_URL value');
+  });
+
+  it('throws when a configured API base URL is malformed', () => {
+    process.env.NEXT_PUBLIC_API_URL = 'api.harmony.chat';
+
+    expect(() => getApiBaseUrl()).toThrow('Invalid NEXT_PUBLIC_API_URL value');
+  });
 });

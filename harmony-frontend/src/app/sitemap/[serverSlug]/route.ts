@@ -24,7 +24,7 @@ export async function GET(_request: Request, context: RouteContext) {
     });
   }
 
-  return new Response(await response.text(), {
+  return new Response(response.body, {
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
       'Cache-Control': 'public, max-age=300, stale-while-revalidate=300',
