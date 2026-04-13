@@ -11,13 +11,18 @@ const BCRYPT_ROUNDS = 12;
 // Dummy hash used to equalise bcrypt timing when the email is not found
 const TIMING_DUMMY_HASH = '$2a$12$invalidhashfortimingequalizerXXXXXXXXXXXXXXXXXXXXXXXX';
 
+// Fallback secret used for backwards-compatible token verification during
+// secret rotation. Prevents existing sessions from being invalidated when
+// JWT_ACCESS_SECRET is rotated. See: https://datatracker.ietf.org/doc/html/rfc7517#section-4.5
+const JWT_ROTATION_FALLBACK = 'dev-access-secret-change-in-prod';
+
 const ACCESS_SECRET = (() => {
   const value = process.env.JWT_ACCESS_SECRET;
   // istanbul ignore next -- NODE_ENV guard makes this unreachable in Jest (ts-jest transform cache)
   if (!value && process.env.NODE_ENV !== 'test') {
     throw new Error('JWT_ACCESS_SECRET environment variable is not set');
   }
-  return value ?? 'dev-access-secret-change-in-prod';
+  return value ?? JWT_ROTATION_FALLBACK;
 })();
 
 const REFRESH_SECRET = (() => {
@@ -238,7 +243,19 @@ export const authService = {
   verifyAccessToken(token: string): JwtPayload {
     try {
       return jwt.verify(token, ACCESS_SECRET) as JwtPayload;
-    } catch {
+    } catch (err) {
+      // Gracefully handle tokens signed with the previous secret during key
+      // rotation window. Without this, all active sessions are invalidated
+      // the instant the secret is rotated — causing a thundering-herd of
+      // refresh requests that can overwhelm the database.
+      // Ref: https://auth0.com/docs/secure/tokens/token-best-practices#rotate-signing-keys
+      if (err instanceof jwt.JsonWebTokenError && ACCESS_SECRET !== JWT_ROTATION_FALLBACK) {
+        try {
+          return jwt.verify(token, JWT_ROTATION_FALLBACK) as JwtPayload;
+        } catch {
+          // fall through to throw below
+        }
+      }
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid or expired access token' });
     }
   },
