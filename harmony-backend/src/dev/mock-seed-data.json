@@ -112,7 +112,7 @@
       "slug": "design-lab",
       "icon": "https://api.dicebear.com/7.x/shapes/svg?seed=designlab",
       "ownerId": "user-005",
-      "description": "A private server for the design team.",
+      "description": "The design team's creative hub for wireframes, inspiration, and portfolio work.",
       "bannerUrl": "https://placehold.co/1200x400/f59e0b/ffffff?text=Design+Lab",
       "memberCount": 3,
       "createdAt": "2024-02-20T11:00:00.000Z",
