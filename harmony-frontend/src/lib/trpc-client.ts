@@ -14,8 +14,6 @@ import { TrpcHttpError } from './trpc-errors';
 
 export { TrpcHttpError } from './trpc-errors';
 
-const BASE = API_CONFIG.BASE_URL;
-
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 
 /**
@@ -42,7 +40,7 @@ export async function publicGet<T>(path: string): Promise<T | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10_000);
   try {
-    const res = await fetch(`${BASE}/api/public${path}`, {
+    const res = await fetch(`${API_CONFIG.BASE_URL}/api/public${path}`, {
       next: { revalidate: 60 }, // ISR: revalidate every 60s
       signal: controller.signal,
     });
@@ -63,7 +61,7 @@ export async function publicGet<T>(path: string): Promise<T | null> {
  * Input is JSON-serialized as a query parameter.
  */
 export async function trpcQuery<T>(procedure: string, input?: unknown): Promise<T> {
-  const url = new URL(`${BASE}/trpc/${procedure}`);
+  const url = new URL(`${API_CONFIG.BASE_URL}/trpc/${procedure}`);
   if (input !== undefined) {
     url.searchParams.set('input', JSON.stringify(input));
   }
@@ -115,7 +113,7 @@ export async function trpcMutate<T>(procedure: string, input?: unknown): Promise
   const timeoutId = setTimeout(() => controller.abort(), 10_000);
   let res: Response;
   try {
-    res = await fetch(`${BASE}/trpc/${procedure}`, {
+    res = await fetch(`${API_CONFIG.BASE_URL}/trpc/${procedure}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(input ?? {}),

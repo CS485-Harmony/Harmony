@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { GuestChannelView } from '@/components/channel/GuestChannelView';
 import { fetchPublicServer, fetchPublicChannel } from '@/services/publicApiService';
 import { ChannelVisibility } from '@/types';
+import { getChannelUrl } from '@/lib/runtime-config';
 
 interface PageProps {
   params: Promise<{ serverSlug: string; channelSlug: string }>;
@@ -20,7 +21,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const isIndexable = channel?.visibility === ChannelVisibility.PUBLIC_INDEXABLE;
   const description = channel?.topic ?? server?.description ?? `Join ${serverName} on Harmony`;
   const title = `${channelName} - ${serverName} | Harmony`;
-  const canonicalUrl = `/c/${serverSlug}/${channelSlug}`;
+  const canonicalUrl = getChannelUrl(serverSlug, channelSlug);
 
   return {
     title,

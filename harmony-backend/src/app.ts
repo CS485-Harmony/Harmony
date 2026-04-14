@@ -74,6 +74,8 @@ export function createApp() {
   });
 
   // SEO endpoints (robots.txt, sitemaps) — before auth so they're publicly accessible
+  // Backend SEO routes remain available as transitional XML sources; the
+  // frontend apex domain owns the canonical crawler-facing entrypoints.
   app.use(seoRouter);
 
   // Auth endpoints

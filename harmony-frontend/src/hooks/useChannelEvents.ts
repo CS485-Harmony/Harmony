@@ -20,6 +20,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Message } from '@/types/message';
 import type { Server } from '@/types/server';
 import { getAccessToken } from '@/lib/api-client';
+import { getApiBaseUrl } from '@/lib/runtime-config';
 
 export interface UseChannelEventsOptions {
   channelId: string;
@@ -64,7 +65,7 @@ export function useChannelEvents({
   useEffect(() => {
     if (!enabled || !channelId) return;
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
+    const apiUrl = getApiBaseUrl();
     const token = getAccessToken();
     if (!token) return; // unauthenticated — don't attempt connection
     const url = `${apiUrl}/api/events/channel/${channelId}?token=${encodeURIComponent(token)}`;

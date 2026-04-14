@@ -79,6 +79,15 @@ afterAll(async () => {
 });
 
 describe('indexingService.generateSitemap', () => {
+  it('generates a sitemap index that points crawlers at the frontend host', async () => {
+    const xml = await indexingService.generateSitemapIndex();
+
+    expect(xml).not.toBeNull();
+    expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+    expect(xml).toContain('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
+    expect(xml).toContain(`/sitemap/${serverSlug}`);
+  });
+
   it('returns null for non-existent server', async () => {
     const result = await indexingService.generateSitemap('non-existent-server-slug');
     expect(result).toBeNull();
@@ -138,9 +147,7 @@ describe('indexingService.onVisibilityChanged', () => {
       newVisibility: 'PUBLIC_INDEXABLE',
     });
 
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.stringContaining('sitemap:'),
-    );
+    expect(invalidateSpy).toHaveBeenCalledWith(expect.stringContaining('sitemap:'));
   });
 
   it('invalidates sitemap cache when channel leaves PUBLIC_INDEXABLE', async () => {
@@ -152,9 +159,7 @@ describe('indexingService.onVisibilityChanged', () => {
       newVisibility: 'PRIVATE',
     });
 
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.stringContaining('sitemap:'),
-    );
+    expect(invalidateSpy).toHaveBeenCalledWith(expect.stringContaining('sitemap:'));
   });
 
   it('does not invalidate cache when visibility change does not involve PUBLIC_INDEXABLE', async () => {
@@ -178,6 +183,17 @@ describe('GET /robots.txt', () => {
     expect(res.text).toContain('Allow: /c/');
     expect(res.text).toContain('Disallow: /api/');
     expect(res.text).toContain('Disallow: /trpc/');
+    expect(res.text).toContain('Sitemap:');
+  });
+});
+
+describe('GET /sitemap-index.xml', () => {
+  it('returns the sitemap index for the frontend host', async () => {
+    const res = await request(app).get('/sitemap-index.xml');
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/application\/xml/);
+    expect(res.text).toContain(`/sitemap/${serverSlug}`);
   });
 });
 

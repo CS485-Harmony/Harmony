@@ -127,6 +127,17 @@ Copy `.env.example` to `.env.local` and fill in your values:
 cp .env.example .env.local
 ```
 
+Required runtime values:
+
+- `NEXT_PUBLIC_BASE_URL`: canonical frontend origin used for absolute public URLs, `metadataBase`,
+  `robots.txt`, and sitemap entrypoints
+- `NEXT_PUBLIC_API_URL`: public backend API origin used by browser code and server-side frontend
+  fetches
+
+Per `docs/deployment/deployment-architecture.md`, the frontend apex domain owns the public SEO
+contract. The frontend hosts canonical URLs, `metadataBase`, `robots.txt`, and sitemap entrypoints,
+while backend sitemap routes remain internal/transitional XML sources.
+
 ## Code Quality
 
 - **Linting**: `npm run lint`

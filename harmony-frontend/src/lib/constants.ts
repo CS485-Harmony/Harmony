@@ -1,3 +1,5 @@
+import { getApiBaseUrl } from './runtime-config';
+
 /**
  * Application-wide constants
  * Aligned with dev spec requirements
@@ -10,7 +12,9 @@ export const APP_DESCRIPTION = 'Search-engine-indexable chat platform';
  * API Configuration
  */
 export const API_CONFIG = {
-  BASE_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000',
+  get BASE_URL() {
+    return getApiBaseUrl();
+  },
   TIMEOUT: 30000, // 30 seconds
 } as const;
 
