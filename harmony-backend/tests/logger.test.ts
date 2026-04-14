@@ -13,7 +13,11 @@ async function loadLoggerModule(): Promise<LoggerModule> {
 
 describe('logger helpers', () => {
   afterEach(() => {
-    process.env.NODE_ENV = originalNodeEnv;
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
     if (originalLogLevel === undefined) {
       delete process.env.LOG_LEVEL;
     } else {
