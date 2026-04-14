@@ -12,8 +12,16 @@ describe('GET /health', () => {
   it('returns 200 with status ok', async () => {
     const res = await request(app).get('/health');
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ status: 'ok' });
+    expect(res.body).toMatchObject({ status: 'ok', service: 'backend-api' });
+    expect(typeof res.body.instanceId).toBe('string');
+    expect(res.body.instanceId.length).toBeGreaterThan(0);
     expect(typeof res.body.timestamp).toBe('string');
+  });
+
+  it('returns X-Instance-Id header matching body instanceId', async () => {
+    const res = await request(app).get('/health');
+    expect(res.status).toBe(200);
+    expect(res.headers['x-instance-id']).toBe(res.body.instanceId);
   });
 });
 

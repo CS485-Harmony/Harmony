@@ -43,7 +43,7 @@ Harmony deploys as five cloud services:
 - Connects to shared Postgres and Redis.
 - Stamps every response with an `X-Instance-Id` header and returns the same id in `/health` JSON so replica distribution is externally observable (see `docs/deployment/replica-readiness-audit.md §6.2`).
 - Must be kept stateless enough to support 2+ replicas behind Railway load balancing.
-- Must NOT start `cacheInvalidator` or any other Redis Pub/Sub subscriber — those belong on `backend-worker`.
+- Must NOT start `cacheInvalidator` or any other background/singleton Redis Pub/Sub subscriber — those belong on `backend-worker`. Per-request SSE fan-out subscribers opened by `/api/events/*` handlers are permitted: each replica holds its own subscriber connection so it can receive and forward published events to connected clients (see §9).
 
 `backend-worker`
 
@@ -393,7 +393,7 @@ The following decisions are now explicit:
 - `frontend` runs on Vercel and owns the canonical public host.
 - `backend-api` runs on Railway and is the only public backend service.
 - `backend-api` is expected to scale to **2+ replicas** and runs only stateless HTTP/tRPC/SSE handling.
-- `backend-worker` runs on Railway and remains a **singleton**, owning all Redis Pub/Sub subscribers and future background queues.
+- `backend-worker` runs on Railway and remains a **singleton**, owning all background/singleton Redis Pub/Sub subscribers (e.g., `cacheInvalidator`) and future background queues. Per-request SSE fan-out subscribers on `backend-api` replicas are a separate concern (see below).
 - SSE event fan-out uses Redis Pub/Sub (no sticky sessions); every `backend-api` replica receives every published event via its own subscriber connection.
 - Each `backend-api` replica is externally identifiable via an `X-Instance-Id` response header and an `instanceId` field in `/health`.
 - `postgres` and `redis` are Railway-managed private services shared by API and worker.

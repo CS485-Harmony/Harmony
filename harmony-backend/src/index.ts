@@ -2,25 +2,9 @@ import 'dotenv/config';
 import { createApp } from './app';
 import { instanceId } from './lib/instance-identity';
 import { createLogger } from './lib/logger';
+import { parsePortEnv } from './lib/parsePortEnv';
 
-const rawPort = process.env.PORT;
-const PORT =
-  rawPort === undefined
-    ? 4000
-    : (() => {
-        if (rawPort.trim() === '') {
-          throw new Error(
-            `Invalid PORT environment variable: value is blank. Expected an integer between 1 and 65535.`,
-          );
-        }
-        const port = Number(rawPort);
-        if (!Number.isInteger(port) || port < 1 || port > 65535) {
-          throw new Error(
-            `Invalid PORT environment variable: "${rawPort}". Expected an integer between 1 and 65535.`,
-          );
-        }
-        return port;
-      })();
+const PORT = parsePortEnv(4000);
 const HOST = '0.0.0.0';
 const DISPLAY_HOST = process.env.NODE_ENV === 'development' ? 'localhost' : HOST;
 const logger = createLogger({ component: 'api-bootstrap', instanceId, pid: process.pid });

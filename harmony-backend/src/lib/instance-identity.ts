@@ -20,8 +20,12 @@ function compute(): string {
       return 'unknown';
     }
   })();
+  // Hash the hostname so internal infrastructure details are not exposed
+  // externally via X-Instance-Id or /health while still producing a value
+  // that is unique per replica and stable across log lines.
+  const hostId = crypto.createHash('sha256').update(host).digest('hex').slice(0, 12);
   const suffix = crypto.randomBytes(3).toString('hex');
-  return `${host}-${suffix}`;
+  return `${hostId}-${suffix}`;
 }
 
 export const instanceId: string = compute();

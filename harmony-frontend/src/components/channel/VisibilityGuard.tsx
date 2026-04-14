@@ -5,7 +5,9 @@
  * Visibility rules:
  *   PUBLIC_INDEXABLE  → render children
  *   PUBLIC_NO_INDEX   → render children (same guest experience)
- *   PRIVATE           → render AccessDeniedPage
+ *   PRIVATE           → unauthenticated: AccessDeniedPage (with login/signup CTAs)
+ *                       authenticated non-admin/non-owner: NoPermissionPage
+ *                       authenticated admin/owner: render children
  *
  * Ref: dev-spec-guest-public-channel-view.md — VisibilityGuard (C1.2)
  */
@@ -77,7 +79,7 @@ function VisibilityError({ message }: { message?: string }) {
   );
 }
 
-// ─── Access denied page (PRIVATE channel) ────────────────────────────────────
+// ─── Access denied page (PRIVATE channel — unauthenticated) ──────────────────
 
 function AccessDeniedPage() {
   const router = useRouter();
@@ -135,6 +137,49 @@ function AccessDeniedPage() {
   );
 }
 
+// ─── No permission page (PRIVATE channel — authenticated, not admin/owner) ────
+
+function NoPermissionPage() {
+  const router = useRouter();
+
+  return (
+    <div className='flex h-screen flex-1 items-center justify-center bg-[#36393f] p-8'>
+      <div className='flex max-w-sm flex-col items-center gap-5 text-center'>
+        {/* Lock icon */}
+        <div className='flex h-16 w-16 items-center justify-center rounded-full bg-[#40444b]'>
+          <svg
+            className='h-8 w-8 text-gray-300'
+            viewBox='0 0 24 24'
+            fill='none'
+            stroke='currentColor'
+            strokeWidth={2}
+          >
+            <rect x='3' y='11' width='18' height='11' rx='2' ry='2' />
+            <path d='M7 11V7a5 5 0 0 1 10 0v4' />
+          </svg>
+        </div>
+
+        {/* Copy */}
+        <div>
+          <h2 className='text-xl font-semibold text-white'>This channel is private</h2>
+          <p className='mt-2 text-sm text-gray-400'>
+            You don&apos;t have permission to view this channel. You may need to join this server or
+            contact an administrator to request access.
+          </p>
+        </div>
+
+        {/* CTA */}
+        <button
+          onClick={() => router.back()}
+          className='flex w-full cursor-pointer items-center justify-center rounded-md border border-white/20 bg-[#40444b] px-4 py-2.5 text-sm font-semibold text-gray-200 transition-colors hover:bg-[#3d4148]'
+        >
+          Go Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export interface VisibilityGuardProps {
@@ -148,7 +193,7 @@ export interface VisibilityGuardProps {
    * The ownerId of the server that owns this channel. When provided,
    * VisibilityGuard uses it to check whether the authenticated user is an
    * admin/owner and therefore allowed to view PRIVATE channels. Authenticated
-   * non-admin members are shown AccessDeniedPage for PRIVATE channels, covering
+   * non-admin members are shown NoPermissionPage for PRIVATE channels, covering
    * the direct-URL access path that the real-time SSE redirect cannot guard.
    */
   serverOwnerId?: string;
@@ -210,7 +255,7 @@ export function VisibilityGuard({
     // 'member' for non-system-admin users (mapBackendUser hardcodes this).
     const userIsAdminOrOwner = isAdmin(serverOwnerId) || isServerAdmin;
     if (!userIsAdminOrOwner) {
-      return <AccessDeniedPage />;
+      return <NoPermissionPage />;
     }
   }
 

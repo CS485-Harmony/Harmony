@@ -66,17 +66,18 @@ export function createApp() {
   }
 
   app.use(helmet());
-  // CORS must come before body parsers so error responses include CORS headers
-  app.use(corsMiddleware);
-  app.use(express.json());
 
-  // Replica identity header — stamped on every response so load-balancer
-  // distribution across 2+ backend-api replicas is externally observable
-  // (curl -I /health across repeated requests should cycle through ids).
+  // Replica identity header — stamped on every response (including CORS errors)
+  // so load-balancer distribution across 2+ backend-api replicas is externally
+  // observable (curl -I /health across repeated requests should cycle through ids).
   app.use((_req, res, next) => {
     res.setHeader('X-Instance-Id', instanceId);
     next();
   });
+
+  // CORS must come before body parsers so error responses include CORS headers
+  app.use(corsMiddleware);
+  app.use(express.json());
 
   // Health check (plain HTTP — no tRPC client required)
   app.get('/health', (_req, res) => {
