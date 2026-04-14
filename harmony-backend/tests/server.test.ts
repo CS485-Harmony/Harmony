@@ -6,8 +6,6 @@ import { createApp } from '../src/app';
 import { generateSlug, serverService } from '../src/services/server.service';
 import { authService } from '../src/services/auth.service';
 import type { Express } from 'express';
-import type { Server } from '@prisma/client';
-import type { ServerMemberWithUser } from '../src/services/server.service';
 
 const TEST_PASSWORD_SALT = '00112233445566778899aabbccddeeff';
 
