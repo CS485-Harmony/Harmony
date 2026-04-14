@@ -83,20 +83,25 @@ attaching evidence to the issue.
 ### Preview
 
 - [ ] Preview build for an open PR shows "Ready" in the Vercel dashboard.
-- [ ] `curl -sI <preview-url>` returns `200`.
-- [ ] `curl <preview-url>/robots.txt` returns a body whose sitemap/canonical
-      references match the preview host (not `localhost`, not production).
-- [ ] `curl <preview-url>/sitemap.xml` returns `200` with `application/xml`.
+- [ ] `curl -sI https://<preview-url>` returns an expected `2xx` or `3xx`
+      status.
+- [ ] `curl -L https://<preview-url>/robots.txt` returns a body whose
+      sitemap/canonical references match the preview host (not `localhost`,
+      not production).
+- [ ] `curl -L https://<preview-url>/sitemap.xml` returns a body with
+      `application/xml`.
 - [ ] In the browser DevTools Network tab, app-triggered API requests go to
       the configured Railway preview URL, not `localhost:4000`.
 
 ### Production
 
-- [ ] `curl -sI https://harmony-dun-omega.vercel.app` returns `200`.
-- [ ] `curl https://harmony-dun-omega.vercel.app/robots.txt` returns the
+- [ ] `curl -sI https://harmony-dun-omega.vercel.app` returns an expected
+      `2xx` or `3xx` status.
+- [ ] `curl -L https://harmony-dun-omega.vercel.app/robots.txt` returns the
       expected body with canonical references to
       `harmony-dun-omega.vercel.app`.
-- [ ] `curl https://harmony-dun-omega.vercel.app/sitemap.xml` returns `200`.
+- [ ] `curl -L https://harmony-dun-omega.vercel.app/sitemap.xml` returns a
+      body with `application/xml`.
 - [ ] Browser flow: home page renders; authenticated API calls hit the Railway
       production URL configured in `NEXT_PUBLIC_API_URL`.
 
