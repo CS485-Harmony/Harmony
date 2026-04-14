@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { createApp } from './app';
-import { cacheInvalidator } from './services/cacheInvalidator.service';
+import { instanceId } from './lib/instance-identity';
 
 const rawPort = process.env.PORT;
 const PORT =
@@ -22,10 +22,16 @@ const DISPLAY_HOST = process.env.NODE_ENV === 'development' ? 'localhost' : HOST
 const app = createApp();
 
 const server = app.listen(PORT, HOST, () => {
-  console.log(`Harmony backend listening at http://${DISPLAY_HOST}:${PORT} (bound to ${HOST}:${PORT})`);
+  console.log(
+    `[api] Harmony backend-api listening at http://${DISPLAY_HOST}:${PORT} instance=${instanceId} pid=${process.pid}`,
+  );
 });
 
-cacheInvalidator.start().catch((err) => console.error('[cacheInvalidator] start failed:', err));
+// NOTE: cacheInvalidator (Redis Pub/Sub subscribers) runs on backend-worker,
+// NOT here. Running it on every API replica would duplicate subscriber
+// connections and background side effects. See
+// docs/deployment/replica-readiness-audit.md §4.1 and
+// docs/deployment/deployment-architecture.md §2.2.
 
 let shuttingDown = false;
 const shutdown = async () => {
@@ -33,7 +39,6 @@ const shutdown = async () => {
   shuttingDown = true;
   const timer = setTimeout(() => process.exit(1), 10_000);
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  await cacheInvalidator.stop();
   clearTimeout(timer);
   process.exit(0);
 };

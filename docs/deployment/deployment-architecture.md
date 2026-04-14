@@ -37,16 +37,21 @@ Harmony deploys as five cloud services:
 
 `backend-api`
 
+- Entry point: `harmony-backend/src/index.ts`. Railway start command: `npm run start:api`.
 - Owns all browser- and frontend-facing backend HTTP traffic.
 - Serves `/api/auth/*`, `/api/public/*`, `/api/events/*`, `/api/attachments/*`, `/trpc`, and `/health`.
 - Connects to shared Postgres and Redis.
+- Stamps every response with an `X-Instance-Id` header and returns the same id in `/health` JSON so replica distribution is externally observable (see `docs/deployment/replica-readiness-audit.md §6.2`).
 - Must be kept stateless enough to support 2+ replicas behind Railway load balancing.
+- Must NOT start `cacheInvalidator` or any other Redis Pub/Sub subscriber — those belong on `backend-worker`.
 
 `backend-worker`
 
-- Owns singleton background processing responsibilities.
+- Entry point: `harmony-backend/src/worker.ts`. Railway start command: `npm run start:worker`.
+- Owns singleton background processing: `cacheInvalidator` today, plus any future queue consumers, Pub/Sub subscribers, sitemap/meta regeneration workers, and other long-running background jobs that should not multiply with API replica count.
 - Connects to the same Postgres and Redis instances as `backend-api`.
-- Must absorb any future queue consumers, Pub/Sub subscribers, sitemap/meta regeneration workers, and other long-running background jobs that should not multiply with API replica count.
+- Exposes a tiny `GET /health` endpoint (plain `http.createServer`, not Express) returning `{ status, service: 'backend-worker', instanceId, timestamp }` so Railway can probe and restart the singleton.
+- Fails fast on subscriber startup error so Railway restarts into a clean state rather than running a half-initialized worker.
 
 `postgres`
 
@@ -369,7 +374,7 @@ Operational policy:
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `frontend`       | Vercel deployment health / successful render                                                                             |
 | `backend-api`    | `GET /health`                                                                                                            |
-| `backend-worker` | Add a lightweight worker health endpoint or process heartbeat before Railway go-live; this is part of issue `#322` scope |
+| `backend-worker` | `GET /health` on the worker's tiny `http.createServer` endpoint (added in #320). Returns `{ status: 'ok', service: 'backend-worker', instanceId, timestamp }`. Railway should probe this endpoint and restart the singleton on failure. |
 
 ## 8.2 Deploy authority
 
@@ -387,8 +392,10 @@ The following decisions are now explicit:
 
 - `frontend` runs on Vercel and owns the canonical public host.
 - `backend-api` runs on Railway and is the only public backend service.
-- `backend-api` is expected to scale to **2+ replicas**.
-- `backend-worker` runs on Railway and remains a **singleton**.
+- `backend-api` is expected to scale to **2+ replicas** and runs only stateless HTTP/tRPC/SSE handling.
+- `backend-worker` runs on Railway and remains a **singleton**, owning all Redis Pub/Sub subscribers and future background queues.
+- SSE event fan-out uses Redis Pub/Sub (no sticky sessions); every `backend-api` replica receives every published event via its own subscriber connection.
+- Each `backend-api` replica is externally identifiable via an `X-Instance-Id` response header and an `instanceId` field in `/health`.
 - `postgres` and `redis` are Railway-managed private services shared by API and worker.
 - production uses an apex frontend domain plus `api` subdomain split.
 - authenticated API traffic uses bearer tokens; the frontend cookie is not the backend auth source of truth.
@@ -401,6 +408,7 @@ The following decisions are now explicit:
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `#317` | Audit replica safety using the API/worker boundary defined here                                                                     |
 | `#321` | Implement frontend production metadata, canonical URLs, and SEO ownership                                                           |
+| `#320` | Split `backend-api` / `backend-worker` entry points, wire replica identity observability, and document the SSE Redis Pub/Sub fan-out strategy |
 | `#322` | Provision Railway services and env vars to match this topology, including the worker health check / restart strategy before go-live |
 | `#323` | Write deployment-aware integration test specs using this topology                                                                   |
 | `#329` | Configure Vercel preview/production domains and env vars to match this contract                                                     |

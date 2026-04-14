@@ -4,8 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:worker": "tsx watch src/worker.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "start:api": "node dist/index.js",
+    "start:worker": "node dist/worker.js",
     "lint": "eslint src tests",
     "test": "jest",
     "db:seed:mock": "prisma db seed",

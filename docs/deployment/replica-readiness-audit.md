@@ -18,8 +18,8 @@ Reference document for topology and ownership context: `docs/deployment/deployme
 | In-memory rate limiting (public/token-bucket) | `src/middleware/rate-limit.middleware.ts:43` | **Must-fix** | Not replica-safe |
 | Trust proxy not configured | `src/app.ts` (absent) | **Must-fix** | Breaks IP extraction for all rate limiters |
 | Local filesystem attachment storage | `src/lib/storage/local.provider.ts` | **Must-fix** | Files not visible across replicas |
-| Duplicate cacheInvalidator on API replicas | `src/index.ts:13` | Acceptable / ownership violation | Idempotent, but wrong service |
-| SSE correctness across replicas | `src/routes/events.router.ts` | Mostly safe — known startup window | Redis Pub/Sub used; `ready` not awaited |
+| Duplicate cacheInvalidator on API replicas | `src/index.ts` | Resolved (#320) | Moved to `backend-worker` singleton |
+| SSE correctness across replicas | `src/routes/events.router.ts` | Mostly safe — known startup window | Redis Pub/Sub fan-out; `ready` not awaited |
 
 ---
 
@@ -100,29 +100,22 @@ The deployment architecture document references `STORAGE_PROVIDER=s3` as the req
 
 ## 4. Acceptable for Demo — Not Blocking
 
-### 4.1 Duplicate cacheInvalidator Subscriptions on API Replicas
+### 4.1 Duplicate cacheInvalidator Subscriptions on API Replicas — RESOLVED (#320)
 
-**File:** `harmony-backend/src/index.ts:13`
+**Files (post-split):**
+- `harmony-backend/src/worker.ts` — owns `cacheInvalidator.start()`
+- `harmony-backend/src/index.ts` — no longer imports or starts `cacheInvalidator`
 
-```ts
-cacheInvalidator.start().catch((err) => console.error('[cacheInvalidator] start failed:', err));
-```
+`cacheInvalidator.start()` opens Redis Pub/Sub subscriber connections and registers handlers for `VISIBILITY_CHANGED`, `MESSAGE_CREATED`, `MESSAGE_EDITED`, and `MESSAGE_DELETED`. Before #320 this ran on every `backend-api` replica, duplicating subscriber connections and redundantly firing `indexingService.onVisibilityChanged()` on visibility transitions.
 
-`cacheInvalidator.start()` opens Redis Pub/Sub subscriber connections and registers handlers for `VISIBILITY_CHANGED`, `MESSAGE_CREATED`, `MESSAGE_EDITED`, and `MESSAGE_DELETED`. With N API replicas, N processes all subscribe to the same Redis channels and run the same invalidation logic.
+**Resolution (#320):** The backend process was split into two Railway services:
 
-**Impact analysis:**
-- Cache invalidations (`redis.del`, `redis.unlink`) are idempotent. Running them N times has no correctness effect.
-- The `indexingService.onVisibilityChanged()` call in `VISIBILITY_CHANGED` only reaches `prisma.channel.update({ data: { indexedAt: null } })` when a channel transitions away from `PUBLIC_INDEXABLE` (via `removeFromSitemap`). In those cases, setting `indexedAt` to `null` when it is already `null` is still a no-op at the database level. Multiple concurrent writes may contend on the same row but produce the same result.
-- Extra Redis subscriber connections add unnecessary load, and duplicate replicas only cause redundant Postgres writes on those `PUBLIC_INDEXABLE` → non-indexable visibility transitions.
+- `backend-api` (`src/index.ts`) — stateless HTTP/tRPC/SSE, 2+ replicas, no background subscribers.
+- `backend-worker` (`src/worker.ts`) — singleton, owns `cacheInvalidator` and any future Pub/Sub subscribers or queue consumers. Exposes a tiny `GET /health` endpoint for Railway health checks and graceful restarts.
 
-**Verdict:** No correctness failure at demo scale. **However**, per the deployment architecture decision, `cacheInvalidator` is a background subscriber and belongs on `backend-worker` (singleton), not `backend-api`. Running it on every API replica violates the ownership boundary established in `docs/deployment/deployment-architecture.md §2.2`.
+With this split, exactly one process subscribes to each Redis channel regardless of API replica count, which eliminates duplicate Postgres writes on `PUBLIC_INDEXABLE` → non-indexable visibility transitions and halves-or-better the number of idle Redis subscriber connections.
 
-**Recommended path:**
-1. Remove `cacheInvalidator.start()` from `harmony-backend/src/index.ts` (the API entry point).
-2. Add it to the `backend-worker` entry point once that service is scaffolded.
-3. Until the worker is deployed, leaving it on the API is acceptable for demo — idempotent behavior means no visible user impact.
-
-**Owner:** `backend-worker` (migration from `backend-api`)
+**Owner:** `backend-worker`
 
 ---
 
@@ -161,7 +154,7 @@ Use this checklist when validating that `backend-api` is ready to run at 2+ repl
 
 ### Ownership Migrations (should happen before production, acceptable for demo)
 
-- [ ] **Move cacheInvalidator to backend-worker**: Remove `cacheInvalidator.start()` from `src/index.ts` (API entry point) and add it to the `backend-worker` entry point. Until the worker is scaffolded, leaving it on the API is safe (idempotent) but violates the ownership boundary.
+- [x] **Move cacheInvalidator to backend-worker** *(resolved in #320)*: `cacheInvalidator.start()` is removed from `src/index.ts` and now runs from `src/worker.ts` on the singleton `backend-worker` Railway service.
 
 ### Deploy-Time Verifications (no code change needed)
 
@@ -176,19 +169,43 @@ Use this checklist when validating that `backend-api` is ready to run at 2+ repl
 
 This section is the authoritative boundary decision. Downstream issues that create or move code across this boundary must update this table.
 
+Entry points (post #320):
+
+- `backend-api`: `harmony-backend/src/index.ts` — Railway start command `npm run start:api`.
+- `backend-worker`: `harmony-backend/src/worker.ts` — Railway start command `npm run start:worker`.
+
 | Responsibility | Service | Rationale |
 |---|---|---|
 | HTTP request/response handling | `backend-api` | Stateless per-request; safe to run N replicas |
 | tRPC endpoint | `backend-api` | Stateless; safe to run N replicas |
 | Auth routes (`/api/auth/*`) | `backend-api` | Stateless; per-request session check |
 | Public REST routes (`/api/public/*`) | `backend-api` | Stateless; cached reads from Redis/Postgres |
-| SSE event streams (`/api/events/*`) | `backend-api` | Long-lived but stateless — backed by Redis Pub/Sub |
+| SSE event streams (`/api/events/*`) | `backend-api` | Long-lived but stateless — Redis Pub/Sub fan-out; no sticky sessions required |
 | File upload endpoint (`/api/attachments/upload`) | `backend-api` | Stateless once S3 storage is in place |
 | File serve (`/api/attachments/files/*`) | `backend-api` (dev only) / CDN (prod) | Local serve removed when `STORAGE_PROVIDER=s3` |
-| Health check (`GET /health`) | `backend-api` | Per-instance readiness check |
-| Redis Pub/Sub cache invalidator | `backend-worker` | Must not run N times; idempotent but wrong boundary |
+| Health check (`GET /health`) | `backend-api` | Per-instance readiness check; includes `instanceId` + `X-Instance-Id` header |
+| Redis Pub/Sub cache invalidator | `backend-worker` | Must not run N times; single subscriber per channel |
 | Sitemap/meta regeneration jobs | `backend-worker` | Long-running background; must not multiply with replica count |
 | Future queue consumers | `backend-worker` | Singleton ownership required for exactly-once processing |
+| Worker health check (`GET /health`) | `backend-worker` | Tiny `http.createServer` endpoint; Railway restart target |
+
+### 6.1 SSE Fan-Out Strategy (No Sticky Sessions)
+
+The production SSE strategy is explicit Redis Pub/Sub fan-out:
+
+1. A message-producing request lands on any `backend-api` replica and calls `eventBus.publish(channel, payload)` — this `PUBLISH`es on the shared Redis instance.
+2. Every `backend-api` replica holds an active Redis subscriber (lazily opened by `eventBus.subscribe`) for each SSE channel it currently serves.
+3. Because all replicas share one Redis, every replica receives the published event and pushes it down to its locally-connected SSE clients.
+
+This means a client connected to replica A receives events produced on replica B without any sticky-session requirement. Railway's default round-robin load balancing is correct for `/api/events/*`. See §4.2 for the known startup window on the first SSE connection to a freshly started replica.
+
+### 6.2 Replica Identity Observability
+
+To prove load balancing across 2+ `backend-api` replicas, each process computes a stable `instanceId` (`harmony-backend/src/lib/instance-identity.ts`, derived from `os.hostname()` plus a short random suffix; overridable with `INSTANCE_ID`) and exposes it via:
+
+- **`X-Instance-Id` response header** — stamped on every `backend-api` response via middleware in `createApp()`. Verify distribution with e.g. `for i in 1 2 3 4 5 6; do curl -sI https://api.harmony.chat/health | grep -i x-instance-id; done` — the values should cycle across replicas.
+- **`GET /health` JSON body** — returns `{ status, service, instanceId, timestamp }` so the same identity is visible without reading headers, and is distinguishable between `backend-api` and `backend-worker`.
+- **Structured startup logs** — both `src/index.ts` and `src/worker.ts` log their `instanceId` and `pid` at boot, so Railway logs can be grouped by replica.
 
 ---
 
@@ -198,5 +215,5 @@ This section is the authoritative boundary decision. Downstream issues that crea
 |---|---|
 | #318 | Implement Redis-backed rate limiting (§3.1, §3.2, §5 checklist) |
 | #319 | Implement S3 attachment storage (§3.4, §5 checklist) |
-| #320 | Add trust proxy configuration (§3.3, §5 checklist) |
-| #330 | Scaffold `backend-worker` and migrate cacheInvalidator (§4.1, §6) |
+| #320 | Split `backend-api` / `backend-worker`, add replica identity observability, migrate `cacheInvalidator` (§4.1, §6) |
+| #330 | Provision `backend-worker` on Railway using the boundary defined here |
