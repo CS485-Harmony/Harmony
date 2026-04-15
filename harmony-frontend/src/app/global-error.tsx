@@ -9,6 +9,7 @@
  */
 
 import { useEffect } from 'react';
+import { createFrontendLogger } from '@/lib/frontend-logger';
 
 interface ServerErrorPageProps {
   error: Error & { digest?: string };
@@ -17,8 +18,15 @@ interface ServerErrorPageProps {
 
 export default function ServerErrorPage({ error, reset }: ServerErrorPageProps) {
   useEffect(() => {
-    // Log to an error reporting service in the future
-    console.error('[ServerError]', error);
+    createFrontendLogger({ component: 'global-error-boundary' }).error(
+      'Root error boundary rendered',
+      {
+        feature: 'react-error-boundary',
+        event: 'render_root_error_boundary',
+        route: typeof window !== 'undefined' ? window.location.pathname : '/',
+        error,
+      },
+    );
   }, [error]);
 
   return (
