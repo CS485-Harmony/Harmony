@@ -17,7 +17,7 @@ Reference document for topology and ownership context: `docs/deployment/deployme
 | In-memory rate limiting (auth routes) | `src/app.ts:18–40` | **Must-fix** | Not replica-safe |
 | In-memory rate limiting (public/token-bucket) | `src/middleware/rate-limit.middleware.ts:43` | **Must-fix** | Not replica-safe |
 | Trust proxy not configured | `src/app.ts` (absent) | **Must-fix** | Breaks IP extraction for all rate limiters |
-| Local filesystem attachment storage | `src/lib/storage/local.provider.ts` | **Must-fix** | Files not visible across replicas |
+| Local filesystem attachment storage | `src/lib/storage/local.provider.ts` | **Must-fix** | Resolved (#319) — `S3StorageProvider` (Cloudflare R2) registered when `STORAGE_PROVIDER=s3` |
 | Duplicate cacheInvalidator on API replicas | `src/index.ts` | Resolved (#320) | Moved to `backend-worker` singleton |
 | SSE correctness across replicas | `src/routes/events.router.ts` | Mostly safe — known startup window | Redis Pub/Sub fan-out; `ready` not awaited |
 
@@ -150,7 +150,7 @@ Use this checklist when validating that `backend-api` is ready to run at 2+ repl
 - [ ] **Rate limiting — Redis store**: Replace `express-rate-limit` `MemoryStore` on auth routes with a Redis-backed store (`src/app.ts:18–40`).
 - [ ] **Rate limiting — token bucket**: Replace in-process `Map` in token-bucket middleware with Redis-backed counters (`src/middleware/rate-limit.middleware.ts:43`).
 - [ ] **Trust proxy**: Add `app.set('trust proxy', TRUST_PROXY_HOPS)` to `createApp()` in `src/app.ts` and set `TRUST_PROXY_HOPS=1` in Railway. Without this, all rate limiters see the proxy IP instead of the client IP.
-- [ ] **Attachment storage — S3**: Implement `S3StorageProvider` and register it in the factory (`src/lib/storage/index.ts`). Set `STORAGE_PROVIDER=s3` in Railway production.
+- [x] **Attachment storage — S3** *(resolved in #319)*: `S3StorageProvider` implemented in `src/lib/storage/s3.provider.ts` using Cloudflare R2 via the S3-compatible API. Factory in `src/lib/storage/index.ts` registers the provider when `STORAGE_PROVIDER=s3`. Set `STORAGE_PROVIDER=s3` and required R2 env vars in Railway production (see `docs/deployment/deployment-architecture.md §6.2`).
 
 ### Ownership Migrations (should happen before production, acceptable for demo)
 

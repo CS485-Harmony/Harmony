@@ -279,7 +279,12 @@ Not part of the deployment contract:
 | `JWT_ACCESS_EXPIRES_IN`    | Required                                    | `15m`                                       | Keep explicit                                                                            |
 | `JWT_REFRESH_EXPIRES_DAYS` | Required                                    | `7`                                         | Keep explicit                                                                            |
 | `BASE_URL`                 | Required                                    | `https://harmony.chat`                      | Canonical public base URL for generated public links/sitemaps                            |
-| `STORAGE_PROVIDER`         | Future/Required for production file uploads | `s3`                                        | Current code only supports `local`; issue `#317` must audit production-safe storage path |
+| `STORAGE_PROVIDER`         | Required for production file uploads        | `s3`                                        | `local` for development (disk); `s3` for production (Cloudflare R2 via S3-compatible API). Implemented in #319. |
+| `R2_ACCOUNT_ID`            | Required when `STORAGE_PROVIDER=s3`         | Cloudflare account ID                       | Used to construct the R2 endpoint URL (`https://<id>.r2.cloudflarestorage.com`)          |
+| `AWS_ACCESS_KEY_ID`        | Required when `STORAGE_PROVIDER=s3`         | R2 API token key ID                         | R2 API token key — do not use a global Cloudflare key                                   |
+| `AWS_SECRET_ACCESS_KEY`    | Required when `STORAGE_PROVIDER=s3`         | R2 API token secret                         | R2 API token secret                                                                      |
+| `S3_BUCKET`                | Required when `STORAGE_PROVIDER=s3`         | `harmony-attachments`                       | Name of the R2 bucket used for attachment storage                                        |
+| `R2_PUBLIC_URL`            | Required when `STORAGE_PROVIDER=s3`         | `https://pub-<token>.r2.dev`                | Base public URL for serving files; must match bucket's public access configuration or custom domain |
 | `TWILIO_ACCOUNT_SID`       | Optional                                    | provider value                              | Required only for real voice in production                                               |
 | `TWILIO_API_KEY`           | Optional                                    | provider value                              | Required only for real voice in production                                               |
 | `TWILIO_API_SECRET`        | Optional                                    | provider value                              | Required only for real voice in production                                               |
@@ -306,7 +311,7 @@ Must not be enabled in production:
 | `JWT_ACCESS_EXPIRES_IN`    | Optional/currently likely unnecessary                          | `15m`                                       | Keep aligned if auth code is reused                            |
 | `JWT_REFRESH_EXPIRES_DAYS` | Optional/currently likely unnecessary                          | `7`                                         | Keep aligned if auth code is reused                            |
 | `BASE_URL`                 | Future/Required if worker generates canonical public artifacts | `https://harmony.chat`                      | For sitemap/meta generation jobs                               |
-| `STORAGE_PROVIDER`         | Future/Required if worker touches attachments/media            | `s3`                                        | Must match backend storage mode                                |
+| `STORAGE_PROVIDER`         | Required if worker touches attachments/media                   | `s3`                                        | Must match `backend-api` storage mode; see §6.2 for full R2 env var list |
 | `TWILIO_*`                 | Optional                                                       | provider values                             | Only if worker ever owns voice background tasks                |
 
 ## 6.4 Shared service env ownership
