@@ -23,6 +23,7 @@ on:
     branches: [main]
     paths:
       - "harmony-frontend/**"
+      - ".github/workflows/deploy-vercel.yml"
   workflow_dispatch:
 
 jobs:
@@ -88,7 +89,7 @@ jobs:
   deploy-production:
     name: Deploy Production
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     environment: production
     steps:
       - uses: actions/checkout@v4
