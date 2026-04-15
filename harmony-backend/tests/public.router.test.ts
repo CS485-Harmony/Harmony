@@ -116,13 +116,11 @@ async function withSilencedConsoleError<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-beforeAll(() => {
-  app = createApp();
-});
-
 beforeEach(() => {
+  // Recreate the app each test so the in-memory MemoryStore (used in dev/test)
+  // starts fresh — prevents rate-limit state from leaking across tests.
+  app = createApp();
   jest.clearAllMocks();
-  // _clearBucketsForTesting() removed in Issue #318 — no in-process bucket state
 });
 
 // ─── GET /api/public/servers/:serverSlug ─────────────────────────────────────

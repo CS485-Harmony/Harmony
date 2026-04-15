@@ -44,29 +44,33 @@ function buildProductionStore(prefix: string): Store | undefined {
 
 export interface CreateAppOptions {
   /**
-   * Store factory injected by tests so rate limiters don't need a real Redis
-   * connection. Called once per limiter so each limiter gets its own instance.
-   * In production this is left undefined and buildProductionStore() is used.
+   * Store factory called once per limiter so each gets a distinct instance.
+   * express-rate-limit v8 requires separate instances per limiter to avoid
+   * counter mixing and to suppress the "unsharedStore" validation error.
+   * In tests: return a new mock per call but share an incrementCalls array
+   * to observe all calls across limiters. In production this is left undefined
+   * and buildProductionStore(prefix) is used instead.
    */
-  rateLimitStore?: Store;
+  rateLimitStore?: () => Store;
 }
 
 export function createApp(options: CreateAppOptions = {}) {
   const isE2E = process.env.NODE_ENV === 'e2e';
+  // Each limiter calls makeStore() independently so it gets its own instance.
+  const makeStore = (prefix: string): Store | undefined =>
+    options.rateLimitStore ? options.rateLimitStore() : buildProductionStore(prefix);
 
   // ─── Auth rate limiters ─────────────────────────────────────────────────────
   // Each limiter gets its own store instance (express-rate-limit v8 requirement).
   // In production: separate RedisStore per route with a unique prefix so
   // login/register/refresh counters are independent in Redis.
-  // In tests: use the injected store (same instance is fine for test assertions)
-  // or fall back to MemoryStore.
 
   const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: isE2E ? 1000 : 10,
     standardHeaders: true,
     legacyHeaders: false,
-    store: options.rateLimitStore ?? buildProductionStore('rl:login:'),
+    store: makeStore('rl:login:'),
     message: { error: 'Too many login attempts. Please try again later.' },
   });
 
@@ -75,7 +79,7 @@ export function createApp(options: CreateAppOptions = {}) {
     max: process.env.NODE_ENV === 'production' ? 5 : 1000,
     standardHeaders: true,
     legacyHeaders: false,
-    store: options.rateLimitStore ?? buildProductionStore('rl:register:'),
+    store: makeStore('rl:register:'),
     message: { error: 'Too many registration attempts. Please try again later.' },
   });
 
@@ -84,7 +88,7 @@ export function createApp(options: CreateAppOptions = {}) {
     max: isE2E ? 1000 : 30,
     standardHeaders: true,
     legacyHeaders: false,
-    store: options.rateLimitStore ?? buildProductionStore('rl:refresh:'),
+    store: makeStore('rl:refresh:'),
     message: { error: 'Too many token refresh attempts. Please try again later.' },
   });
   const app = express();
@@ -145,7 +149,7 @@ export function createApp(options: CreateAppOptions = {}) {
   app.use('/api/auth', authRouter);
 
   // Public API endpoints (cached, no auth required)
-  app.use('/api/public', createPublicRouter(options.rateLimitStore ?? buildProductionStore('rl:public:')));
+  app.use('/api/public', createPublicRouter(makeStore('rl:public:')));
 
   // Real-time SSE endpoints
   app.use('/api/events', eventsRouter);
