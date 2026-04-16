@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import type { StorageProvider, UploadOptions, UploadResult } from './storage.interface';
+import { MIME_TO_EXT } from './mime-types';
 
 /**
  * Writes uploaded files to a local directory.
@@ -10,23 +11,6 @@ import type { StorageProvider, UploadOptions, UploadResult } from './storage.int
  * Files are served by the attachment router at:
  *   GET /api/attachments/files/:filename
  */
-
-/**
- * Maps validated MIME types to stored file extensions.
- * Extension is derived from the server-verified content type (never from the
- * user-supplied filename) to prevent extension spoofing (e.g. uploading a
- * shell script with a .png name and having it served as active content).
- */
-const MIME_TO_EXT: Record<string, string> = {
-  'image/jpeg': '.jpg',
-  'image/png': '.png',
-  'image/gif': '.gif',
-  'image/webp': '.webp',
-  'application/pdf': '.pdf',
-  'text/plain': '.txt',
-  'application/msword': '.doc',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
-};
 
 export class LocalStorageProvider implements StorageProvider {
   private readonly uploadDir: string;

@@ -1,6 +1,7 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { randomUUID } from 'crypto';
 import type { StorageProvider, UploadOptions, UploadResult } from './storage.interface';
+import { MIME_TO_EXT } from './mime-types';
 
 /**
  * Cloudflare R2 storage provider via the S3-compatible API.
@@ -20,18 +21,6 @@ import type { StorageProvider, UploadOptions, UploadResult } from './storage.int
  * File deletion uses DeleteObjectCommand. R2 treats deletes for non-existent
  * keys as a success (idempotent), so no special handling is needed.
  */
-
-/** Maps validated MIME types to stored file extensions (mirrors local.provider.ts). */
-const MIME_TO_EXT: Record<string, string> = {
-  'image/jpeg': '.jpg',
-  'image/png': '.png',
-  'image/gif': '.gif',
-  'image/webp': '.webp',
-  'application/pdf': '.pdf',
-  'text/plain': '.txt',
-  'application/msword': '.doc',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
-};
 
 export class S3StorageProvider implements StorageProvider {
   private readonly client: S3Client;
@@ -53,8 +42,8 @@ export class S3StorageProvider implements StorageProvider {
     }
 
     this.bucket = bucket;
-    // Strip trailing slash so URL joins are consistent
-    this.publicUrl = publicUrl.replace(/\/$/, '');
+    // Strip trailing slashes so URL joins are consistent
+    this.publicUrl = publicUrl.replace(/\/+$/, '');
 
     this.client = new S3Client({
       // R2 requires region 'auto'; any other value is rejected

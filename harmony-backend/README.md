@@ -133,6 +133,50 @@ Copy `.env.example` to `.env` before running locally. All variables with no defa
 | `TWILIO_API_SECRET`        | —                       | Optional. Twilio API Key Secret.                                                                       |
 | `TWILIO_MOCK`              | `false`                 | Set `true` to stub Twilio locally without real credentials. Auto-enabled when credentials are missing. |
 | `HARMONY_DEMO_MODE`        | `false`                 | Set `true` only when running `npm run db:seed:demo`.                                                   |
+| `STORAGE_PROVIDER`         | `local`                 | `local` (dev/CI) or `s3` (production Cloudflare R2). See **Storage Configuration** below.             |
+| `LOCAL_UPLOAD_DIR`         | `<cwd>/uploads`         | Local-only. Directory where uploaded files are written. Defaults to `./uploads` relative to `cwd`.    |
+| `LOCAL_UPLOAD_BASE_URL`    | `http://localhost:4000` | Local-only. Base URL used to construct served attachment URLs.                                         |
+| `R2_ACCOUNT_ID`            | —                       | **Required for S3.** Cloudflare account ID (appears in the R2 dashboard URL).                         |
+| `AWS_ACCESS_KEY_ID`        | —                       | **Required for S3.** R2 API token key ID (create under R2 → Manage API tokens).                       |
+| `AWS_SECRET_ACCESS_KEY`    | —                       | **Required for S3.** R2 API token secret.                                                              |
+| `S3_BUCKET`                | —                       | **Required for S3.** R2 bucket name.                                                                   |
+| `R2_PUBLIC_URL`            | —                       | **Required for S3.** Base public URL for serving files, e.g. `https://pub-<token>.r2.dev`.            |
+
+---
+
+## Storage Configuration
+
+Attachment storage is controlled by `STORAGE_PROVIDER`.
+
+### Local (default — development and CI)
+
+```bash
+STORAGE_PROVIDER=local
+# Optional overrides:
+LOCAL_UPLOAD_DIR=./uploads
+LOCAL_UPLOAD_BASE_URL=http://localhost:4000
+```
+
+Files are written to `LOCAL_UPLOAD_DIR` and served by the backend at `GET /api/attachments/files/:filename`. **Do not use in production with multiple replicas** — each replica writes to its own local disk and files are not shared.
+
+### S3 / Cloudflare R2 (production)
+
+```bash
+STORAGE_PROVIDER=s3
+R2_ACCOUNT_ID=<your-cloudflare-account-id>
+AWS_ACCESS_KEY_ID=<r2-api-token-key-id>
+AWS_SECRET_ACCESS_KEY=<r2-api-token-secret>
+S3_BUCKET=<your-bucket-name>
+R2_PUBLIC_URL=https://pub-<token>.r2.dev   # or your custom domain
+```
+
+To obtain the R2 credentials:
+1. Open the [Cloudflare dashboard](https://dash.cloudflare.com/) → **R2** → your bucket.
+2. Go to **Manage API tokens** and create a token with **Object Read & Write** on the target bucket.
+3. Copy the **Access Key ID** and **Secret Access Key** — the secret is shown only once.
+4. Set `R2_PUBLIC_URL` to the bucket's public URL (enable **Public access** on the bucket, or use a custom domain configured in R2 settings).
+
+See `docs/deployment/deployment-architecture.md §6.2` for the full production env variable reference.
 
 ---
 
