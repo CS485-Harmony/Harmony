@@ -36,7 +36,7 @@ acquire the domain or update the spec.
 | Install command    | Vercel default (`npm install`)                              |
 | Build command      | Vercel default (`next build`)                               |
 | Output directory   | Vercel default (`.next`)                                    |
-| Auto-deploy `main` | **OFF** — Vercel's built-in git integration must be disconnected (Vercel dashboard → Settings → Git → Disconnect). GitHub Actions (`deploy-vercel.yml`) is the production deploy authority (#327). |
+| Auto-deploy `main` | **ON** — Vercel's built-in git integration handles deploys. Pushes to `main` trigger production; PRs against `main` trigger preview deployments automatically. |
 
 ## Environment Variables
 
@@ -76,37 +76,14 @@ environment-agnostic.
 
 ## Deploy Flow
 
-GitHub Actions (`deploy-vercel.yml`) is the sole deploy authority. Vercel's
-built-in git integration must be disconnected from the dashboard.
+Vercel's native git integration is the deploy authority.
 
-- **Preview:** opening or updating a PR against `main` triggers the
-  `deploy-preview` job. The workflow posts the unique `harmony-*.vercel.app`
-  URL as a PR comment. The preview shim in `next.config.ts` ensures canonical
-  URLs and SEO routes emit that preview host.
-- **Production:** merging to `main` (or any direct push) triggers the
-  `deploy-production` job, which builds with the production Vercel environment
-  and promotes the output to `harmony-dun-omega.vercel.app`.
-
-### Required GitHub secrets
-
-Add these in **Settings → Secrets and variables → Actions**:
-
-| Secret              | Where to find it                                               |
-| ------------------- | -------------------------------------------------------------- |
-| `VERCEL_TOKEN`      | Vercel dashboard → Account Settings → Tokens                  |
-| `VERCEL_ORG_ID`     | `.vercel/project.json` (`orgId`) or Vercel dashboard → Settings |
-| `VERCEL_PROJECT_ID` | `.vercel/project.json` (`projectId`) or Vercel dashboard → Settings |
-
-### Disabling Vercel's built-in auto-deploy
-
-Once the GitHub Actions workflow is active, disconnect the git integration to
-prevent double-deploys:
-
-1. Vercel dashboard → project → **Settings** → **Git**
-2. Click **Disconnect** next to the GitHub repository connection.
-
-Preview deployments are then driven entirely by the `deploy-preview` job;
-production deploys are driven by `deploy-production`.
+- **Preview:** opening or updating a PR against `main` automatically triggers a
+  Vercel preview deployment. The unique `harmony-*.vercel.app` URL is posted as
+  a PR comment by the Vercel bot. The preview shim in `next.config.ts` ensures
+  canonical URLs and SEO routes emit that preview host.
+- **Production:** merging to `main` (or any direct push) automatically triggers
+  a Vercel production deployment to `harmony-dun-omega.vercel.app`.
 
 ## Verification Checklist
 
@@ -148,6 +125,5 @@ evidence from the preview checklist instead.
   matrix (§6.1), SEO ownership (§3.3).
 - `harmony-frontend/src/lib/runtime-config.ts` — reads and validates the two
   env vars above; reused by SEO route handlers.
-- Issues: #321 (frontend production SEO config — merged), #327 (GitHub Action
-  deploy-vercel.yml — merged, owns deploy authority), #322 (Railway prod URL),
-  #330 (multi-replica validation).
+- Issues: #321 (frontend production SEO config — merged), #322 (Railway prod
+  URL), #330 (multi-replica validation).
