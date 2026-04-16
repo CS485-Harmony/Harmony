@@ -78,7 +78,7 @@ test.describe('True E2E auth and access flows', () => {
       `/c/${SEEDED_PRIVATE_CHANNEL.serverSlug}/${SEEDED_PRIVATE_CHANNEL.channelSlug}`,
     );
 
-    await expect(page.getByText('This channel is private')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'This channel is private' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Create Account' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Log In' })).toHaveAttribute(
       'href',
