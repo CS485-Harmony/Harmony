@@ -11,7 +11,6 @@ import { useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { DEFAULT_HOME_PATH } from '@/lib/constants';
 import { ChannelType } from '@/types';
 import type { Server, Channel } from '@/types';
 
@@ -122,14 +121,9 @@ export function ServerRail({
     return map;
   }, [allChannels]);
 
-  // Home links to a stable, hardcoded entry point (DEFAULT_HOME_PATH) rather
-  // than deriving from servers[0], which would change if server ordering changes.
-  //
-  // TODO: When real user/server data is wired up, revisit this. "Home" should
-  // ideally navigate to the user's DM inbox or a personalized landing route —
-  // not a hardcoded server channel. Update DEFAULT_HOME_PATH or replace this
-  // with a user-context-aware route at that point.
-  const homeHref = `${basePath}${DEFAULT_HOME_PATH}`;
+  // Home navigates to /channels which dynamically resolves the user's first
+  // server/channel, rather than a hardcoded slug that may not exist.
+  const homeHref = '/channels';
 
   return (
     <nav

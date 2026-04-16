@@ -1,10 +1,12 @@
-import { notFound, redirect } from 'next/navigation';
+import { redirect } from 'next/navigation';
 import { getServers, getServerMembers } from '@/services/serverService';
 import { getChannels } from '@/services/channelService';
 import { getMessages } from '@/services/messageService';
 import { getCurrentUser } from '@/services/authService';
+import { TrpcHttpError } from '@/lib/trpc-client';
 import { HarmonyShell } from '@/components/layout/HarmonyShell';
 import { VisibilityGuard } from '@/components/channel/VisibilityGuard';
+import type { Server } from '@/types';
 
 interface ChannelPageContentProps {
   serverSlug: string;
@@ -18,9 +20,19 @@ export async function ChannelPageContent({
   channelSlug,
   isGuestView = false,
 }: ChannelPageContentProps) {
-  const servers = await getServers();
+  let servers: Server[];
+  try {
+    servers = await getServers();
+  } catch (err) {
+    // Only redirect to login for auth failures; rethrow other errors (network, 5xx) so
+    // Next.js surfaces them honestly rather than masking them as an auth problem.
+    if (err instanceof TrpcHttpError && err.status === 401) redirect('/auth/login');
+    throw err;
+  }
   const server = servers.find(s => s.slug === serverSlug);
-  if (!server) notFound();
+  // Server not found in member list — redirect to channels index which resolves
+  // the user's first valid server dynamically.
+  if (!server) redirect('/channels');
 
   let serverChannels;
   try {
@@ -30,7 +42,8 @@ export async function ChannelPageContent({
     redirect(`/c/${serverSlug}/${channelSlug}`);
   }
   const channel = serverChannels.find(c => c.slug === channelSlug);
-  if (!channel) notFound();
+  // Channel not found — redirect to channels index rather than showing a dead-end 404.
+  if (!channel) redirect('/channels');
 
   // Gather all channels across servers for cross-server navigation.
   // Use .catch(() => []) so a FORBIDDEN error for servers the authenticated

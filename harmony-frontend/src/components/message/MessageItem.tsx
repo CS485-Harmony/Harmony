@@ -73,9 +73,19 @@ function ActionBar({
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
+  const [pinErrorMsg, setPinErrorMsg] = useState('');
   const moreRef = useRef<HTMLDivElement>(null);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Close dropdown on outside click
+  // Close dropdown on outside click; clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (!isMoreOpen) return;
     function onClickOutside(e: MouseEvent) {
@@ -91,18 +101,31 @@ function ActionBar({
     if (!serverId) return;
     setIsMoreOpen(false);
     setPinState('loading');
+    const verb = isPinned ? 'unpin' : 'pin';
     try {
-      if (isPinned) {
-        await unpinMessageAction(messageId, serverId);
+      const result = isPinned
+        ? await unpinMessageAction(messageId, serverId)
+        : await pinMessageAction(messageId, serverId);
+      if (result.ok) {
+        setIsPinned(prev => !prev);
+        setPinState('success');
+        if (successTimerRef.current) clearTimeout(successTimerRef.current);
+        successTimerRef.current = setTimeout(() => setPinState('idle'), 2000);
       } else {
-        await pinMessageAction(messageId, serverId);
+        const msg = result.forbidden
+          ? `You don't have permission to ${verb} messages.`
+          : `Failed to ${verb} message. Please try again.`;
+        setPinErrorMsg(msg);
+        setPinState('error');
+        if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+        errorTimerRef.current = setTimeout(() => { setPinState('idle'); setPinErrorMsg(''); }, 3000);
       }
-      setIsPinned(prev => !prev);
-      setPinState('success');
-      setTimeout(() => setPinState('idle'), 2000);
     } catch {
+      const msg = `Failed to ${verb} message. Please try again.`;
+      setPinErrorMsg(msg);
       setPinState('error');
-      setTimeout(() => setPinState('idle'), 3000);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+      errorTimerRef.current = setTimeout(() => { setPinState('idle'); setPinErrorMsg(''); }, 3000);
     }
   }, [isPinned, messageId, serverId]);
 
@@ -113,7 +136,7 @@ function ActionBar({
         <span className='px-2 text-xs text-green-400'>{isPinned ? '📌 Pinned' : 'Unpinned'}</span>
       )}
       {pinState === 'error' && (
-        <span className='px-2 text-xs text-red-400'>Failed</span>
+        <span className='px-2 text-xs text-red-400'>{pinErrorMsg}</span>
       )}
 
       {/* Reply (stub) */}
