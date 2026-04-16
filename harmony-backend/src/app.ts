@@ -1,48 +1,96 @@
 import express, { NextFunction, Request, Response } from 'express';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { type Store } from 'express-rate-limit';
+import { RedisStore } from 'rate-limit-redis';
 import corsMiddleware, { CorsError } from './middleware/cors';
 import { appRouter } from './trpc/router';
 import { createContext } from './trpc/init';
 import { authRouter } from './routes/auth.router';
-import { publicRouter } from './routes/public.router';
+import { createPublicRouter } from './routes/public.router';
 import { seoRouter } from './routes/seo.router';
 import { eventsRouter } from './routes/events.router';
 import { attachmentRouter } from './routes/attachment.router';
 import { instanceId } from './lib/instance-identity';
 import { createLogger } from './lib/logger';
+import { redis } from './db/redis';
 
-// ─── Auth rate limiters ───────────────────────────────────────────────────────
-
-const isE2E = process.env.NODE_ENV === 'e2e';
 const logger = createLogger({ component: 'app', instanceId });
 
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isE2E ? 1000 : 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many login attempts. Please try again later.' },
-});
+/**
+ * Creates one Redis store per rate-limit route in production.
+ * Each store gets a unique prefix so login/register/refresh counters don't
+ * collide in Redis, while all replicas share the same keyspace.
+ *
+ * Returns undefined in dev/test so express-rate-limit falls back to
+ * MemoryStore — keeps tests hermetic with no Redis dependency.
+ *
+ * Uses ioredis `.call()` which runs the rate-limit-redis Lua script as a
+ * single atomic command, satisfying the "no non-atomic INCR + EXPIRE"
+ * constraint from the replica-readiness audit (§3.1).
+ *
+ * express-rate-limit v8 requires each limiter to have its own store instance
+ * (it validates against shared instances to prevent route counter mixing),
+ * so callers must invoke this once per limiter.
+ */
+function buildProductionStore(prefix: string): Store | undefined {
+  if (process.env.NODE_ENV !== 'production') return undefined;
+  return new RedisStore({
+    prefix,
+    sendCommand: (...args: string[]) =>
+      redis.call(args[0] as string, ...(args.slice(1) as [string, ...string[]])) as Promise<number>,
+  });
+}
 
-const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: process.env.NODE_ENV === 'production' ? 5 : 1000,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many registration attempts. Please try again later.' },
-});
+export interface CreateAppOptions {
+  /**
+   * Store factory called once per limiter so each gets a distinct instance.
+   * express-rate-limit v8 requires separate instances per limiter to avoid
+   * counter mixing and to suppress the "unsharedStore" validation error.
+   * In tests: return a new mock per call but share an incrementCalls array
+   * to observe all calls across limiters. In production this is left undefined
+   * and buildProductionStore(prefix) is used instead.
+   */
+  rateLimitStore?: () => Store;
+}
 
-const refreshLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isE2E ? 1000 : 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many token refresh attempts. Please try again later.' },
-});
+export function createApp(options: CreateAppOptions = {}) {
+  const isE2E = process.env.NODE_ENV === 'e2e';
+  // Each limiter calls makeStore() independently so it gets its own instance.
+  const makeStore = (prefix: string): Store | undefined =>
+    options.rateLimitStore ? options.rateLimitStore() : buildProductionStore(prefix);
 
-export function createApp() {
+  // ─── Auth rate limiters ─────────────────────────────────────────────────────
+  // Each limiter gets its own store instance (express-rate-limit v8 requirement).
+  // In production: separate RedisStore per route with a unique prefix so
+  // login/register/refresh counters are independent in Redis.
+
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: isE2E ? 1000 : 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: makeStore('rl:login:'),
+    message: { error: 'Too many login attempts. Please try again later.' },
+  });
+
+  const registerLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: process.env.NODE_ENV === 'production' ? 5 : 1000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: makeStore('rl:register:'),
+    message: { error: 'Too many registration attempts. Please try again later.' },
+  });
+
+  const refreshLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: isE2E ? 1000 : 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: makeStore('rl:refresh:'),
+    message: { error: 'Too many token refresh attempts. Please try again later.' },
+  });
   const app = express();
 
   // Trust N proxy hops so req.ip and express-rate-limit can read
@@ -101,7 +149,7 @@ export function createApp() {
   app.use('/api/auth', authRouter);
 
   // Public API endpoints (cached, no auth required)
-  app.use('/api/public', publicRouter);
+  app.use('/api/public', createPublicRouter(makeStore('rl:public:')));
 
   // Real-time SSE endpoints
   app.use('/api/events', eventsRouter);

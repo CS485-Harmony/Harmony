@@ -1,23 +1,31 @@
 import { Router, Request, Response } from 'express';
+import type { Store } from 'express-rate-limit';
 import { prisma } from '../db/prisma';
 import { ChannelVisibility } from '@prisma/client';
 import { createLogger } from '../lib/logger';
 import { cacheMiddleware } from '../middleware/cache.middleware';
 import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from '../services/cache.service';
-import { tokenBucketRateLimiter } from '../middleware/rate-limit.middleware';
+import { createPublicRateLimiter } from '../middleware/rate-limit.middleware';
 
-export const publicRouter = Router();
 const logger = createLogger({ component: 'public-router' });
 
-// Token bucket rate limiting per issue #110: 100 req/min (human) / 1000 req/min (verified bots)
-publicRouter.use(tokenBucketRateLimiter);
+/**
+ * Factory so createApp() can inject a rate-limit store (e.g. a mock in tests
+ * or a RedisStore in production) without requiring a real Redis connection in
+ * every test that imports the public router.
+ */
+export function createPublicRouter(store?: Store) {
+  const router = Router();
+
+  // Redis-backed rate limiting per Issue #318: 100 req/min per IP, shared across replicas
+  router.use(createPublicRateLimiter(store));
 
 /**
  * GET /api/public/channels/:channelId/messages
  * Returns paginated messages for a PUBLIC_INDEXABLE channel.
  * Uses cache middleware with stale-while-revalidate.
  */
-publicRouter.get(
+router.get(
   '/channels/:channelId/messages',
   cacheMiddleware({
     ttl: CacheTTL.channelMessages,
@@ -71,7 +79,7 @@ publicRouter.get(
  * Returns a single message from a PUBLIC_INDEXABLE channel.
  * Uses cache middleware with stale-while-revalidate.
  */
-publicRouter.get(
+router.get(
   '/channels/:channelId/messages/:messageId',
   cacheMiddleware({
     ttl: CacheTTL.channelMessages,
@@ -128,7 +136,7 @@ publicRouter.get(
  * Returns a list of public servers ordered by member count (desc).
  * Used by the home page to discover a default public channel to show visitors.
  */
-publicRouter.get('/servers', async (_req: Request, res: Response) => {
+router.get('/servers', async (_req: Request, res: Response) => {
   try {
     const servers = await prisma.server.findMany({
       where: { isPublic: true },
@@ -157,7 +165,7 @@ publicRouter.get('/servers', async (_req: Request, res: Response) => {
  * Returns public server info. Uses getOrRevalidate for SWR.
  * Cache key: server:{serverId}:info per §4.4.
  */
-publicRouter.get('/servers/:serverSlug', async (req: Request, res: Response) => {
+router.get('/servers/:serverSlug', async (req: Request, res: Response) => {
   try {
     const server = await prisma.server.findUnique({
       where: { slug: req.params.serverSlug },
@@ -212,7 +220,7 @@ publicRouter.get('/servers/:serverSlug', async (req: Request, res: Response) => 
  * Returns public channels for a server. Uses getOrRevalidate for SWR.
  * Cache key: server:{serverId}:public_channels per §4.4.
  */
-publicRouter.get('/servers/:serverSlug/channels', async (req: Request, res: Response) => {
+router.get('/servers/:serverSlug/channels', async (req: Request, res: Response) => {
   try {
     const server = await prisma.server.findUnique({
       where: { slug: req.params.serverSlug },
@@ -264,7 +272,7 @@ publicRouter.get('/servers/:serverSlug/channels', async (req: Request, res: Resp
  * Returns channel info by slug. Returns 403 for PRIVATE channels, 404 if not found.
  * Supports PUBLIC_INDEXABLE and PUBLIC_NO_INDEX channels for guest access.
  */
-publicRouter.get(
+router.get(
   '/servers/:serverSlug/channels/:channelSlug',
   async (req: Request, res: Response) => {
     try {
@@ -314,3 +322,6 @@ publicRouter.get(
     }
   },
 );
+
+  return router;
+}

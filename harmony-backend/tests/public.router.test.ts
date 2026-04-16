@@ -13,7 +13,7 @@
 import request from 'supertest';
 import { createApp } from '../src/app';
 import { ChannelVisibility, ChannelType } from '@prisma/client';
-import { _clearBucketsForTesting } from '../src/middleware/rate-limit.middleware';
+// _clearBucketsForTesting removed in Issue #318 — no in-process bucket state remains
 
 // ─── Mock Prisma ──────────────────────────────────────────────────────────────
 
@@ -116,13 +116,11 @@ async function withSilencedConsoleError<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-beforeAll(() => {
-  app = createApp();
-});
-
 beforeEach(() => {
+  // Recreate the app each test so the in-memory MemoryStore (used in dev/test)
+  // starts fresh — prevents rate-limit state from leaking across tests.
+  app = createApp();
   jest.clearAllMocks();
-  _clearBucketsForTesting();
 });
 
 // ─── GET /api/public/servers/:serverSlug ─────────────────────────────────────
@@ -251,7 +249,7 @@ describe('GET /api/public/channels/:channelId/messages', () => {
     );
 
     jest.clearAllMocks();
-    _clearBucketsForTesting();
+    // _clearBucketsForTesting() removed in Issue #318 — no in-process bucket state
     mockPrisma.channel.findUnique.mockResolvedValue({
       id: CHANNEL.id,
       visibility: ChannelVisibility.PUBLIC_INDEXABLE,

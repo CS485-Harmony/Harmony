@@ -14,9 +14,9 @@ Reference document for topology and ownership context: `docs/deployment/deployme
 
 | Area | Location | Severity | Status |
 |---|---|---|---|
-| In-memory rate limiting (auth routes) | `src/app.ts:18–40` | **Must-fix** | Not replica-safe |
-| In-memory rate limiting (public/token-bucket) | `src/middleware/rate-limit.middleware.ts:43` | **Must-fix** | Not replica-safe |
-| Trust proxy not configured | `src/app.ts` (absent) | **Must-fix** | Breaks IP extraction for all rate limiters |
+| In-memory rate limiting (auth routes) | `src/app.ts` | **Must-fix** | Resolved (#318) — Redis-backed `RedisStore` via `rate-limit-redis` |
+| In-memory rate limiting (public/token-bucket) | `src/middleware/rate-limit.middleware.ts` | **Must-fix** | Resolved (#318) — replaced with Redis-backed `express-rate-limit` |
+| Trust proxy not configured | `src/app.ts` | **Must-fix** | Resolved (#318) — `TRUST_PROXY_HOPS` env var gates `trust proxy` setting |
 | Local filesystem attachment storage | `src/lib/storage/local.provider.ts` | **Must-fix** | Files not visible across replicas |
 | Duplicate cacheInvalidator on API replicas | `src/index.ts` | Resolved (#320) | Moved to `backend-worker` singleton |
 | SSE correctness across replicas | `src/routes/events.router.ts` | Mostly safe — known startup window | Redis Pub/Sub fan-out; `ready` not awaited |
@@ -25,56 +25,37 @@ Reference document for topology and ownership context: `docs/deployment/deployme
 
 ## 3. Must-Fix Items
 
-### 3.1 In-Memory Rate Limiting — Auth Routes
+### 3.1 In-Memory Rate Limiting — Auth Routes — RESOLVED (#318)
 
-**File:** `harmony-backend/src/app.ts:18–40`
-
-```ts
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, ... });
-const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, ... });
-const refreshLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, ... });
-```
+**File:** `harmony-backend/src/app.ts`
 
 `express-rate-limit` defaults to an in-process `MemoryStore`. With N replicas, each replica maintains an independent counter. A client can make `N × max` requests before hitting a limit — effectively multiplying the allowed rate by the replica count. For production login brute-force protection (`max: 10`) this is a security regression.
 
-**Fix:** Replace `MemoryStore` with a shared Redis store (e.g. `rate-limit-redis` package using the existing `ioredis` client from `src/db/redis.ts`). This makes all replicas share a single counter per IP per route.
+**Resolution (#318):** Limiters (`loginLimiter`, `registerLimiter`, `refreshLimiter`) are now created inside `createApp()` and wired to a `RedisStore` (from the `rate-limit-redis` package) when `NODE_ENV === 'production'`. Each limiter gets its own store instance with a unique key prefix (`rl:login:`, `rl:register:`, `rl:refresh:`) so route counters are independent in Redis. `rate-limit-redis` uses a Lua script for atomic increment+expiry — no non-atomic INCR + EXPIRE pattern. In dev/test, `MemoryStore` (the default) is used automatically when no store is passed.
 
 **Owner:** `backend-api`
 
 ---
 
-### 3.2 In-Memory Rate Limiting — Public API Token Bucket
+### 3.2 In-Memory Rate Limiting — Public API Token Bucket — RESOLVED (#318)
 
-**File:** `harmony-backend/src/middleware/rate-limit.middleware.ts:43`
+**File:** `harmony-backend/src/middleware/rate-limit.middleware.ts`
 
-```ts
-const buckets = new Map<string, TokenBucket>();
-```
+The custom token-bucket rate limiter stored per-IP state in a module-level `Map`. This state was local to the Node.js process and not shared across replicas. With N replicas, the effective public API rate limit became `N × 100` requests per minute per IP.
 
-The custom token-bucket rate limiter stores per-IP state in a module-level `Map`. This state is local to the Node.js process and is not shared across replicas. With N replicas, the effective public API rate limit becomes `N × HUMAN_CAPACITY` (currently `100`) requests per minute per IP.
-
-**Fix:** Replace the in-process `Map` with Redis-backed counters (e.g. Redis sorted sets or a Lua script implementing the token-bucket algorithm atomically). Alternatively, replace this middleware with a Redis-backed `express-rate-limit` instance to consolidate the two rate-limiting mechanisms.
+**Resolution (#318):** The in-process `Map<string, TokenBucket>` and all associated token-bucket logic are removed. The middleware now exports `createPublicRateLimiter(store?)` — a factory that returns a standard `express-rate-limit` middleware (fixed-window, 100 req/min per IP) backed by a `RedisStore` (prefix `rl:public:`) in production. Algorithm trade-off: continuous token-bucket is replaced by fixed-window; this is acceptable for a public read API and avoids a Lua token-bucket implementation. `publicRouter` was converted from a module-level singleton to a `createPublicRouter(store?)` factory so `createApp()` can inject the same `rateLimitStore` option used for auth limiters.
 
 **Owner:** `backend-api`
 
 ---
 
-### 3.3 Trust Proxy Not Configured
+### 3.3 Trust Proxy Not Configured — RESOLVED (#318)
 
-**File:** `harmony-backend/src/app.ts` — absent
+**File:** `harmony-backend/src/app.ts`
 
 Without `app.set('trust proxy', N)`, Express reads `req.ip` from the socket's remote address. Behind Railway's HTTP proxy, the socket address is the proxy's IP, not the client's. All rate limiters key on `req.ip`, so they collapse all clients into a single bucket — effectively disabling per-IP limiting for the entire deployment.
 
-The deployment architecture document (`docs/deployment/deployment-architecture.md`, §6.2) already defines `TRUST_PROXY_HOPS=1` as a required production env var. The recommended gated configuration is:
-
-```ts
-const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
-if (trustProxyHops > 0) {
-  app.set('trust proxy', trustProxyHops);
-}
-```
-
-**Fix:** Land the above configuration in `createApp()` before the rate-limit middleware. Set `TRUST_PROXY_HOPS=1` in the Railway production environment. Using a numeric hop count (not `true`) prevents XFF spoofing when the backend is not behind a proxy in local dev.
+**Resolution (#318):** `createApp()` reads `TRUST_PROXY_HOPS` from the environment and calls `app.set('trust proxy', trustProxyHops)` when the value is a positive integer. The setting is absent (0) in local dev so clients cannot spoof `X-Forwarded-For`. Set `TRUST_PROXY_HOPS=1` in Railway to unwrap one proxy hop. An empty or non-integer value throws at startup to prevent silent misconfiguration.
 
 **Owner:** `backend-api`
 
@@ -147,9 +128,9 @@ Use this checklist when validating that `backend-api` is ready to run at 2+ repl
 
 ### Must-Fix (block multi-replica deployment)
 
-- [ ] **Rate limiting — Redis store**: Replace `express-rate-limit` `MemoryStore` on auth routes with a Redis-backed store (`src/app.ts:18–40`).
-- [ ] **Rate limiting — token bucket**: Replace in-process `Map` in token-bucket middleware with Redis-backed counters (`src/middleware/rate-limit.middleware.ts:43`).
-- [ ] **Trust proxy**: Add `app.set('trust proxy', TRUST_PROXY_HOPS)` to `createApp()` in `src/app.ts` and set `TRUST_PROXY_HOPS=1` in Railway. Without this, all rate limiters see the proxy IP instead of the client IP.
+- [x] **Rate limiting — Redis store** *(resolved in #318)*: Auth limiters in `createApp()` use `RedisStore` (prefix `rl:login:` / `rl:register:` / `rl:refresh:`) in production. Atomic via Lua script. Dev/test falls back to `MemoryStore`.
+- [x] **Rate limiting — token bucket** *(resolved in #318)*: In-process `Map` removed. `createPublicRateLimiter(store?)` factory uses Redis-backed `express-rate-limit` (prefix `rl:public:`, 100 req/min fixed-window) in production.
+- [x] **Trust proxy** *(resolved in #318)*: `TRUST_PROXY_HOPS` env var gates `app.set('trust proxy', N)` in `createApp()`. Set `TRUST_PROXY_HOPS=1` in Railway. Numeric hop count prevents XFF spoofing in local dev.
 - [ ] **Attachment storage — S3**: Implement `S3StorageProvider` and register it in the factory (`src/lib/storage/index.ts`). Set `STORAGE_PROVIDER=s3` in Railway production.
 
 ### Ownership Migrations (should happen before production, acceptable for demo)
