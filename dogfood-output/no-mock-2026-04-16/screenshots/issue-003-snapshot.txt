@@ -1,0 +1,6 @@
+- button "Open Next.js Dev Tools" [expanded=false, ref=e6]
+- heading "general" [level=1, ref=e1]
+- heading "Welcome to #general!" [level=2, ref=e2]
+- link "Create Account" [ref=e3]
+- link "Log In" [ref=e4]
+- button "Dismiss banner" [ref=e5]

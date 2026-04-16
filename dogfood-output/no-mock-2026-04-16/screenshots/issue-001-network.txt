@@ -1,0 +1,10 @@
+[38584E012DBA918B4AA5C420275C89D1] GET http://localhost:3000/auth/signup (Document) 200
+[94433.24] GET http://localhost:3000/_next/static/chunks/src_app_auth_signup_page_tsx_8496980c._.js (Script) 200
+[9640EA4780E654F692C1EEF229FCC923] GET http://localhost:3000/auth/signup (Document) 200
+[94433.92] GET http://localhost:3000/_next/static/chunks/src_app_auth_signup_page_tsx_8496980c._.js (Script) 200
+[6F08C07E518B1864BFA69F65C371EA35] GET http://localhost:3000/auth/login (Document) 200
+[94433.159] GET http://localhost:3000/_next/static/chunks/src_app_auth_login_page_tsx_8496980c._.js (Script) 200
+[AF5B40F06DD65101238B27CA44FFDC04] GET http://localhost:3000/auth/signup (Document) 200
+[94433.226] GET http://localhost:3000/_next/static/chunks/src_app_auth_signup_page_tsx_8496980c._.js (Script) 200
+[C33E2F3798C0C8D9C55D7A362FEEC54C] GET http://localhost:3000/auth/signup (Document) 200
+[97369.24] GET http://localhost:3000/_next/static/chunks/src_app_auth_signup_page_tsx_8496980c._.js (Script) 200
