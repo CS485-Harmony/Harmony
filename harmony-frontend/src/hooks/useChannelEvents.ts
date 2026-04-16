@@ -20,7 +20,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Message } from '@/types/message';
 import type { Server } from '@/types/server';
 import { getAccessToken } from '@/lib/api-client';
+import { createFrontendLogger } from '@/lib/frontend-logger';
 import { getApiBaseUrl } from '@/lib/runtime-config';
+
+const logger = createFrontendLogger({ component: 'use-channel-events' });
 
 export interface UseChannelEventsOptions {
   channelId: string;
@@ -77,8 +80,15 @@ export function useChannelEvents({
       try {
         const msg = JSON.parse(event.data) as Message;
         onCreatedRef.current(msg);
-      } catch {
-        // Ignore malformed payloads — server bug or network corruption
+      } catch (error) {
+        logger.warn('Dropped malformed channel SSE payload', {
+          feature: 'channel-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'message:created',
+          target: '/api/events/channel/[channelId]',
+          error,
+        });
       }
     };
 
@@ -86,8 +96,15 @@ export function useChannelEvents({
       try {
         const msg = JSON.parse(event.data) as Message;
         onEditedRef.current(msg);
-      } catch {
-        // Ignore malformed payloads
+      } catch (error) {
+        logger.warn('Dropped malformed channel SSE payload', {
+          feature: 'channel-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'message:edited',
+          target: '/api/events/channel/[channelId]',
+          error,
+        });
       }
     };
 
@@ -95,8 +112,15 @@ export function useChannelEvents({
       try {
         const payload = JSON.parse(event.data) as { messageId: string };
         onDeletedRef.current(payload.messageId);
-      } catch {
-        // Ignore malformed payloads
+      } catch (error) {
+        logger.warn('Dropped malformed channel SSE payload', {
+          feature: 'channel-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'message:deleted',
+          target: '/api/events/channel/[channelId]',
+          error,
+        });
       }
     };
 
@@ -104,8 +128,15 @@ export function useChannelEvents({
       try {
         const server = JSON.parse(event.data) as Server;
         onServerUpdatedRef.current?.(server);
-      } catch {
-        // Ignore malformed payloads
+      } catch (error) {
+        logger.warn('Dropped malformed channel SSE payload', {
+          feature: 'channel-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'server:updated',
+          target: '/api/events/channel/[channelId]',
+          error,
+        });
       }
     };
 
@@ -126,6 +157,12 @@ export function useChannelEvents({
     };
     es.onerror = () => {
       setIsConnected(false);
+      logger.warn('Channel SSE connection failed', {
+        feature: 'channel-events',
+        event: everOpened ? 'stream_disconnected' : 'stream_failed',
+        source: 'sse',
+        target: '/api/events/channel/[channelId]',
+      });
       if (!everOpened) {
         // Never successfully opened — likely a 401/403. Stop retrying.
         es.close();

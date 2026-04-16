@@ -4,6 +4,7 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from 'axios';
 import { API_CONFIG } from './constants';
+import { createFrontendLogger } from './frontend-logger';
 import { setSessionCookie } from '@/app/actions/session';
 
 // ─── Token storage ────────────────────────────────────────────────────────────
@@ -12,6 +13,7 @@ import { setSessionCookie } from '@/app/actions/session';
 // Refresh token is stored in localStorage so users stay logged-in across reloads.
 
 const REFRESH_TOKEN_KEY = 'harmony_refresh_token';
+const logger = createFrontendLogger({ component: 'api-client' });
 
 let _accessToken: string | null = null;
 let _isRefreshing = false;
@@ -93,10 +95,25 @@ class ApiClient {
       response => response,
       async error => {
         const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+        const statusCode =
+          typeof error.response?.status === 'number' ? error.response.status : undefined;
+        const method =
+          typeof originalRequest?.method === 'string'
+            ? originalRequest.method.toUpperCase()
+            : undefined;
+        const route = typeof originalRequest?.url === 'string' ? originalRequest.url : undefined;
 
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        if (statusCode === 401 && !originalRequest._retry) {
           const refreshToken = getRefreshToken();
           if (!refreshToken) {
+            logger.warn('Auth session refresh skipped because no refresh token is stored', {
+              feature: 'auth',
+              event: 'refresh_skipped',
+              method,
+              route,
+              statusCode,
+              reason: 'missing_refresh_token',
+            });
             clearTokens();
             return Promise.reject(error);
           }
@@ -131,17 +148,33 @@ class ApiClient {
             // the in-memory token is refreshed and all server-side calls return 401.
             try {
               await setSessionCookie(newAt);
-            } catch {
+            } catch (sessionError) {
               // Best-effort — if the Server Action fails, keep going. The in-memory token
               // is still valid for client-side calls; the user may see a 401 on the next
               // server-side render but a page refresh will recover.
+              logger.warn('Server session cookie sync failed after token refresh', {
+                feature: 'auth',
+                event: 'cookie_sync_failed',
+                method: 'POST',
+                route: '/api/auth/refresh',
+                retryCount: 1,
+                error: sessionError,
+              });
             }
             notifyRefreshQueue(newAt);
 
             originalRequest.headers = originalRequest.headers ?? {};
             originalRequest.headers.Authorization = `Bearer ${newAt}`;
             return this.client(originalRequest);
-          } catch {
+          } catch (refreshError) {
+            logger.error('Auth session refresh failed', {
+              feature: 'auth',
+              event: 'refresh_failed',
+              method: 'POST',
+              route: '/api/auth/refresh',
+              retryCount: 1,
+              error: refreshError,
+            });
             clearTokens();
             notifyRefreshQueue(null);
             if (typeof window !== 'undefined') {
@@ -151,6 +184,17 @@ class ApiClient {
           } finally {
             _isRefreshing = false;
           }
+        }
+
+        if (statusCode === undefined || statusCode >= 500) {
+          logger.error('Browser API request failed', {
+            feature: 'browser-api',
+            event: 'request_failed',
+            method,
+            route,
+            statusCode,
+            error,
+          });
         }
 
         return Promise.reject(error);

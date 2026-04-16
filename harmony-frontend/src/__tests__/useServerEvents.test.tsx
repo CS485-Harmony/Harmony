@@ -118,9 +118,11 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockEventSourceInstance = null;
   process.env = { ...originalEnv, NEXT_PUBLIC_API_URL: API_URL };
+  jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
+  jest.restoreAllMocks();
   process.env = originalEnv;
 });
 
@@ -235,7 +237,10 @@ describe('useServerEvents — channel events', () => {
     );
 
     act(() => {
-      mockEventSourceInstance!.simulateEvent('channel:updated', { ...MOCK_CHANNEL, name: 'renamed' });
+      mockEventSourceInstance!.simulateEvent('channel:updated', {
+        ...MOCK_CHANNEL,
+        name: 'renamed',
+      });
     });
 
     expect(onChannelUpdated).toHaveBeenCalledTimes(1);
@@ -389,6 +394,17 @@ describe('useServerEvents — member events', () => {
     }).not.toThrow();
 
     expect(onMemberJoined).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith(
+      '[frontend]',
+      expect.objectContaining({
+        message: 'Dropped malformed server SSE payload',
+        fields: expect.objectContaining({
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          operation: 'member:joined',
+        }),
+      }),
+    );
   });
 });
 
@@ -601,5 +617,31 @@ describe('useServerEvents — channel:visibility-changed events', () => {
     }).not.toThrow();
 
     expect(onChannelVisibilityChanged).not.toHaveBeenCalled();
+  });
+
+  it('logs when the EventSource connection fails before opening', () => {
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+      }),
+    );
+
+    act(() => {
+      mockEventSourceInstance!.simulateError();
+    });
+
+    expect(console.warn).toHaveBeenCalledWith(
+      '[frontend]',
+      expect.objectContaining({
+        message: 'Server SSE connection failed',
+        fields: expect.objectContaining({
+          feature: 'server-events',
+          event: 'stream_failed',
+        }),
+      }),
+    );
   });
 });

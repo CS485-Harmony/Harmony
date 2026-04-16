@@ -5,8 +5,11 @@
  */
 
 import { cache } from 'react';
+import { createFrontendLogger } from '@/lib/frontend-logger';
 import { ChannelVisibility, type Channel } from '@/types';
 import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
+
+const logger = createFrontendLogger({ component: 'channel-service' });
 
 // ─── Type adapters ────────────────────────────────────────────────────────────
 
@@ -104,10 +107,13 @@ export const getChannel = cache(
       if (!data) return null;
       return toFrontendChannel(data);
     } catch (error) {
-      console.error(
-        `[channelService.getChannel] API call failed for "${serverSlug}/${channelSlug}":`,
+      logger.warn('Channel lookup failed', {
+        feature: 'channel-service',
+        event: 'get_channel_failed',
+        procedure: 'channel.getChannel',
+        route: '/trpc/channel.getChannel',
         error,
-      );
+      });
       return null;
     }
   },

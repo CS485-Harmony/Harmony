@@ -5,8 +5,11 @@
  */
 
 import { cache } from 'react';
+import { createFrontendLogger } from '@/lib/frontend-logger';
 import type { Server, User, CreateServerInput, ServerMemberInfo } from '@/types';
 import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
+
+const logger = createFrontendLogger({ component: 'server-service' });
 
 // ─── Type adapters ────────────────────────────────────────────────────────────
 
@@ -15,7 +18,8 @@ function toFrontendServer(raw: Record<string, unknown>): Server {
   // Warn on missing required fields to catch backend shape mismatches early.
   if (typeof raw.id !== 'string') console.warn('[toFrontendServer] missing or non-string "id"');
   if (typeof raw.slug !== 'string') console.warn('[toFrontendServer] missing or non-string "slug"');
-  if (typeof raw.createdAt !== 'string') console.warn('[toFrontendServer] missing or non-string "createdAt"');
+  if (typeof raw.createdAt !== 'string')
+    console.warn('[toFrontendServer] missing or non-string "createdAt"');
   return {
     id: raw.id as string,
     name: raw.name as string,
@@ -52,7 +56,13 @@ export const getServer = cache(async (slug: string): Promise<Server | null> => {
     if (!data) return null;
     return toFrontendServer(data);
   } catch (error) {
-    console.error(`[serverService.getServer] API call failed for slug "${slug}":`, error);
+    logger.warn('Public server lookup failed', {
+      feature: 'server-service',
+      event: 'get_server_failed',
+      procedure: 'publicGet',
+      route: '/servers/[slug]',
+      error,
+    });
     return null;
   }
 });
@@ -110,7 +120,14 @@ export async function getServerAuthenticated(slug: string): Promise<Server | nul
     const data = await trpcQuery<Record<string, unknown>>('server.getServer', { slug });
     if (!data) return null;
     return toFrontendServer(data);
-  } catch {
+  } catch (error) {
+    logger.warn('Authenticated server lookup failed', {
+      feature: 'server-service',
+      event: 'get_server_authenticated_failed',
+      procedure: 'server.getServer',
+      route: '/trpc/server.getServer',
+      error,
+    });
     return null;
   }
 }
@@ -125,7 +142,13 @@ export async function getServerMembers(serverId: string): Promise<User[]> {
     const data = await trpcQuery<BackendServerMember[]>('server.getMembers', { serverId });
     return (data ?? []).map(toFrontendMember);
   } catch (error) {
-    console.warn('[serverService.getServerMembers] failed, returning []:', error);
+    logger.warn('Server member lookup failed; returning []', {
+      feature: 'server-service',
+      event: 'get_server_members_failed',
+      procedure: 'server.getMembers',
+      route: '/trpc/server.getMembers',
+      error,
+    });
     return [];
   }
 }
@@ -190,13 +213,15 @@ const BACKEND_ROLE_MAP: Record<string, ServerMemberInfo['role']> = {
  * Returns all members of a server with their role info, sorted by role hierarchy.
  */
 export async function getServerMembersWithRole(serverId: string): Promise<ServerMemberInfo[]> {
-  const data = await trpcQuery<Array<{
-    userId: string;
-    serverId: string;
-    role: string;
-    joinedAt: string;
-    user: { id: string; username: string; displayName: string; avatarUrl: string | null };
-  }>>('serverMember.getMembers', { serverId });
+  const data = await trpcQuery<
+    Array<{
+      userId: string;
+      serverId: string;
+      role: string;
+      joinedAt: string;
+      user: { id: string; username: string; displayName: string; avatarUrl: string | null };
+    }>
+  >('serverMember.getMembers', { serverId });
   return (data ?? []).map(m => ({
     userId: m.userId,
     username: m.user.username,
