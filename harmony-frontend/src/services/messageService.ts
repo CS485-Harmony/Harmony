@@ -7,6 +7,7 @@
 import { createFrontendLogger } from '@/lib/frontend-logger';
 import type { Message } from '@/types';
 import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
+import type { AttachmentInput } from '@/types';
 
 const logger = createFrontendLogger({ component: 'message-service' });
 
@@ -114,6 +115,7 @@ export async function sendMessage(
   channelId: string,
   content: string,
   serverId?: string,
+  attachments?: AttachmentInput[],
 ): Promise<Message> {
   if (!serverId) {
     throw new Error('serverId is required for sendMessage');
@@ -122,6 +124,7 @@ export async function sendMessage(
     serverId,
     channelId,
     content,
+    ...(attachments?.length ? { attachments } : {}),
   });
   return toFrontendMessage(data);
 }
