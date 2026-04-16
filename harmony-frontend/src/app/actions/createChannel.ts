@@ -73,18 +73,23 @@ export async function createChannelAction(input: CreateChannelInput): Promise<Ch
 
   // Revalidate only the server-scoped paths so unrelated server pages are not
   // unnecessarily invalidated on every channel creation.
-  try {
-    revalidatePath(`/channels/${input.serverSlug}`, 'layout');
-    revalidatePath(`/c/${input.serverSlug}`, 'layout');
-    revalidatePath(`/settings/${input.serverSlug}`, 'layout');
-  } catch (err) {
-    // Revalidation failure is non-fatal but log so stale-cache issues are diagnosable.
-    logger.warn('Channel creation path revalidation failed', {
-      feature: 'next-runtime',
-      event: 'revalidate_failed',
-      route: `/channels/${input.serverSlug}`,
-      error: err,
-    });
+  for (const target of [
+    `/channels/${input.serverSlug}`,
+    `/c/${input.serverSlug}`,
+    `/settings/${input.serverSlug}`,
+  ]) {
+    try {
+      revalidatePath(target, 'layout');
+    } catch (err) {
+      // Revalidation failure is non-fatal but log the exact target so stale-cache
+      // issues can be traced back to the failing path.
+      logger.warn('Channel creation path revalidation failed', {
+        feature: 'next-runtime',
+        event: 'revalidate_failed',
+        route: target,
+        error: err,
+      });
+    }
   }
 
   return newChannel;

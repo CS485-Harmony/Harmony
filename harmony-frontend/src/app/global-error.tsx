@@ -23,7 +23,7 @@ export default function ServerErrorPage({ error, reset }: ServerErrorPageProps) 
       {
         feature: 'react-error-boundary',
         event: 'render_root_error_boundary',
-        route: typeof window !== 'undefined' ? window.location.pathname : '/',
+        route: window.location.pathname,
         error,
       },
     );
