@@ -1,21 +1,31 @@
 import { Router, Request, Response } from 'express';
+import type { Store } from 'express-rate-limit';
 import { prisma } from '../db/prisma';
 import { ChannelVisibility } from '@prisma/client';
+import { createLogger } from '../lib/logger';
 import { cacheMiddleware } from '../middleware/cache.middleware';
 import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from '../services/cache.service';
-import { tokenBucketRateLimiter } from '../middleware/rate-limit.middleware';
+import { createPublicRateLimiter } from '../middleware/rate-limit.middleware';
 
-export const publicRouter = Router();
+const logger = createLogger({ component: 'public-router' });
 
-// Token bucket rate limiting per issue #110: 100 req/min (human) / 1000 req/min (verified bots)
-publicRouter.use(tokenBucketRateLimiter);
+/**
+ * Factory so createApp() can inject a rate-limit store (e.g. a mock in tests
+ * or a RedisStore in production) without requiring a real Redis connection in
+ * every test that imports the public router.
+ */
+export function createPublicRouter(store?: Store) {
+  const router = Router();
+
+  // Redis-backed rate limiting per Issue #318: 100 req/min per IP, shared across replicas
+  router.use(createPublicRateLimiter(store));
 
 /**
  * GET /api/public/channels/:channelId/messages
  * Returns paginated messages for a PUBLIC_INDEXABLE channel.
  * Uses cache middleware with stale-while-revalidate.
  */
-publicRouter.get(
+router.get(
   '/channels/:channelId/messages',
   cacheMiddleware({
     ttl: CacheTTL.channelMessages,
@@ -56,7 +66,7 @@ publicRouter.get(
       res.set('Cache-Control', `public, max-age=${CacheTTL.channelMessages}`);
       res.json({ messages, page, pageSize });
     } catch (err) {
-      console.error('Public messages route error:', err);
+      logger.error({ err, channelId: req.params.channelId }, 'Public messages route failed');
       if (!res.headersSent) {
         res.status(500).json({ error: 'Internal server error' });
       }
@@ -69,7 +79,7 @@ publicRouter.get(
  * Returns a single message from a PUBLIC_INDEXABLE channel.
  * Uses cache middleware with stale-while-revalidate.
  */
-publicRouter.get(
+router.get(
   '/channels/:channelId/messages/:messageId',
   cacheMiddleware({
     ttl: CacheTTL.channelMessages,
@@ -110,7 +120,10 @@ publicRouter.get(
       res.set('Cache-Control', `public, max-age=${CacheTTL.channelMessages}`);
       res.json(message);
     } catch (err) {
-      console.error('Public message route error:', err);
+      logger.error(
+        { err, channelId: req.params.channelId, messageId: req.params.messageId },
+        'Public message route failed',
+      );
       if (!res.headersSent) {
         res.status(500).json({ error: 'Internal server error' });
       }
@@ -123,7 +136,7 @@ publicRouter.get(
  * Returns a list of public servers ordered by member count (desc).
  * Used by the home page to discover a default public channel to show visitors.
  */
-publicRouter.get('/servers', async (_req: Request, res: Response) => {
+router.get('/servers', async (_req: Request, res: Response) => {
   try {
     const servers = await prisma.server.findMany({
       where: { isPublic: true },
@@ -142,7 +155,7 @@ publicRouter.get('/servers', async (_req: Request, res: Response) => {
     res.set('Cache-Control', `public, max-age=${CacheTTL.serverInfo}`);
     res.json(servers);
   } catch (err) {
-    console.error('Public servers list route error:', err);
+    logger.error({ err }, 'Public servers list route failed');
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -152,7 +165,7 @@ publicRouter.get('/servers', async (_req: Request, res: Response) => {
  * Returns public server info. Uses getOrRevalidate for SWR.
  * Cache key: server:{serverId}:info per §4.4.
  */
-publicRouter.get('/servers/:serverSlug', async (req: Request, res: Response) => {
+router.get('/servers/:serverSlug', async (req: Request, res: Response) => {
   try {
     const server = await prisma.server.findUnique({
       where: { slug: req.params.serverSlug },
@@ -182,8 +195,8 @@ publicRouter.get('/servers/:serverSlug', async (req: Request, res: Response) => 
       if (entry) {
         xCache = cacheService.isStale(entry, CacheTTL.serverInfo) ? 'STALE' : 'HIT';
       }
-    } catch {
-      /* Redis error */
+    } catch (err) {
+      logger.warn({ err, cacheKey }, 'Failed to inspect public server cache state');
     }
 
     const data = await cacheService.getOrRevalidate(
@@ -197,7 +210,7 @@ publicRouter.get('/servers/:serverSlug', async (req: Request, res: Response) => 
     res.set('Cache-Control', `public, max-age=${CacheTTL.serverInfo}`);
     res.json(data);
   } catch (err) {
-    console.error('Public server route error:', err);
+    logger.error({ err, serverSlug: req.params.serverSlug }, 'Public server route failed');
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -207,7 +220,7 @@ publicRouter.get('/servers/:serverSlug', async (req: Request, res: Response) => 
  * Returns public channels for a server. Uses getOrRevalidate for SWR.
  * Cache key: server:{serverId}:public_channels per §4.4.
  */
-publicRouter.get('/servers/:serverSlug/channels', async (req: Request, res: Response) => {
+router.get('/servers/:serverSlug/channels', async (req: Request, res: Response) => {
   try {
     const server = await prisma.server.findUnique({
       where: { slug: req.params.serverSlug },
@@ -238,8 +251,8 @@ publicRouter.get('/servers/:serverSlug/channels', async (req: Request, res: Resp
       if (entry) {
         xCache = cacheService.isStale(entry, CacheTTL.serverInfo) ? 'STALE' : 'HIT';
       }
-    } catch {
-      /* Redis error */
+    } catch (err) {
+      logger.warn({ err, cacheKey }, 'Failed to inspect public channel cache state');
     }
 
     const data = await cacheService.getOrRevalidate(cacheKey, fetcher, cacheOpts);
@@ -249,7 +262,7 @@ publicRouter.get('/servers/:serverSlug/channels', async (req: Request, res: Resp
     res.set('Cache-Control', `public, max-age=${CacheTTL.serverInfo}`);
     res.json(data);
   } catch (err) {
-    console.error('Public channels route error:', err);
+    logger.error({ err, serverSlug: req.params.serverSlug }, 'Public channels route failed');
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -259,7 +272,7 @@ publicRouter.get('/servers/:serverSlug/channels', async (req: Request, res: Resp
  * Returns channel info by slug. Returns 403 for PRIVATE channels, 404 if not found.
  * Supports PUBLIC_INDEXABLE and PUBLIC_NO_INDEX channels for guest access.
  */
-publicRouter.get(
+router.get(
   '/servers/:serverSlug/channels/:channelSlug',
   async (req: Request, res: Response) => {
     try {
@@ -301,8 +314,14 @@ publicRouter.get(
       res.set('Cache-Control', `public, max-age=${CacheTTL.serverInfo}`);
       res.json(channel);
     } catch (err) {
-      console.error('Public channel route error:', err);
+      logger.error(
+        { err, serverSlug: req.params.serverSlug, channelSlug: req.params.channelSlug },
+        'Public channel route failed',
+      );
       res.status(500).json({ error: 'Internal server error' });
     }
   },
 );
+
+  return router;
+}

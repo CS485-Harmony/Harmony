@@ -16,6 +16,7 @@
 
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db/prisma';
+import { createLogger } from '../lib/logger';
 import { authService } from '../services/auth.service';
 import { eventBus, EventChannels } from '../events/eventBus';
 import type {
@@ -33,6 +34,7 @@ import type {
 } from '../events/eventTypes';
 
 export const eventsRouter = Router();
+const logger = createLogger({ component: 'events-router' });
 
 // ─── Validation ────────────────────────────────────────────────────────────────
 
@@ -140,8 +142,11 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
           attachments: message.attachments,
           editedAt: message.editedAt ? message.editedAt.toISOString() : null,
         });
-      } catch {
-        // Silently ignore DB errors — the client will still receive future events
+      } catch (err) {
+        logger.warn(
+          { err, channelId, messageId: payload.messageId },
+          'Failed to hydrate SSE message:created payload',
+        );
       }
     },
   );
@@ -168,8 +173,11 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
           attachments: message.attachments,
           editedAt: message.editedAt ? message.editedAt.toISOString() : null,
         });
-      } catch {
-        // Silently ignore DB errors
+      } catch (err) {
+        logger.warn(
+          { err, channelId, messageId: payload.messageId },
+          'Failed to hydrate SSE message:edited payload',
+        );
       }
     },
   );
@@ -305,8 +313,11 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
         if (!channel) return;
 
         sendEvent(res, 'channel:created', channel);
-      } catch {
-        // Silently ignore DB errors — the client will still receive future events
+      } catch (err) {
+        logger.warn(
+          { err, serverId, channelId: payload.channelId },
+          'Failed to hydrate SSE channel:created payload',
+        );
       }
     },
   );
@@ -324,8 +335,11 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
         if (!channel) return;
 
         sendEvent(res, 'channel:updated', channel);
-      } catch {
-        // Silently ignore DB errors
+      } catch (err) {
+        logger.warn(
+          { err, serverId, channelId: payload.channelId },
+          'Failed to hydrate SSE channel:updated payload',
+        );
       }
     },
   );
@@ -347,7 +361,10 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     (payload: UserStatusChangedPayload) => {
       if (payload.serverId !== serverId) return;
       // Normalize Prisma enum ('IDLE') to the lowercase format the frontend expects ('idle').
-      sendEvent(res, 'member:statusChanged', { id: payload.userId, status: payload.status.toLowerCase() });
+      sendEvent(res, 'member:statusChanged', {
+        id: payload.userId,
+        status: payload.status.toLowerCase(),
+      });
     },
   );
 
@@ -363,7 +380,14 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       try {
         const user = await prisma.user.findUnique({
           where: { id: payload.userId },
-          select: { id: true, username: true, displayName: true, avatarUrl: true, status: true, publicProfile: true },
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatarUrl: true,
+            status: true,
+            publicProfile: true,
+          },
         });
         if (!user) return;
 
@@ -382,8 +406,11 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
           // Cast DB UserStatus (e.g. 'ONLINE') to frontend UserStatus (e.g. 'online')
           status: user.status.toLowerCase(),
         });
-      } catch {
-        // Silently ignore DB errors — the client will re-fetch on next load
+      } catch (err) {
+        logger.warn(
+          { err, serverId, userId: payload.userId },
+          'Failed to hydrate SSE member:joined payload',
+        );
       }
     },
   );
@@ -419,8 +446,11 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
           // (e.g. current user is viewing a channel that just became PRIVATE).
           oldVisibility: payload.oldVisibility,
         });
-      } catch {
-        // Silently ignore DB errors — the client will re-fetch on next load
+      } catch (err) {
+        logger.warn(
+          { err, serverId, channelId: payload.channelId },
+          'Failed to hydrate SSE channel:visibility-changed payload',
+        );
       }
     },
   );

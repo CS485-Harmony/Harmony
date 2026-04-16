@@ -117,9 +117,11 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockEventSourceInstance = null;
   process.env = { ...originalEnv, NEXT_PUBLIC_API_URL: API_URL };
+  jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
+  jest.restoreAllMocks();
   process.env = originalEnv;
 });
 
@@ -303,6 +305,17 @@ describe('useChannelEvents — edge cases', () => {
 
     // Malformed JSON should not call the handler
     expect(onMessageCreated).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith(
+      '[frontend]',
+      expect.objectContaining({
+        message: 'Dropped malformed channel SSE payload',
+        fields: expect.objectContaining({
+          feature: 'channel-events',
+          event: 'payload_parse_failed',
+          operation: 'message:created',
+        }),
+      }),
+    );
   });
 
   it('removes event listeners on unmount', () => {
@@ -397,5 +410,31 @@ describe('useChannelEvents — onServerUpdated', () => {
       mockEventSourceInstance!.removeEventListener.mock.calls as [string, unknown][]
     ).map(([type]) => type);
     expect(removedTypes).toContain('server:updated');
+  });
+
+  it('logs when the EventSource connection fails before opening', () => {
+    renderHook(() =>
+      useChannelEvents({
+        channelId: CHANNEL_ID,
+        onMessageCreated: jest.fn(),
+        onMessageEdited: jest.fn(),
+        onMessageDeleted: jest.fn(),
+      }),
+    );
+
+    act(() => {
+      mockEventSourceInstance!.simulateError();
+    });
+
+    expect(console.warn).toHaveBeenCalledWith(
+      '[frontend]',
+      expect.objectContaining({
+        message: 'Channel SSE connection failed',
+        fields: expect.objectContaining({
+          feature: 'channel-events',
+          event: 'stream_failed',
+        }),
+      }),
+    );
   });
 });

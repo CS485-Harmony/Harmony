@@ -17,7 +17,7 @@ import { AuthRedirect } from '@/components/channel/AuthRedirect';
 import { VisibilityGuard } from '@/components/channel/VisibilityGuard';
 import { MessageList } from '@/components/channel/MessageList';
 import { GuestPromoBanner } from '@/components/channel/GuestPromoBanner';
-import { ChannelVisibility } from '@/types';
+import { PrivateChannelLockedPane } from '@/components/channel/PrivateChannelLockedPane';
 import type { Server, Channel } from '@/types';
 
 type PublicServer = Omit<Server, 'ownerId'>;
@@ -123,9 +123,7 @@ export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannel
       <div className='flex h-screen flex-col overflow-hidden bg-[#36393f] font-sans'>
         {isMember && <AuthRedirect to={`/channels/${serverSlug}/${channelSlug}`} />}
         <GuestHeader server={server} memberCount={server.memberCount ?? 0} />
-        <VisibilityGuard visibility={ChannelVisibility.PRIVATE} isLoading={false}>
-          {null}
-        </VisibilityGuard>
+        <PrivateChannelLockedPane mode='guest' />
       </div>
     );
   }

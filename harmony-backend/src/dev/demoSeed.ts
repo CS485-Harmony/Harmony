@@ -1,10 +1,11 @@
 import { seedMockData } from './mockSeed';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger({ component: 'demo-seed' });
 
 export function assertDemoSeedAllowed(env: NodeJS.ProcessEnv = process.env): void {
   if (env.HARMONY_DEMO_MODE !== 'true') {
-    throw new Error(
-      'Demo seed is disabled. Set HARMONY_DEMO_MODE=true to run the demo seed path.',
-    );
+    throw new Error('Demo seed is disabled. Set HARMONY_DEMO_MODE=true to run the demo seed path.');
   }
 }
 
@@ -18,8 +19,14 @@ async function main(): Promise<void> {
   const prisma = await getPrismaClient();
   try {
     const counts = await seedMockData(prisma, true);
-    console.log(
-      `Reconciled demo dataset (${counts.reconciled.users} users, ${counts.reconciled.servers} servers, ${counts.reconciled.channels} channels, ${counts.reconciled.messages} messages).`,
+    logger.info(
+      {
+        users: counts.reconciled.users,
+        servers: counts.reconciled.servers,
+        channels: counts.reconciled.channels,
+        messages: counts.reconciled.messages,
+      },
+      'Reconciled demo dataset',
     );
   } finally {
     await prisma.$disconnect();
@@ -27,9 +34,8 @@ async function main(): Promise<void> {
 }
 
 if (require.main === module) {
-  void main()
-    .catch((error: unknown) => {
-      console.error(error);
-      process.exitCode = 1;
-    });
+  void main().catch((error: unknown) => {
+    logger.error({ err: error }, 'Demo seed failed');
+    process.exitCode = 1;
+  });
 }

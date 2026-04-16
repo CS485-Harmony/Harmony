@@ -13,12 +13,14 @@
  */
 
 import { redis } from '../db/redis';
+import { createLogger } from '../lib/logger';
 import { eventBus, EventChannels } from '../events/eventBus';
 
 // ─── TTL ────────────────────────────────────────────────────────────────────
 
 /** 24 hours — refreshed on every join. */
 const VOICE_TTL_SECONDS = 86_400;
+const logger = createLogger({ component: 'voice-service' });
 
 // ─── Redis key helpers ───────────────────────────────────────────────────────
 
@@ -60,18 +62,16 @@ function isMockMode(): boolean {
 async function ensureTwilioRoom(channelId: string): Promise<void> {
   try {
     const twilio = await import('twilio');
-    const client = twilio.default(
-      process.env.TWILIO_API_KEY,
-      process.env.TWILIO_API_SECRET,
-      { accountSid: process.env.TWILIO_ACCOUNT_SID },
-    );
+    const client = twilio.default(process.env.TWILIO_API_KEY, process.env.TWILIO_API_SECRET, {
+      accountSid: process.env.TWILIO_ACCOUNT_SID,
+    });
     await client.video.v1.rooms.create({ uniqueName: channelId });
   } catch (err: unknown) {
     const code = (err as { code?: number }).code;
     if (code === 53113) {
       return;
     }
-    console.error(`[VoiceService] ensureTwilioRoom error (code=${code}):`, (err as Error).message);
+    logger.warn({ err, channelId, code }, 'Failed to pre-create Twilio room');
     // Non-fatal: if pre-creation fails, let TwilioVideo.connect() attempt auto-create.
     // This handles accounts with "Auto-create Rooms" enabled in the Twilio console.
   }
@@ -87,23 +87,27 @@ async function destroyTwilioRoom(channelId: string): Promise<void> {
     // Dynamic import keeps twilio out of module-level evaluation in mock mode.
     // Use API Key + API Secret auth (same credential layout as generateToken).
     const twilio = await import('twilio');
-    const client = twilio.default(
-      process.env.TWILIO_API_KEY,
-      process.env.TWILIO_API_SECRET,
-      { accountSid: process.env.TWILIO_ACCOUNT_SID },
-    );
+    const client = twilio.default(process.env.TWILIO_API_KEY, process.env.TWILIO_API_SECRET, {
+      accountSid: process.env.TWILIO_ACCOUNT_SID,
+    });
 
     // Rooms are named after channelId — fetch the in-progress room then close it.
-    const rooms = await client.video.v1.rooms.list({ uniqueName: channelId, status: 'in-progress' });
+    const rooms = await client.video.v1.rooms.list({
+      uniqueName: channelId,
+      status: 'in-progress',
+    });
     await Promise.all(
       rooms.map((room) =>
-        client.video.v1.rooms(room.sid).update({ status: 'completed' }).catch((err: unknown) => {
-          console.error(`[VoiceService] Failed to close room ${room.sid}:`, err);
-        }),
+        client.video.v1
+          .rooms(room.sid)
+          .update({ status: 'completed' })
+          .catch((err: unknown) => {
+            logger.warn({ err, channelId, roomSid: room.sid }, 'Failed to close Twilio room');
+          }),
       ),
     );
   } catch (err) {
-    console.error(`[VoiceService] destroyTwilioRoom error for channelId ${channelId}:`, err);
+    logger.warn({ err, channelId }, 'Failed to destroy Twilio room');
   }
 }
 
@@ -158,7 +162,10 @@ export const voiceService = {
    * - Publishes USER_JOINED_VOICE.
    * - Returns the access token and current participant list.
    */
-  async join(userId: string, channelId: string): Promise<{ token: string; participants: ParticipantState[] }> {
+  async join(
+    userId: string,
+    channelId: string,
+  ): Promise<{ token: string; participants: ParticipantState[] }> {
     const pKey = participantsKey(channelId);
     const uKey = userVoiceKey(userId);
 
@@ -190,7 +197,9 @@ export const voiceService = {
         channelId,
         timestamp: new Date().toISOString(),
       })
-      .catch((err: unknown) => console.error('[VoiceService] publish USER_JOINED_VOICE error:', err));
+      .catch((err: unknown) =>
+        logger.warn({ err, channelId }, 'Failed to publish voice join event'),
+      );
 
     if (!isMockMode()) {
       await ensureTwilioRoom(channelId);
@@ -237,11 +246,16 @@ export const voiceService = {
         channelId,
         timestamp: new Date().toISOString(),
       })
-      .catch((err: unknown) => console.error('[VoiceService] publish USER_LEFT_VOICE error:', err));
+      .catch((err: unknown) =>
+        logger.warn({ err, channelId }, 'Failed to publish voice leave event'),
+      );
 
     if (remaining === 0 && !isMockMode()) {
       destroyTwilioRoom(channelId).catch((err: unknown) =>
-        console.error('[VoiceService] destroyTwilioRoom fire-and-forget error:', err),
+        logger.warn(
+          { err, channelId },
+          'Failed to destroy Twilio room after final participant left',
+        ),
       );
     }
   },
@@ -256,8 +270,10 @@ export const voiceService = {
 
     await redis.hset(
       uKey,
-      'muted', state.muted ? '1' : '0',
-      'deafened', state.deafened ? '1' : '0',
+      'muted',
+      state.muted ? '1' : '0',
+      'deafened',
+      state.deafened ? '1' : '0',
     );
 
     eventBus
@@ -268,7 +284,9 @@ export const voiceService = {
         deafened: state.deafened,
         timestamp: new Date().toISOString(),
       })
-      .catch((err: unknown) => console.error('[VoiceService] publish VOICE_STATE_CHANGED error:', err));
+      .catch((err: unknown) =>
+        logger.warn({ err, channelId }, 'Failed to publish voice state change event'),
+      );
   },
 
   /**

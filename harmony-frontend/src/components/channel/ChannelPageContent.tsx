@@ -1,10 +1,12 @@
-import { notFound, redirect } from 'next/navigation';
+import { redirect } from 'next/navigation';
 import { getServers, getServerMembers } from '@/services/serverService';
 import { getChannels } from '@/services/channelService';
 import { getMessages } from '@/services/messageService';
-import { getCurrentUser } from '@/services/authService';
+import { TrpcHttpError, getSessionUser } from '@/lib/trpc-client';
 import { HarmonyShell } from '@/components/layout/HarmonyShell';
-import { VisibilityGuard } from '@/components/channel/VisibilityGuard';
+import { PrivateChannelLockedPane } from '@/components/channel/PrivateChannelLockedPane';
+import { ChannelVisibility } from '@/types';
+import type { Server } from '@/types';
 
 interface ChannelPageContentProps {
   serverSlug: string;
@@ -18,23 +20,30 @@ export async function ChannelPageContent({
   channelSlug,
   isGuestView = false,
 }: ChannelPageContentProps) {
-  const servers = await getServers();
+  let servers: Server[];
+  try {
+    servers = await getServers();
+  } catch (err) {
+    // Only redirect to login for auth failures; rethrow other errors (network, 5xx) so
+    // Next.js surfaces them honestly rather than masking them as an auth problem.
+    if (err instanceof TrpcHttpError && err.status === 401) redirect('/auth/login');
+    throw err;
+  }
   const server = servers.find(s => s.slug === serverSlug);
-  if (!server) notFound();
+  // Server not found in member list — redirect to channels index which resolves
+  // the user's first valid server dynamically.
+  if (!server) redirect('/channels');
 
   let serverChannels;
   try {
     serverChannels = await getChannels(server.id);
   } catch {
-    // User is authenticated but not a member of this server — show public guest view.
     redirect(`/c/${serverSlug}/${channelSlug}`);
   }
   const channel = serverChannels.find(c => c.slug === channelSlug);
-  if (!channel) notFound();
+  // Channel not found — redirect to channels index rather than showing a dead-end 404.
+  if (!channel) redirect('/channels');
 
-  // Gather all channels across servers for cross-server navigation.
-  // Use .catch(() => []) so a FORBIDDEN error for servers the authenticated
-  // user is not a member of degrades gracefully instead of crashing the page.
   const allChannels = (
     await Promise.all(
       servers.map(s =>
@@ -43,23 +52,22 @@ export async function ChannelPageContent({
     )
   ).flat();
 
-  // Service returns newest-first (both public and tRPC paths); reverse for chronological display
-  const [{ messages }, members, currentUser] = await Promise.all([
-    getMessages(channel.id, 1, { serverId: server.id }),
+  const [members, sessionUser] = await Promise.all([
     getServerMembers(server.id),
-    getCurrentUser(),
+    getSessionUser(),
   ]);
-  const sortedMessages = [...messages].reverse();
 
-  // Derive the current user's server-scoped admin status from the member list.
-  // We cannot rely on AuthContext isAdmin() with no arg here because it checks
-  // the global User.role, which mapBackendUser always sets to 'member' for
-  // non-system-admin users. The member list carries the correct server-scoped role.
-  const currentMember = currentUser ? members.find(m => m.id === currentUser.id) : undefined;
+  const currentMember = sessionUser ? members.find(m => m.id === sessionUser.id) : undefined;
   const isServerAdmin =
-    currentMember?.role === 'admin' || currentMember?.role === 'owner';
+    sessionUser?.isSystemAdmin ||
+    currentMember?.role === 'admin' ||
+    currentMember?.role === 'owner';
+  const isLockedPrivateChannel = channel.visibility === ChannelVisibility.PRIVATE && !isServerAdmin;
+  const sortedMessages = isLockedPrivateChannel
+    ? []
+    : [...(await getMessages(channel.id, 1, { serverId: server.id })).messages].reverse();
 
-  const shell = (
+  return (
     <HarmonyShell
       servers={servers}
       currentServer={server}
@@ -69,17 +77,11 @@ export async function ChannelPageContent({
       messages={sortedMessages}
       members={members}
       basePath={isGuestView ? '/c' : '/channels'}
+      lockedMessagePane={
+        isLockedPrivateChannel ? (
+          <PrivateChannelLockedPane mode={sessionUser ? 'member' : 'guest'} />
+        ) : undefined
+      }
     />
-  );
-
-  return (
-    <VisibilityGuard
-      visibility={channel.visibility}
-      isLoading={false}
-      serverOwnerId={server.ownerId}
-      isServerAdmin={isServerAdmin}
-    >
-      {shell}
-    </VisibilityGuard>
   );
 }

@@ -16,6 +16,11 @@
 // jest.mock() calls. This allows them to be referenced inside mock factories.
 
 const mockSetSessionCookie = jest.fn().mockResolvedValue(undefined);
+const mockFrontendLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+};
 
 // Capture the response error interceptor handler when api-client registers it.
 // We invoke the handler directly in tests to trigger the refresh logic.
@@ -50,6 +55,10 @@ const mockAxiosPost = jest.fn().mockResolvedValue({
 jest.mock('@/app/actions/session', () => ({
   setSessionCookie: mockSetSessionCookie,
   clearSessionCookie: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('@/lib/frontend-logger', () => ({
+  createFrontendLogger: jest.fn(() => mockFrontendLogger),
 }));
 
 jest.mock('axios', () => ({
@@ -138,6 +147,14 @@ describe('Fix 1 — api-client: setSessionCookie is called after token refresh',
 
     // setSessionCookie was still attempted despite the failure (best-effort)
     expect(setSessionCookie).toHaveBeenCalledWith('refreshed-access-token');
+    expect(mockFrontendLogger.warn).toHaveBeenCalledWith(
+      'Server session cookie sync failed after token refresh',
+      expect.objectContaining({
+        feature: 'auth',
+        event: 'cookie_sync_failed',
+        route: '/api/auth/refresh',
+      }),
+    );
   });
 });
 

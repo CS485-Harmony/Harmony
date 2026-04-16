@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { prisma } from '../db/prisma';
+import { createLogger } from '../lib/logger';
 import { cacheService, sanitizeKeySegment } from './cache.service';
 import { eventBus, EventChannels } from '../events/eventBus';
 
@@ -32,6 +33,8 @@ export interface ReactionGroup {
   count: number;
   userIds: string[];
 }
+
+const logger = createLogger({ component: 'reaction-service' });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -79,7 +82,14 @@ export const reactionService = {
         data: { messageId, userId, emoji },
       });
 
-      cacheService.invalidatePattern(reactionCacheKey(serverId, messageId)).catch(() => {});
+      cacheService
+        .invalidatePattern(reactionCacheKey(serverId, messageId))
+        .catch((err) =>
+          logger.warn(
+            { err, messageId, serverId },
+            'Failed to invalidate reaction cache after add',
+          ),
+        );
 
       eventBus
         .publish(EventChannels.REACTION_ADDED, {
@@ -89,7 +99,12 @@ export const reactionService = {
           emoji,
           timestamp: reaction.createdAt.toISOString(),
         })
-        .catch(() => {});
+        .catch((err) =>
+          logger.warn(
+            { err, messageId, channelId, serverId },
+            'Failed to publish reaction added event',
+          ),
+        );
 
       return reaction;
     } catch (err: unknown) {
@@ -151,7 +166,14 @@ export const reactionService = {
       throw err;
     }
 
-    cacheService.invalidatePattern(reactionCacheKey(serverId, messageId)).catch(() => {});
+    cacheService
+      .invalidatePattern(reactionCacheKey(serverId, messageId))
+      .catch((err) =>
+        logger.warn(
+          { err, messageId, serverId },
+          'Failed to invalidate reaction cache after removal',
+        ),
+      );
 
     eventBus
       .publish(EventChannels.REACTION_REMOVED, {
@@ -161,7 +183,12 @@ export const reactionService = {
         emoji,
         timestamp: new Date().toISOString(),
       })
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, messageId, channelId, serverId },
+          'Failed to publish reaction removed event',
+        ),
+      );
   },
 
   /**

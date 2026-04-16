@@ -69,8 +69,7 @@ jest.mock('../src/services/cache.service', () => ({
 // ─── Mock rate-limit middleware ────────────────────────────────────────────────
 
 jest.mock('../src/middleware/rate-limit.middleware', () => ({
-  tokenBucketRateLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
-  _clearBucketsForTesting: jest.fn(),
+  createPublicRateLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
 // ─── SSE helper ───────────────────────────────────────────────────────────────

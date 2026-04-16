@@ -68,6 +68,8 @@ export interface HarmonyShellProps {
   members: User[];
   /** Base path for navigation links. Use "/c" for public guest routes, "/channels" for authenticated routes. */
   basePath?: string;
+  /** Optional replacement for the center chat pane while keeping the shell visible. */
+  lockedMessagePane?: React.ReactNode;
 }
 
 export function HarmonyShell({
@@ -79,7 +81,9 @@ export function HarmonyShell({
   messages,
   members,
   basePath = '/c',
+  lockedMessagePane,
 }: HarmonyShellProps) {
+  const isChannelLocked = lockedMessagePane !== undefined;
   // Track the user's explicit toggle preference; null means "follow viewport default".
   const [membersOverride, setMembersOverride] = useState<boolean | null>(null);
 
@@ -182,11 +186,25 @@ export function HarmonyShell({
 
   const { notifyServerCreated, notifyServerJoined } = useServerListSync();
 
-  // Show the pin UI to all authenticated members — the backend enforces message:pin
-  // permission (MODERATOR+) and will reject unauthorized calls with 403.
-  // Client-side role filtering is unreliable here because localMembers carries the
-  // global platform role, not the server-scoped membership role.
-  const canPin = isAuthenticated;
+  // Show the pin UI only to users with MODERATOR+ server-scoped role, and never
+  // while the channel is locked (pinning would be meaningless/unauthorized anyway).
+  // localMembers is populated by toFrontendMember() in serverService.ts, which maps
+  // the backend ServerMember.role field (server-scoped) to User.role.
+  // System admins bypass membership checks — they are authorized server-side regardless.
+  const currentMemberRecord = useMemo(
+    () => localMembers.find(m => m.id === authUser?.id),
+    [localMembers, authUser?.id],
+  );
+  const canPin = useMemo(
+    () =>
+      isAuthenticated &&
+      !isChannelLocked &&
+      (authUser?.isSystemAdmin ||
+        currentMemberRecord?.role === 'owner' ||
+        currentMemberRecord?.role === 'admin' ||
+        currentMemberRecord?.role === 'moderator'),
+    [isAuthenticated, isChannelLocked, authUser?.isSystemAdmin, currentMemberRecord?.role],
+  );
 
   const handleServerCreated = useCallback(
     (server: Server, defaultChannel: Channel) => {
@@ -235,7 +253,7 @@ export function HarmonyShell({
     onMessageEdited: handleRealTimeEdited,
     onMessageDeleted: handleRealTimeDeleted,
     onServerUpdated: handleServerUpdated,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !isChannelLocked,
   });
 
   // ── Real-time channel list updates ────────────────────────────────────────
@@ -350,6 +368,7 @@ export function HarmonyShell({
   // #c10/#c23: single global Ctrl+K / Cmd+K handler — SearchModal no longer needs its own
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if (isChannelLocked) return;
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         setIsSearchOpen(v => !v);
@@ -357,7 +376,7 @@ export function HarmonyShell({
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isChannelLocked]);
 
   return (
     <VoiceProvider serverId={currentServer.id} voiceChannelIds={voiceChannelIds}>
@@ -422,42 +441,51 @@ export function HarmonyShell({
             isAdmin={checkIsAdmin(currentServer.ownerId)}
             isMembersOpen={isMembersOpen}
             onMembersToggle={() => setIsMembersOpen(!isMembersOpen)}
-            onSearchOpen={() => setIsSearchOpen(true)}
-            onPinsOpen={() => setIsPinsOpen(true)}
+            onSearchOpen={isChannelLocked ? undefined : () => setIsSearchOpen(true)}
+            onPinsOpen={isChannelLocked ? undefined : () => setIsPinsOpen(true)}
+            disableMessageActions={isChannelLocked}
             isMenuOpen={isMenuOpen}
             onMenuToggle={() => setIsMenuOpen(v => !v)}
           />
 
           <div className='flex flex-1 overflow-hidden'>
             <div className={cn('flex flex-1 flex-col overflow-hidden', BG.primary)}>
-              <MessageList
-                key={currentChannel.id}
-                channel={currentChannel}
-                messages={localMessages}
-                serverId={currentServer.id}
-                canPin={canPin}
-              />
-              <MessageInput
-                channelId={currentChannel.id}
-                channelName={currentChannel.name}
-                serverId={currentServer.id}
-                isReadOnly={currentUser.role === 'guest'}
-                onMessageSent={handleMessageSent}
-              />
-              {!isAuthLoading && !isAuthenticated && (
-                <GuestPromoBanner
-                  serverName={currentServer.name}
-                  memberCount={currentServer.memberCount ?? members.length}
-                />
+              {lockedMessagePane ? (
+                lockedMessagePane
+              ) : (
+                <>
+                  <MessageList
+                    key={currentChannel.id}
+                    channel={currentChannel}
+                    messages={localMessages}
+                    serverId={currentServer.id}
+                    canPin={canPin}
+                  />
+                  <MessageInput
+                    channelId={currentChannel.id}
+                    channelName={currentChannel.name}
+                    serverId={currentServer.id}
+                    isReadOnly={currentUser.role === 'guest'}
+                    onMessageSent={handleMessageSent}
+                  />
+                  {!isAuthLoading && !isAuthenticated && (
+                    <GuestPromoBanner
+                      serverName={currentServer.name}
+                      memberCount={currentServer.memberCount ?? members.length}
+                    />
+                  )}
+                </>
               )}
             </div>
-            <PinnedMessagesPanel
-              channelId={currentChannel.id}
-              serverId={currentServer.id}
-              channelName={currentChannel.name}
-              isOpen={isPinsOpen}
-              onClose={() => setIsPinsOpen(false)}
-            />
+            {!isChannelLocked && (
+              <PinnedMessagesPanel
+                channelId={currentChannel.id}
+                serverId={currentServer.id}
+                channelName={currentChannel.name}
+                isOpen={isPinsOpen}
+                onClose={() => setIsPinsOpen(false)}
+              />
+            )}
             <MembersSidebar
               members={members}
               isOpen={isMembersOpen}
@@ -481,12 +509,14 @@ export function HarmonyShell({
           onJoined={notifyServerJoined}
         />
 
-        <SearchModal
-          messages={localMessages}
-          channelName={currentChannel.name}
-          isOpen={isSearchOpen}
-          onClose={() => setIsSearchOpen(false)}
-        />
+        {!isChannelLocked && (
+          <SearchModal
+            messages={localMessages}
+            channelName={currentChannel.name}
+            isOpen={isSearchOpen}
+            onClose={() => setIsSearchOpen(false)}
+          />
+        )}
 
         {isCreateChannelOpen && (
           <CreateChannelModal

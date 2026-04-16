@@ -28,8 +28,11 @@ import {
   type ReactNode,
 } from 'react';
 import { apiClient, getAccessToken } from '@/lib/api-client';
+import { createFrontendLogger } from '@/lib/frontend-logger';
 import { useToast } from '@/hooks/useToast';
 import { getApiBaseUrl } from '@/lib/runtime-config';
+
+const logger = createFrontendLogger({ component: 'voice-context' });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -106,7 +109,9 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
   const [connectedChannelId, setConnectedChannelId] = useState<string | null>(null);
   const [connectedChannelName, setConnectedChannelName] = useState<string | null>(null);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
-  const [channelParticipants, setChannelParticipants] = useState<Record<string, VoiceParticipant[]>>({});
+  const [channelParticipants, setChannelParticipants] = useState<
+    Record<string, VoiceParticipant[]>
+  >({});
   const [dominantSpeakerId, setDominantSpeakerId] = useState<string | null>(null);
   const [localSpeaking, setLocalSpeaking] = useState(false);
   const [isMuted, setIsMutedState] = useState(false);
@@ -152,10 +157,12 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
           .trpcQuery<VoiceParticipant[]>('voice.getParticipants', { serverId, channelId })
           .then(ps => setChannelParticipants(prev => ({ ...prev, [channelId]: ps })))
           .catch((err: unknown) => {
-            console.error(
-              '[VoiceContext] getParticipants error for', channelId,
-              err instanceof Error ? err.message : err,
-            );
+            logger.warn('Voice participants fetch failed', {
+              feature: 'voice',
+              event: 'participants_fetch_failed',
+              operation: 'voice.getParticipants',
+              error: err,
+            });
           }),
       ),
     );
@@ -163,7 +170,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
 
   const resetVoiceState = useCallback(() => {
     // Detach all remote audio elements before clearing other state.
-    remoteAudioTracksRef.current.forEach((tracks) => {
+    remoteAudioTracksRef.current.forEach(tracks => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tracks.forEach((track: any) => {
         track.detach().forEach((el: HTMLAudioElement) => el.remove());
@@ -222,8 +229,12 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
         await apiClient.trpcMutation('voice.leave', { channelId, serverId });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      console.error('[VoiceContext] leave error:', message);
+      logger.warn('Voice leave mutation failed', {
+        feature: 'voice',
+        event: 'leave_failed',
+        operation: 'voice.leave',
+        error: err,
+      });
     } finally {
       // Remove local user from channelParticipants so the sidebar updates immediately.
       // Must happen before resetVoiceState, which clears localParticipantIdentityRef.
@@ -288,8 +299,9 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
         // Start local audio level detection for the speaking ring.
         // Web Audio API is used instead of relying solely on Twilio's dominantSpeakerChanged,
         // which requires multiple participants and doesn't fire for the local user alone.
-        const mediaTrack = (localAudioTrackRef.current as { mediaStreamTrack?: MediaStreamTrack } | null)
-          ?.mediaStreamTrack;
+        const mediaTrack = (
+          localAudioTrackRef.current as { mediaStreamTrack?: MediaStreamTrack } | null
+        )?.mediaStreamTrack;
         if (mediaTrack) {
           try {
             // Pin to 48 kHz — WebRTC's native rate — so the OS audio driver does not
@@ -327,15 +339,23 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
               }
             }, 100);
           } catch (e) {
-            console.error('[VoiceContext] audio level detection setup error:', e);
+            logger.warn('Voice speaking detection setup failed', {
+              feature: 'voice',
+              event: 'speaking_detection_setup_failed',
+              operation: 'audio-level-detection',
+              error: e,
+            });
           }
         }
-
 
         // Merge remote participants already in the room and attach their audio.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         room.participants.forEach((participant: any) => {
-          const newEntry: VoiceParticipant = { userId: participant.identity, muted: false, deafened: false };
+          const newEntry: VoiceParticipant = {
+            userId: participant.identity,
+            muted: false,
+            deafened: false,
+          };
           setParticipants(prev =>
             prev.some(p => p.userId === participant.identity) ? prev : [...prev, newEntry],
           );
@@ -359,7 +379,11 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         room.on('participantConnected', (participant: any) => {
-          const newEntry: VoiceParticipant = { userId: participant.identity, muted: false, deafened: false };
+          const newEntry: VoiceParticipant = {
+            userId: participant.identity,
+            muted: false,
+            deafened: false,
+          };
           setParticipants(prev =>
             prev.some(p => p.userId === participant.identity) ? prev : [...prev, newEntry],
           );
@@ -442,18 +466,32 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
           resetVoiceState();
           // Fire-and-forget: keep Redis in sync on unexpected disconnect.
           if (cId && sId) {
-            apiClient.trpcMutation('voice.leave', { channelId: cId, serverId: sId }).catch((err: unknown) => {
-              console.error('[VoiceContext] disconnect leave error:', err instanceof Error ? err.message : err);
-            });
+            apiClient
+              .trpcMutation('voice.leave', { channelId: cId, serverId: sId })
+              .catch((err: unknown) => {
+                logger.warn('Voice disconnect cleanup failed', {
+                  feature: 'voice',
+                  event: 'disconnect_leave_failed',
+                  operation: 'voice.leave',
+                  error: err,
+                });
+              });
           }
         });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        console.error('[VoiceContext] joinChannel error:', message, err);
+        logger.error('Voice channel join failed', {
+          feature: 'voice',
+          event: 'join_failed',
+          operation: 'voice.join',
+          error: err,
+        });
         // Distinguish getUserMedia device errors from Twilio server errors for actionable toasts.
         const isDeviceError =
           err instanceof DOMException &&
-          (err.name === 'NotFoundError' || err.name === 'NotReadableError' || err.name === 'OverconstrainedError' || err.name === 'NotAllowedError');
+          (err.name === 'NotFoundError' ||
+            err.name === 'NotReadableError' ||
+            err.name === 'OverconstrainedError' ||
+            err.name === 'NotAllowedError');
         const toastMessage = isDeviceError
           ? err instanceof DOMException && err.name === 'NotAllowedError'
             ? 'Microphone access denied. Click the lock icon in your address bar and allow microphone permission, then try again.'
@@ -488,7 +526,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
     const localIdentity = localParticipantIdentityRef.current;
     const channelId = connectedChannelIdRef.current;
     if (localIdentity) {
-      setParticipants(prev => prev.map(p => p.userId === localIdentity ? { ...p, muted } : p));
+      setParticipants(prev => prev.map(p => (p.userId === localIdentity ? { ...p, muted } : p)));
       if (channelId) {
         setChannelParticipants(prev => ({
           ...prev,
@@ -517,7 +555,9 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
         isMutedRef.current = !muted;
         setIsMutedState(!muted);
         if (localIdentity) {
-          setParticipants(prev => prev.map(p => p.userId === localIdentity ? { ...p, muted: !muted } : p));
+          setParticipants(prev =>
+            prev.map(p => (p.userId === localIdentity ? { ...p, muted: !muted } : p)),
+          );
           if (channelId) {
             setChannelParticipants(prev => ({
               ...prev,
@@ -527,8 +567,12 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
             }));
           }
         }
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        console.error('[VoiceContext] updateState (mute) error:', message);
+        logger.warn('Voice mute update failed', {
+          feature: 'voice',
+          event: 'mute_update_failed',
+          operation: 'voice.updateState',
+          error: err,
+        });
       }
     }
   }, []);
@@ -556,7 +600,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
     const localIdentity = localParticipantIdentityRef.current;
     const channelId = connectedChannelIdRef.current;
     if (localIdentity) {
-      setParticipants(prev => prev.map(p => p.userId === localIdentity ? { ...p, deafened } : p));
+      setParticipants(prev => prev.map(p => (p.userId === localIdentity ? { ...p, deafened } : p)));
       if (channelId) {
         setChannelParticipants(prev => ({
           ...prev,
@@ -582,7 +626,9 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
         isDeafenedRef.current = !deafened;
         setIsDeafenedState(!deafened);
         if (localIdentity) {
-          setParticipants(prev => prev.map(p => p.userId === localIdentity ? { ...p, deafened: !deafened } : p));
+          setParticipants(prev =>
+            prev.map(p => (p.userId === localIdentity ? { ...p, deafened: !deafened } : p)),
+          );
           if (channelId) {
             setChannelParticipants(prev => ({
               ...prev,
@@ -592,8 +638,12 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
             }));
           }
         }
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        console.error('[VoiceContext] updateState (deafen) error:', message);
+        logger.warn('Voice deafen update failed', {
+          feature: 'voice',
+          event: 'deafen_update_failed',
+          operation: 'voice.updateState',
+          error: err,
+        });
       }
     }
   }, []);
@@ -613,7 +663,12 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
       // Cannot await in a cleanup function, so errors are logged only.
       if (channelId && serverId) {
         apiClient.trpcMutation('voice.leave', { channelId, serverId }).catch((err: unknown) => {
-          console.error('[VoiceContext] unmount leave error:', err instanceof Error ? err.message : err);
+          logger.warn('Voice unmount cleanup failed', {
+            feature: 'voice',
+            event: 'unmount_leave_failed',
+            operation: 'voice.leave',
+            error: err,
+          });
         });
       }
     };
@@ -632,10 +687,19 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
       const baseUrl = getApiBaseUrl();
       fetch(`${baseUrl}/trpc/voice.leave`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ channelId, serverId }),
         keepalive: true,
-      }).catch(() => { /* fire-and-forget */ });
+      }).catch(error => {
+        logger.warn('Voice keepalive leave request failed', {
+          feature: 'voice',
+          event: 'keepalive_leave_failed',
+          operation: 'voice.leave',
+          source: 'beforeunload',
+          target: '/trpc/voice.leave',
+          error,
+        });
+      });
     }
 
     window.addEventListener('beforeunload', handleBeforeUnload);

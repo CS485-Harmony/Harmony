@@ -1,4 +1,5 @@
 import { redis } from '../db/redis';
+import { createLogger } from '../lib/logger';
 
 export interface CacheEntry<T = unknown> {
   data: T;
@@ -9,6 +10,8 @@ export interface CacheOptions {
   ttl: number; // seconds
   staleTtl?: number; // extra seconds to serve stale data while revalidating
 }
+
+const logger = createLogger({ component: 'cache-service' });
 
 /**
  * Sanitize an identifier before embedding it in a Redis key.
@@ -22,7 +25,8 @@ export function sanitizeKeySegment(segment: string): string {
 // Key patterns from spec
 export const CacheKeys = {
   channelVisibility: (id: string) => `channel:${sanitizeKeySegment(id)}:visibility`,
-  channelMessages: (id: string, page: number) => `channel:msgs:${sanitizeKeySegment(id)}:page:${page}`,
+  channelMessages: (id: string, page: number) =>
+    `channel:msgs:${sanitizeKeySegment(id)}:page:${page}`,
   serverInfo: (id: string) => `server:${sanitizeKeySegment(id)}:info`,
   metaChannel: (id: string) => `meta:channel:${sanitizeKeySegment(id)}`,
   analysisChannel: (id: string) => `analysis:channel:${sanitizeKeySegment(id)}`,
@@ -41,7 +45,8 @@ export const cacheService = {
     if (!raw) return null;
     try {
       return JSON.parse(raw) as CacheEntry<T>;
-    } catch {
+    } catch (err) {
+      logger.warn({ err, key }, 'Failed to parse cached payload');
       return null;
     }
   },
@@ -103,6 +108,6 @@ export const cacheService = {
   revalidate<T>(key: string, fetcher: () => Promise<T>, options: CacheOptions): void {
     fetcher()
       .then((data) => this.set(key, data, options))
-      .catch((err) => console.error(`Cache revalidation failed for ${key}:`, err));
+      .catch((err) => logger.warn({ err, key }, 'Cache revalidation failed'));
   },
 };

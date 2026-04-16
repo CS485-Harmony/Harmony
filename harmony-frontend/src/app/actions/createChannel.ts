@@ -13,8 +13,11 @@
  */
 
 import { revalidatePath } from 'next/cache';
+import { createFrontendLogger } from '@/lib/frontend-logger';
 import { ChannelType, ChannelVisibility, type Channel } from '@/types';
 import { createChannel, getChannels } from '@/services/channelService';
+
+const logger = createFrontendLogger({ component: 'create-channel-action' });
 
 export interface CreateChannelInput {
   serverId: string;
@@ -45,20 +48,13 @@ export async function createChannelAction(input: CreateChannelInput): Promise<Ch
 
   // Validate slug: non-empty, starts/ends with alphanumeric, only [a-z0-9-].
   const slug = input.slug;
-  if (
-    !slug ||
-    !/^[a-z0-9]/.test(slug) ||
-    !/[a-z0-9]$/.test(slug) ||
-    /[^a-z0-9-]/.test(slug)
-  ) {
+  if (!slug || !/^[a-z0-9]/.test(slug) || !/[a-z0-9]$/.test(slug) || /[^a-z0-9-]/.test(slug)) {
     throw new Error('Invalid channel name');
   }
 
   // Sanitize topic — clamp to 1024 chars, coerce non-strings to undefined.
   const topic =
-    typeof input.topic === 'string'
-      ? input.topic.trim().slice(0, 1024) || undefined
-      : undefined;
+    typeof input.topic === 'string' ? input.topic.trim().slice(0, 1024) || undefined : undefined;
 
   // Compute position server-side so concurrent creates don't collide on the
   // same client-supplied value.
@@ -77,13 +73,23 @@ export async function createChannelAction(input: CreateChannelInput): Promise<Ch
 
   // Revalidate only the server-scoped paths so unrelated server pages are not
   // unnecessarily invalidated on every channel creation.
-  try {
-    revalidatePath(`/channels/${input.serverSlug}`, 'layout');
-    revalidatePath(`/c/${input.serverSlug}`, 'layout');
-    revalidatePath(`/settings/${input.serverSlug}`, 'layout');
-  } catch (err) {
-    // Revalidation failure is non-fatal but log so stale-cache issues are diagnosable.
-    console.error('[createChannelAction] revalidatePath failed:', err instanceof Error ? err.message : err);
+  for (const target of [
+    `/channels/${input.serverSlug}`,
+    `/c/${input.serverSlug}`,
+    `/settings/${input.serverSlug}`,
+  ]) {
+    try {
+      revalidatePath(target, 'layout');
+    } catch (err) {
+      // Revalidation failure is non-fatal but log the exact target so stale-cache
+      // issues can be traced back to the failing path.
+      logger.warn('Channel creation path revalidation failed', {
+        feature: 'next-runtime',
+        event: 'revalidate_failed',
+        route: target,
+        error: err,
+      });
+    }
   }
 
   return newChannel;

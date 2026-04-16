@@ -116,6 +116,7 @@ function IconButton({
   title,
   active,
   ariaPressed,
+  disabled,
   children,
 }: {
   onClick?: () => void;
@@ -123,16 +124,18 @@ function IconButton({
   active?: boolean;
   /** Set for toggle buttons so screen readers announce pressed state */
   ariaPressed?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       title={title}
       aria-label={title}
       aria-pressed={ariaPressed}
       className={cn(
-        'rounded p-1.5 transition-colors',
+        'rounded p-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-50',
         active ? 'text-white bg-white/10' : 'text-gray-400 hover:bg-white/10 hover:text-gray-200',
       )}
     >
@@ -162,6 +165,8 @@ export interface TopBarProps {
   onSearchOpen?: () => void;
   /** Callback fired when the pinned messages icon is clicked */
   onPinsOpen?: () => void;
+  /** Disable actions that would reveal message content while the channel is locked. */
+  disableMessageActions?: boolean;
 }
 
 export function TopBar({
@@ -174,6 +179,7 @@ export function TopBar({
   onMenuToggle,
   onSearchOpen,
   onPinsOpen,
+  disableMessageActions = false,
 }: TopBarProps) {
   const settingsHref = `/settings/${serverSlug}/${channel.slug}`;
 
@@ -207,12 +213,20 @@ export function TopBar({
       {/* ── Right: action icons ── */}
       <div className='flex flex-shrink-0 items-center gap-0.5'>
         {/* Search */}
-        <IconButton onClick={onSearchOpen} title='Search'>
+        <IconButton
+          onClick={disableMessageActions ? undefined : onSearchOpen}
+          title='Search'
+          disabled={disableMessageActions}
+        >
           <SearchIcon />
         </IconButton>
 
         {/* Pinned messages */}
-        <IconButton onClick={onPinsOpen} title='Pinned messages'>
+        <IconButton
+          onClick={disableMessageActions ? undefined : onPinsOpen}
+          title='Pinned messages'
+          disabled={disableMessageActions}
+        >
           <PinIcon />
         </IconButton>
 

@@ -1,9 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
+import { createLogger } from '../lib/logger';
 import { cacheService, CacheOptions } from '../services/cache.service';
 
 export interface CacheMiddlewareOptions extends CacheOptions {
   keyFn: (req: Request) => string;
 }
+
+const logger = createLogger({ component: 'cache-middleware' });
 
 /**
  * Express middleware implementing stale-while-revalidate for public API endpoints.
@@ -43,7 +46,8 @@ export function cacheMiddleware(options: CacheMiddlewareOptions) {
         servedStale = true;
         // Fall through to run handler for background revalidation
       }
-    } catch {
+    } catch (err) {
+      logger.warn({ err, key }, 'Failed to read cache entry; falling back to origin');
       // Redis error — fall through to origin
     }
 
@@ -66,7 +70,9 @@ export function cacheMiddleware(options: CacheMiddlewareOptions) {
     res.json = (body: unknown) => {
       // Only cache successful (2xx) responses — never cache errors
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        cacheService.set(key, body, options).catch(() => {});
+        cacheService
+          .set(key, body, options)
+          .catch((err) => logger.warn({ err, key }, 'Failed to write cache entry'));
       }
 
       if (servedStale) {

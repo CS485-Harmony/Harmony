@@ -12,9 +12,11 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { createLogger } from '../lib/logger';
 import { indexingService } from '../services/indexing.service';
 
 export const seoRouter = Router();
+const logger = createLogger({ component: 'seo-router' });
 
 seoRouter.get('/sitemap-index.xml', async (_req: Request, res: Response) => {
   try {
@@ -23,7 +25,7 @@ seoRouter.get('/sitemap-index.xml', async (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=300');
     res.send(xml);
   } catch (err) {
-    console.error('Sitemap index generation error:', err);
+    logger.error({ err }, 'Sitemap index generation failed');
     if (!res.headersSent) {
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -67,7 +69,7 @@ seoRouter.get('/sitemap/:serverSlug.xml', async (req: Request, res: Response) =>
     res.set('Cache-Control', 'public, max-age=3600');
     res.send(xml);
   } catch (err) {
-    console.error('Sitemap generation error:', err);
+    logger.error({ err, serverSlug: req.params.serverSlug }, 'Sitemap generation failed');
     if (!res.headersSent) {
       res.status(500).json({ error: 'Internal server error' });
     }

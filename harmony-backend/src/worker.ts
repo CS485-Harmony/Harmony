@@ -15,14 +15,14 @@ import 'dotenv/config';
 import http from 'http';
 import { cacheInvalidator } from './services/cacheInvalidator.service';
 import { instanceId } from './lib/instance-identity';
+import { createLogger } from './lib/logger';
 import { parsePortEnv } from './lib/parsePortEnv';
 
 const PORT = parsePortEnv(4100);
 const HOST = '0.0.0.0';
+const logger = createLogger({ component: 'worker-bootstrap', instanceId, pid: process.pid });
 
-console.log(
-  `[worker] starting backend-worker instance=${instanceId} pid=${process.pid}`,
-);
+logger.info('Starting backend-worker');
 
 // Tiny health endpoint — deliberately separate from the Express app used by
 // backend-api. The worker has no user-facing HTTP surface and should never
@@ -49,22 +49,29 @@ const healthServer = http.createServer((req, res) => {
 });
 
 healthServer.on('error', (err: NodeJS.ErrnoException) => {
-  console.error(
-    `[worker] health server error instance=${instanceId} host=${HOST} port=${PORT} code=${err.code ?? 'unknown'} errno=${err.errno ?? 'unknown'} syscall=${err.syscall ?? 'unknown'}`,
-    err,
+  logger.error(
+    {
+      err,
+      host: HOST,
+      port: PORT,
+      code: err.code ?? 'unknown',
+      errno: err.errno ?? 'unknown',
+      syscall: err.syscall ?? 'unknown',
+    },
+    'Worker health server error',
   );
   process.exit(1);
 });
 
 healthServer.listen(PORT, HOST, () => {
-  console.log(`[worker] health endpoint listening on http://${HOST}:${PORT}/health`);
+  logger.info({ host: HOST, port: PORT }, 'Worker health endpoint listening');
 });
 
 cacheInvalidator
   .start()
-  .then(() => console.log('[worker] cacheInvalidator subscriptions ready'))
+  .then(() => logger.info('Cache invalidator subscriptions ready'))
   .catch((err) => {
-    console.error('[worker] cacheInvalidator start failed:', err);
+    logger.error({ err }, 'Cache invalidator startup failed');
     // Fail fast so Railway restarts us into a clean state rather than running
     // a half-initialized worker that silently drops events.
     process.exit(1);
@@ -74,7 +81,7 @@ let shuttingDown = false;
 const shutdown = async (signal: string) => {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`[worker] ${signal} received, shutting down instance=${instanceId}`);
+  logger.info({ signal }, 'Shutdown signal received');
   const timer = setTimeout(() => process.exit(1), 10_000);
   let exitCode = 0;
 
@@ -85,14 +92,14 @@ const shutdown = async (signal: string) => {
       );
     } catch (err) {
       exitCode = 1;
-      console.error('[worker] healthServer close failed during shutdown:', err);
+      logger.error({ err }, 'Worker health server close failed during shutdown');
     }
 
     try {
       await cacheInvalidator.stop();
     } catch (err) {
       exitCode = 1;
-      console.error('[worker] cacheInvalidator stop failed during shutdown:', err);
+      logger.error({ err }, 'Cache invalidator stop failed during shutdown');
     }
   } finally {
     clearTimeout(timer);

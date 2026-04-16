@@ -138,6 +138,12 @@ Per `docs/deployment/deployment-architecture.md`, the frontend apex domain owns 
 contract. The frontend hosts canonical URLs, `metadataBase`, `robots.txt`, and sitemap entrypoints,
 while backend sitemap routes remain internal/transitional XML sources.
 
+## Deployment (Vercel)
+
+The frontend is deployed on Vercel at `https://harmony-dun-omega.vercel.app`. Project settings,
+required environment variables for preview vs production, and the verification checklist live in
+[`docs/deployment/vercel-setup.md`](../docs/deployment/vercel-setup.md).
+
 ## Code Quality
 
 - **Linting**: `npm run lint`

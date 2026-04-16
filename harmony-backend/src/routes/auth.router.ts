@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { createLogger } from '../lib/logger';
 import { authService } from '../services/auth.service';
 
 export const authRouter = Router();
+const logger = createLogger({ component: 'auth-router' });
 
 // ─── Input schemas ────────────────────────────────────────────────────────────
 
@@ -74,7 +76,7 @@ function handleError(res: Response, err: unknown): void {
     res.status(400).json({ error: 'Validation failed', details: err.errors });
     return;
   }
-  console.error('Auth route error:', err);
+  logger.error({ err }, 'Auth route failed');
   res.status(500).json({ error: 'Internal server error' });
 }
 

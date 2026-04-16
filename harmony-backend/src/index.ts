@@ -1,18 +1,18 @@
 import 'dotenv/config';
 import { createApp } from './app';
 import { instanceId } from './lib/instance-identity';
+import { createLogger } from './lib/logger';
 import { parsePortEnv } from './lib/parsePortEnv';
 
 const PORT = parsePortEnv(4000);
 const HOST = '0.0.0.0';
 const DISPLAY_HOST = process.env.NODE_ENV === 'development' ? 'localhost' : HOST;
+const logger = createLogger({ component: 'api-bootstrap', instanceId, pid: process.pid });
 
 const app = createApp();
 
 const server = app.listen(PORT, HOST, () => {
-  console.log(
-    `[api] Harmony backend-api listening at http://${DISPLAY_HOST}:${PORT} instance=${instanceId} pid=${process.pid}`,
-  );
+  logger.info({ host: DISPLAY_HOST, port: PORT }, 'Harmony backend-api listening');
 });
 
 // NOTE: cacheInvalidator (Redis Pub/Sub subscribers) runs on backend-worker,
@@ -25,6 +25,7 @@ let shuttingDown = false;
 const shutdown = async () => {
   if (shuttingDown) return;
   shuttingDown = true;
+  logger.info('Shutdown signal received');
   const timer = setTimeout(() => process.exit(1), 10_000);
   await new Promise<void>((resolve) => server.close(() => resolve()));
   clearTimeout(timer);

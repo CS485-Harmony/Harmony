@@ -18,12 +18,14 @@
  */
 
 import { eventBus, EventChannels } from '../events/eventBus';
+import { createLogger } from '../lib/logger';
 import { cacheService, CacheKeys, sanitizeKeySegment } from './cache.service';
 import { indexingService } from './indexing.service';
 
 type UnsubscribeFn = () => void;
 
 let unsubscribers: UnsubscribeFn[] = [];
+const logger = createLogger({ component: 'cache-invalidator' });
 // Shared startup promise — concurrent callers all await the same initialization
 // so no caller returns before subscriptions are confirmed ready.
 let startPromise: Promise<void> | null = null;
@@ -42,62 +44,124 @@ export const cacheInvalidator = {
       const sub1 = eventBus.subscribe(EventChannels.VISIBILITY_CHANGED, (payload) => {
         cacheService
           .invalidate(CacheKeys.channelVisibility(payload.channelId))
-          .catch((err) => console.error('[CacheInvalidator] VISIBILITY_CHANGED invalidation failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Visibility cache invalidation failed',
+            ),
+          );
 
         cacheService
           .invalidate(`server:${sanitizeKeySegment(payload.serverId)}:public_channels`)
-          .catch((err) => console.error('[CacheInvalidator] VISIBILITY_CHANGED server key failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, serverId: payload.serverId },
+              'Public channel cache invalidation failed',
+            ),
+          );
 
         cacheService
           .invalidate(CacheKeys.metaChannel(payload.channelId))
-          .catch((err) => console.error('[CacheInvalidator] VISIBILITY_CHANGED meta key failed:', err));
+          .catch((err) =>
+            logger.warn({ err, channelId: payload.channelId }, 'Meta cache invalidation failed'),
+          );
 
         // Update sitemap on visibility changes
         indexingService
           .onVisibilityChanged(payload)
-          .catch((err) => console.error('[CacheInvalidator] VISIBILITY_CHANGED sitemap update failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Sitemap update on visibility change failed',
+            ),
+          );
       });
 
       const sub2 = eventBus.subscribe(EventChannels.MESSAGE_CREATED, (payload) => {
         cacheService
           .invalidatePattern(`channel:msgs:${sanitizeKeySegment(payload.channelId)}:*`)
-          .catch((err) => console.error('[CacheInvalidator] MESSAGE_CREATED invalidation failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Message cache invalidation failed after create',
+            ),
+          );
 
         cacheService
           .invalidate(CacheKeys.analysisChannel(payload.channelId))
-          .catch((err) => console.error('[CacheInvalidator] MESSAGE_CREATED analysis key failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Analysis cache invalidation failed after create',
+            ),
+          );
 
         cacheService
           .invalidate(CacheKeys.metaChannel(payload.channelId))
-          .catch((err) => console.error('[CacheInvalidator] MESSAGE_CREATED meta key failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Meta cache invalidation failed after create',
+            ),
+          );
       });
 
       const sub3 = eventBus.subscribe(EventChannels.MESSAGE_EDITED, (payload) => {
         cacheService
           .invalidatePattern(`channel:msgs:${sanitizeKeySegment(payload.channelId)}:*`)
-          .catch((err) => console.error('[CacheInvalidator] MESSAGE_EDITED invalidation failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Message cache invalidation failed after edit',
+            ),
+          );
 
         cacheService
           .invalidate(CacheKeys.analysisChannel(payload.channelId))
-          .catch((err) => console.error('[CacheInvalidator] MESSAGE_EDITED analysis key failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Analysis cache invalidation failed after edit',
+            ),
+          );
 
         cacheService
           .invalidate(CacheKeys.metaChannel(payload.channelId))
-          .catch((err) => console.error('[CacheInvalidator] MESSAGE_EDITED meta key failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Meta cache invalidation failed after edit',
+            ),
+          );
       });
 
       const sub4 = eventBus.subscribe(EventChannels.MESSAGE_DELETED, (payload) => {
         cacheService
           .invalidatePattern(`channel:msgs:${sanitizeKeySegment(payload.channelId)}:*`)
-          .catch((err) => console.error('[CacheInvalidator] MESSAGE_DELETED invalidation failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Message cache invalidation failed after delete',
+            ),
+          );
 
         cacheService
           .invalidate(CacheKeys.analysisChannel(payload.channelId))
-          .catch((err) => console.error('[CacheInvalidator] MESSAGE_DELETED analysis key failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Analysis cache invalidation failed after delete',
+            ),
+          );
 
         cacheService
           .invalidate(CacheKeys.metaChannel(payload.channelId))
-          .catch((err) => console.error('[CacheInvalidator] MESSAGE_DELETED meta key failed:', err));
+          .catch((err) =>
+            logger.warn(
+              { err, channelId: payload.channelId },
+              'Meta cache invalidation failed after delete',
+            ),
+          );
       });
 
       unsubscribers = [sub1.unsubscribe, sub2.unsubscribe, sub3.unsubscribe, sub4.unsubscribe];

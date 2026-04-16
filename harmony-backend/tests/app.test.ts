@@ -44,17 +44,54 @@ describe('404 handler', () => {
 
 describe('CORS', () => {
   it('returns 403 for disallowed origins', async () => {
-    const res = await request(app)
-      .get('/health')
-      .set('Origin', 'https://evil.example.com');
+    const res = await request(app).get('/health').set('Origin', 'https://evil.example.com');
     expect(res.status).toBe(403);
     expect(res.body).toMatchObject({ error: 'CORS: origin not allowed' });
   });
 
   it('allows requests from localhost:3000', async () => {
-    const res = await request(app)
-      .get('/health')
-      .set('Origin', 'http://localhost:3000');
+    const res = await request(app).get('/health').set('Origin', 'http://localhost:3000');
     expect(res.status).toBe(200);
+  });
+
+  describe('FRONTEND_URL comma-separated origins', () => {
+    const originalEnv = process.env.FRONTEND_URL;
+
+    afterEach(() => {
+      if (originalEnv === undefined) {
+        delete process.env.FRONTEND_URL;
+      } else {
+        process.env.FRONTEND_URL = originalEnv;
+      }
+    });
+
+    it('allows the single URL when FRONTEND_URL has no comma', async () => {
+      process.env.FRONTEND_URL = 'https://harmony-dun-omega.vercel.app';
+      const res = await request(createApp())
+        .get('/health')
+        .set('Origin', 'https://harmony-dun-omega.vercel.app');
+      expect(res.status).toBe(200);
+    });
+
+    it('allows all URLs when FRONTEND_URL is comma-separated', async () => {
+      process.env.FRONTEND_URL = 'https://harmony-dun-omega.vercel.app,https://harmony.chat';
+      const freshApp = createApp();
+
+      const r1 = await request(freshApp)
+        .get('/health')
+        .set('Origin', 'https://harmony-dun-omega.vercel.app');
+      expect(r1.status).toBe(200);
+
+      const r2 = await request(freshApp).get('/health').set('Origin', 'https://harmony.chat');
+      expect(r2.status).toBe(200);
+    });
+
+    it('rejects origins not in the comma-separated list', async () => {
+      process.env.FRONTEND_URL = 'https://harmony-dun-omega.vercel.app,https://harmony.chat';
+      const res = await request(createApp())
+        .get('/health')
+        .set('Origin', 'https://evil.example.com');
+      expect(res.status).toBe(403);
+    });
   });
 });

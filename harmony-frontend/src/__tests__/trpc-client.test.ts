@@ -2,6 +2,16 @@ jest.mock('next/headers', () => ({
   cookies: jest.fn(),
 }));
 
+const mockLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+};
+
+jest.mock('../lib/frontend-logger', () => ({
+  createFrontendLogger: jest.fn(() => mockLogger),
+}));
+
 import { cookies } from 'next/headers';
 import { publicGet, TrpcHttpError, trpcMutate, trpcQuery } from '../lib/trpc-client';
 
@@ -59,6 +69,15 @@ describe('trpc-client', () => {
       mockFetch.mockResolvedValue(createTextResponse('', 500));
 
       await expect(publicGet('/servers/failing')).rejects.toThrow('Public API error: 500');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Public API request failed',
+        expect.objectContaining({
+          feature: 'public-api',
+          event: 'http_failure',
+          route: '/servers/failing',
+          statusCode: 500,
+        }),
+      );
     });
   });
 
@@ -126,6 +145,16 @@ describe('trpc-client', () => {
           status: 403,
         }),
       );
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'tRPC query failed',
+        expect.objectContaining({
+          feature: 'trpc',
+          event: 'http_failure',
+          procedure: 'channel.getChannels',
+          route: '/trpc/channel.getChannels',
+          statusCode: 403,
+        }),
+      );
     });
 
     it('throws when the tRPC query response is missing result.data', async () => {
@@ -136,6 +165,14 @@ describe('trpc-client', () => {
 
       await expect(trpcQuery('channel.getChannels')).rejects.toThrow(
         'tRPC query [channel.getChannels]: response missing result.data',
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'tRPC query response missing result.data',
+        expect.objectContaining({
+          feature: 'trpc',
+          event: 'invalid_response',
+          procedure: 'channel.getChannels',
+        }),
       );
     });
   });
@@ -201,6 +238,16 @@ describe('trpc-client', () => {
           status: 400,
         }),
       );
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'tRPC mutation failed',
+        expect.objectContaining({
+          feature: 'trpc',
+          event: 'http_failure',
+          procedure: 'channel.createChannel',
+          route: '/trpc/channel.createChannel',
+          statusCode: 400,
+        }),
+      );
     });
 
     it('throws when the mutation response is missing result.data', async () => {
@@ -211,6 +258,14 @@ describe('trpc-client', () => {
 
       await expect(trpcMutate('channel.createChannel')).rejects.toThrow(
         'tRPC mutation [channel.createChannel]: response missing result.data',
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'tRPC mutation response missing result.data',
+        expect.objectContaining({
+          feature: 'trpc',
+          event: 'invalid_response',
+          procedure: 'channel.createChannel',
+        }),
       );
     });
   });

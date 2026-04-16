@@ -5,6 +5,7 @@ import express from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import { storageProvider } from '../lib/storage';
 import { LocalStorageProvider } from '../lib/storage/local.provider';
+import { createLogger } from '../lib/logger';
 import {
   attachmentService,
   AttachmentValidationError,
@@ -13,6 +14,7 @@ import {
 import { detectMimeType } from '../lib/mime-detect';
 
 export const attachmentRouter = Router();
+const logger = createLogger({ component: 'attachment-router' });
 
 // ─── Multer setup ─────────────────────────────────────────────────────────────
 
@@ -90,7 +92,7 @@ attachmentRouter.post(
         sizeBytes: size,
       });
     } catch (err) {
-      console.error('Attachment upload error:', err);
+      logger.error({ err }, 'Attachment upload failed');
       if (!res.headersSent) {
         res.status(500).json({ error: 'Internal server error' });
       }

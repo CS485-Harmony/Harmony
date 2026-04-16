@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { ChannelType, ChannelVisibility } from '@prisma/client';
 import { prisma } from '../db/prisma';
+import { createLogger } from '../lib/logger';
 import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from './cache.service';
 import { eventBus, EventChannels } from '../events/eventBus';
 
@@ -19,6 +20,8 @@ export interface UpdateChannelInput {
   topic?: string;
   position?: number;
 }
+
+const logger = createLogger({ component: 'channel-service' });
 
 export const channelService = {
   async getChannels(serverId: string) {
@@ -81,10 +84,20 @@ export const channelService = {
       .set(CacheKeys.channelVisibility(channel.id), channel.visibility, {
         ttl: CacheTTL.channelVisibility,
       })
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId: channel.id },
+          'Failed to cache channel visibility after creation',
+        ),
+      );
     cacheService
       .invalidate(`server:${sanitizeKeySegment(serverId)}:public_channels`)
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, serverId },
+          'Failed to invalidate public channel cache after channel creation',
+        ),
+      );
 
     // Notify connected clients (fire-and-forget)
     eventBus
@@ -93,7 +106,12 @@ export const channelService = {
         serverId: channel.serverId,
         timestamp: new Date().toISOString(),
       })
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId: channel.id, serverId },
+          'Failed to publish channel created event',
+        ),
+      );
 
     return channel;
   },
@@ -116,10 +134,17 @@ export const channelService = {
     // Write-through: invalidate message caches and server channel list (best-effort)
     cacheService
       .invalidatePattern(`channel:msgs:${sanitizeKeySegment(channelId)}:*`)
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn({ err, channelId }, 'Failed to invalidate channel message cache after update'),
+      );
     cacheService
       .invalidate(`server:${sanitizeKeySegment(channel.serverId)}:public_channels`)
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, serverId: channel.serverId },
+          'Failed to invalidate public channel cache after channel update',
+        ),
+      );
 
     // Notify connected clients (fire-and-forget)
     eventBus
@@ -128,7 +153,12 @@ export const channelService = {
         serverId: updated.serverId,
         timestamp: new Date().toISOString(),
       })
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId: updated.id, serverId },
+          'Failed to publish channel updated event',
+        ),
+      );
 
     return updated;
   },
@@ -142,13 +172,30 @@ export const channelService = {
     await prisma.channel.delete({ where: { id: channelId } });
 
     // Write-through: invalidate all caches for deleted channel (best-effort)
-    cacheService.invalidate(CacheKeys.channelVisibility(channelId)).catch(() => {});
+    cacheService
+      .invalidate(CacheKeys.channelVisibility(channelId))
+      .catch((err) =>
+        logger.warn(
+          { err, channelId },
+          'Failed to invalidate channel visibility cache after deletion',
+        ),
+      );
     cacheService
       .invalidatePattern(`channel:msgs:${sanitizeKeySegment(channelId)}:*`)
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId },
+          'Failed to invalidate channel message cache after deletion',
+        ),
+      );
     cacheService
       .invalidate(`server:${sanitizeKeySegment(channel.serverId)}:public_channels`)
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, serverId: channel.serverId },
+          'Failed to invalidate public channel cache after channel deletion',
+        ),
+      );
 
     // Notify connected clients (fire-and-forget)
     eventBus
@@ -157,7 +204,12 @@ export const channelService = {
         serverId: channel.serverId,
         timestamp: new Date().toISOString(),
       })
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId: channel.id, serverId },
+          'Failed to publish channel deleted event',
+        ),
+      );
   },
 
   async createDefaultChannel(serverId: string) {

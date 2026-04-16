@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { prisma } from '../db/prisma';
+import { createLogger } from '../lib/logger';
 import { cacheService, CacheTTL, sanitizeKeySegment } from './cache.service';
 import { permissionService } from './permission.service';
 import { eventBus, EventChannels } from '../events/eventBus';
@@ -55,6 +56,8 @@ export interface DeleteMessageInput {
   actorId: string;
   serverId: string;
 }
+
+const logger = createLogger({ component: 'message-service' });
 
 // ─── Author / attachment projections ─────────────────────────────────────────
 
@@ -193,7 +196,12 @@ export const messageService = {
       .invalidatePattern(
         `channel:msgs:${sanitizeKeySegment(serverId)}:${sanitizeKeySegment(channelId)}:*`,
       )
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId, serverId },
+          'Failed to invalidate channel message cache after send',
+        ),
+      );
 
     eventBus
       .publish(EventChannels.MESSAGE_CREATED, {
@@ -202,7 +210,12 @@ export const messageService = {
         authorId,
         timestamp: message.createdAt.toISOString(),
       })
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, messageId: message.id, channelId, serverId },
+          'Failed to publish message created event',
+        ),
+      );
 
     return message;
   },
@@ -229,7 +242,12 @@ export const messageService = {
       .invalidatePattern(
         `channel:msgs:${sanitizeKeySegment(serverId)}:${sanitizeKeySegment(message.channelId)}:*`,
       )
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId: message.channelId, serverId },
+          'Failed to invalidate channel message cache after edit',
+        ),
+      );
 
     eventBus
       .publish(EventChannels.MESSAGE_EDITED, {
@@ -237,7 +255,12 @@ export const messageService = {
         channelId: message.channelId,
         timestamp: updated.editedAt!.toISOString(),
       })
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, messageId, channelId: message.channelId, serverId },
+          'Failed to publish message edited event',
+        ),
+      );
 
     return updated;
   },
@@ -303,10 +326,17 @@ export const messageService = {
       .invalidatePattern(
         `channel:msgs:${sanitizeKeySegment(serverId)}:${sanitizeKeySegment(message.channelId)}:*`,
       )
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId: message.channelId, serverId },
+          'Failed to invalidate channel message cache after delete',
+        ),
+      );
     cacheService
       .invalidatePattern(`thread:msgs:${sanitizeKeySegment(threadCacheId)}:*`)
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn({ err, threadCacheId }, 'Failed to invalidate thread cache after delete'),
+      );
 
     eventBus
       .publish(EventChannels.MESSAGE_DELETED, {
@@ -314,7 +344,12 @@ export const messageService = {
         channelId: message.channelId,
         timestamp: new Date().toISOString(),
       })
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, messageId, channelId: message.channelId, serverId },
+          'Failed to publish message deleted event',
+        ),
+      );
   },
 
   /**
@@ -347,7 +382,12 @@ export const messageService = {
       .invalidatePattern(
         `channel:msgs:${sanitizeKeySegment(serverId)}:${sanitizeKeySegment(updated.channelId)}:*`,
       )
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId: updated.channelId, serverId },
+          'Failed to invalidate channel message cache after pin',
+        ),
+      );
 
     return updated;
   },
@@ -381,7 +421,12 @@ export const messageService = {
       .invalidatePattern(
         `channel:msgs:${sanitizeKeySegment(serverId)}:${sanitizeKeySegment(updated.channelId)}:*`,
       )
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId: updated.channelId, serverId },
+          'Failed to invalidate channel message cache after unpin',
+        ),
+      );
 
     return updated;
   },
@@ -453,10 +498,17 @@ export const messageService = {
       .invalidatePattern(
         `channel:msgs:${sanitizeKeySegment(serverId)}:${sanitizeKeySegment(channelId)}:*`,
       )
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, channelId, serverId },
+          'Failed to invalidate channel message cache after reply',
+        ),
+      );
     cacheService
       .invalidatePattern(`thread:msgs:${sanitizeKeySegment(parentMessageId)}:*`)
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn({ err, parentMessageId }, 'Failed to invalidate thread cache after reply'),
+      );
 
     eventBus
       .publish(EventChannels.MESSAGE_CREATED, {
@@ -466,7 +518,12 @@ export const messageService = {
         parentMessageId,
         timestamp: reply.createdAt.toISOString(),
       })
-      .catch(() => {});
+      .catch((err) =>
+        logger.warn(
+          { err, messageId: reply.id, channelId, serverId },
+          'Failed to publish reply created event',
+        ),
+      );
 
     return reply;
   },
