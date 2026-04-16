@@ -68,6 +68,8 @@ export interface HarmonyShellProps {
   members: User[];
   /** Base path for navigation links. Use "/c" for public guest routes, "/channels" for authenticated routes. */
   basePath?: string;
+  /** Optional replacement for the center chat pane while keeping the shell visible. */
+  lockedMessagePane?: React.ReactNode;
 }
 
 export function HarmonyShell({
@@ -79,6 +81,7 @@ export function HarmonyShell({
   messages,
   members,
   basePath = '/c',
+  lockedMessagePane,
 }: HarmonyShellProps) {
   // Track the user's explicit toggle preference; null means "follow viewport default".
   const [membersOverride, setMembersOverride] = useState<boolean | null>(null);
@@ -430,25 +433,31 @@ export function HarmonyShell({
 
           <div className='flex flex-1 overflow-hidden'>
             <div className={cn('flex flex-1 flex-col overflow-hidden', BG.primary)}>
-              <MessageList
-                key={currentChannel.id}
-                channel={currentChannel}
-                messages={localMessages}
-                serverId={currentServer.id}
-                canPin={canPin}
-              />
-              <MessageInput
-                channelId={currentChannel.id}
-                channelName={currentChannel.name}
-                serverId={currentServer.id}
-                isReadOnly={currentUser.role === 'guest'}
-                onMessageSent={handleMessageSent}
-              />
-              {!isAuthLoading && !isAuthenticated && (
-                <GuestPromoBanner
-                  serverName={currentServer.name}
-                  memberCount={currentServer.memberCount ?? members.length}
-                />
+              {lockedMessagePane ? (
+                lockedMessagePane
+              ) : (
+                <>
+                  <MessageList
+                    key={currentChannel.id}
+                    channel={currentChannel}
+                    messages={localMessages}
+                    serverId={currentServer.id}
+                    canPin={canPin}
+                  />
+                  <MessageInput
+                    channelId={currentChannel.id}
+                    channelName={currentChannel.name}
+                    serverId={currentServer.id}
+                    isReadOnly={currentUser.role === 'guest'}
+                    onMessageSent={handleMessageSent}
+                  />
+                  {!isAuthLoading && !isAuthenticated && (
+                    <GuestPromoBanner
+                      serverName={currentServer.name}
+                      memberCount={currentServer.memberCount ?? members.length}
+                    />
+                  )}
+                </>
               )}
             </div>
             <PinnedMessagesPanel
