@@ -4,7 +4,7 @@ name: Deploy Frontend to Vercel
 # Vercel's built-in git integration must be disabled (Settings → Git → disconnect)
 # after this workflow is active to prevent double-deploys.
 #
-# Required repository secrets (Settings → Secrets → Actions):
+# Required repository secrets (Settings → Secrets and variables → Actions):
 #   VERCEL_TOKEN       - Vercel personal access token
 #   VERCEL_ORG_ID      - Vercel team/org ID (from .vercel/project.json or dashboard)
 #   VERCEL_PROJECT_ID  - Vercel project ID (from .vercel/project.json or dashboard)
@@ -52,7 +52,7 @@ jobs:
         run: npm run lint
 
       - name: Install Vercel CLI
-        run: npm install --global vercel@latest
+        run: npm install --global vercel@41
 
       - name: Pull Vercel environment (preview)
         run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
@@ -79,17 +79,42 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.createComment({
+            const marker = '<!-- vercel-preview-url -->';
+            const body = `${marker}\n**Vercel preview deployed:** ${{ steps.deploy.outputs.preview_url }}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `**Vercel preview deployed:** ${{ steps.deploy.outputs.preview_url }}`
-            })
+            });
+
+            const existing = comments.find(
+              (c) => c.user?.type === 'Bot' && c.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body,
+              });
+            }
 
   deploy-production:
     name: Deploy Production
     runs-on: ubuntu-latest
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    concurrency:
+      group: production-deploy-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -109,7 +134,7 @@ jobs:
         run: npm run lint
 
       - name: Install Vercel CLI
-        run: npm install --global vercel@latest
+        run: npm install --global vercel@41
 
       - name: Pull Vercel environment (production)
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
