@@ -19,8 +19,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Message } from '@/types/message';
 import type { Server } from '@/types/server';
-import { getAccessToken } from '@/lib/api-client';
+import { getAccessToken, refreshAccessToken } from '@/lib/api-client';
 import { getApiBaseUrl } from '@/lib/runtime-config';
+
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_DELAY_MS = 2_000;
 
 export interface UseChannelEventsOptions {
   channelId: string;
@@ -46,6 +49,12 @@ export function useChannelEvents({
   enabled = true,
 }: UseChannelEventsOptions): UseChannelEventsResult {
   const [isConnected, setIsConnected] = useState(false);
+  // Incrementing this triggers the effect to re-run with a fresh token after a
+  // dropped connection (e.g. token expiry). Capped at MAX_RECONNECT_ATTEMPTS.
+  const [reconnectKey, setReconnectKey] = useState(0);
+  // Tracks how many consecutive reconnect attempts have been made so we can
+  // apply a growing delay and bail out after repeated failures.
+  const reconnectCountRef = useRef(0);
 
   // Keep stable references to callbacks so the effect doesn't re-run on every render.
   // Updated via useLayoutEffect (before paint) so the EventSource handlers always call
@@ -119,9 +128,11 @@ export function useChannelEvents({
     // server or a network error before the stream started) — close immediately
     // instead of letting EventSource retry with a stale/invalid token.
     let everOpened = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     es.onopen = () => {
       everOpened = true;
+      reconnectCountRef.current = 0; // reset budget on successful connection
       setIsConnected(true);
     };
     es.onerror = () => {
@@ -129,10 +140,32 @@ export function useChannelEvents({
       if (!everOpened) {
         // Never successfully opened — likely a 401/403. Stop retrying.
         es.close();
+        return;
       }
+
+      // The connection was previously healthy but dropped (e.g. network blip,
+      // server restart, or the access token expired and the backend rejected the
+      // EventSource auto-reconnect attempt). Stop the native retry loop (which
+      // would keep hammering the server with the same stale token) and
+      // proactively refresh the token before reconnecting.
+      es.close();
+      const attempt = reconnectCountRef.current;
+      if (attempt >= MAX_RECONNECT_ATTEMPTS) return; // give up after cap
+
+      reconnectCountRef.current += 1;
+      const delay = RECONNECT_DELAY_MS * reconnectCountRef.current;
+      reconnectTimer = setTimeout(() => {
+        // Attempt a silent token refresh so the next EventSource URL carries a
+        // valid token even when the user has been idle (no API calls to trigger
+        // the axios interceptor refresh).
+        refreshAccessToken().finally(() => {
+          setReconnectKey(k => k + 1);
+        });
+      }, delay);
     };
 
     return () => {
+      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       es.removeEventListener('message:created', handleCreated);
       es.removeEventListener('message:edited', handleEdited);
       es.removeEventListener('message:deleted', handleDeleted);
@@ -140,7 +173,7 @@ export function useChannelEvents({
       es.close();
       setIsConnected(false);
     };
-  }, [channelId, enabled]);
+  }, [channelId, enabled, reconnectKey]);
 
   return { isConnected };
 }

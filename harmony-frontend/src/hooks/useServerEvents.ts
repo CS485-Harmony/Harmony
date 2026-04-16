@@ -25,11 +25,14 @@
 
 'use client';
 
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Channel, ChannelVisibility } from '@/types/channel';
 import type { User, UserStatus } from '@/types/user';
-import { getAccessToken } from '@/lib/api-client';
+import { getAccessToken, refreshAccessToken } from '@/lib/api-client';
 import { getApiBaseUrl } from '@/lib/runtime-config';
+
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_DELAY_MS = 2_000;
 
 export interface UseServerEventsOptions {
   serverId: string;
@@ -63,6 +66,12 @@ export function useServerEvents({
   onChannelVisibilityChanged,
   enabled = true,
 }: UseServerEventsOptions): void {
+  // Incrementing this triggers the effect to re-run with a fresh token after a
+  // dropped connection (e.g. token expiry). Capped at MAX_RECONNECT_ATTEMPTS.
+  const [reconnectKey, setReconnectKey] = useState(0);
+  // Tracks how many consecutive reconnect attempts have been made.
+  const reconnectCountRef = useRef(0);
+
   // Keep stable references to callbacks so the effect doesn't re-run on every render.
   const onCreatedRef = useRef(onChannelCreated);
   const onUpdatedRef = useRef(onChannelUpdated);
@@ -166,18 +175,36 @@ export function useServerEvents({
     es.addEventListener('channel:visibility-changed', handleVisibilityChanged);
 
     let everOpened = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     es.onopen = () => {
       everOpened = true;
+      reconnectCountRef.current = 0; // reset budget on successful connection
     };
     es.onerror = () => {
       if (!everOpened) {
         // Never successfully opened — likely 401/403. Stop retrying.
         es.close();
+        return;
       }
+
+      // Connection dropped after being healthy. Stop native retry (stale token)
+      // and schedule a reconnect with a proactive token refresh.
+      es.close();
+      const attempt = reconnectCountRef.current;
+      if (attempt >= MAX_RECONNECT_ATTEMPTS) return;
+
+      reconnectCountRef.current += 1;
+      const delay = RECONNECT_DELAY_MS * reconnectCountRef.current;
+      reconnectTimer = setTimeout(() => {
+        refreshAccessToken().finally(() => {
+          setReconnectKey(k => k + 1);
+        });
+      }, delay);
     };
 
     return () => {
+      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       es.removeEventListener('channel:created', handleCreated);
       es.removeEventListener('channel:updated', handleUpdated);
       es.removeEventListener('channel:deleted', handleDeleted);
@@ -187,5 +214,5 @@ export function useServerEvents({
       es.removeEventListener('channel:visibility-changed', handleVisibilityChanged);
       es.close();
     };
-  }, [serverId, enabled]);
+  }, [serverId, enabled, reconnectKey]);
 }
