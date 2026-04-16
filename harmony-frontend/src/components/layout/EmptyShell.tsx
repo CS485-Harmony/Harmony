@@ -11,17 +11,29 @@
 
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, createContext, useContext } from 'react';
 import { useRouter } from 'next/navigation';
 import { ServerRail } from '@/components/server-rail/ServerRail';
 import { ChannelSidebar } from '@/components/channel/ChannelSidebar';
 import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
 import { BrowseServersModal } from '@/components/server-rail/BrowseServersModal';
+import { VoiceProvider } from '@/contexts/VoiceContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useServerListSync } from '@/hooks/useServerListSync';
-import { ChannelType } from '@/types';
+import { ChannelType, ChannelVisibility } from '@/types';
 import type { ReactNode } from 'react';
 import type { Server, Channel } from '@/types';
+
+// Module-internal context so NoServersContent (a child) can trigger shell-owned modals
+// without duplicating modal state or mounting duplicate modal trees.
+const EmptyShellModalContext = createContext<{
+  openBrowseServers: () => void;
+  openCreateServer: () => void;
+} | null>(null);
+
+export function useEmptyShellModals() {
+  return useContext(EmptyShellModalContext);
+}
 
 export interface EmptyShellProps {
   servers: Server[];
@@ -48,18 +60,33 @@ export function EmptyShell({
   const [isCreateServerOpen, setIsCreateServerOpen] = useState(false);
   const [isBrowseServersOpen, setIsBrowseServersOpen] = useState(false);
   const [localServers, setLocalServers] = useState<Server[]>(servers);
+  const [prevServers, setPrevServers] = useState<Server[]>(servers);
+  if (prevServers !== servers) {
+    setPrevServers(servers);
+    setLocalServers(servers);
+  }
   const { notifyServerCreated, notifyServerJoined } = useServerListSync();
 
   const defaultChannelByServerId = useMemo(() => {
     const map = new Map<string, string>();
     const textOrAnn = allChannels
-      .filter(c => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT)
+      .filter(
+        c =>
+          (c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT) &&
+          c.visibility !== ChannelVisibility.PRIVATE,
+      )
       .sort((a, b) => a.position - b.position);
     for (const ch of textOrAnn) {
       if (!map.has(ch.serverId)) map.set(ch.serverId, ch.slug);
     }
     return map;
   }, [allChannels]);
+
+  // Voice channel IDs for VoiceProvider — scoped to the current server's channels.
+  const voiceChannelIds = useMemo(
+    () => channels.filter(c => c.type === ChannelType.VOICE).map(c => c.id),
+    [channels],
+  );
 
   // Fallback guest user — mirrors the pattern used in HarmonyShell.
   const currentUser = authUser ?? {
@@ -76,59 +103,76 @@ export function EmptyShell({
     router.push(`${basePath}/${server.slug}/${defaultChannel.slug}`);
   }
 
-  return (
-    <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
-      <ServerRail
-        servers={localServers}
-        allChannels={allChannels}
-        currentServerId={currentServer?.id ?? ''}
-        basePath={basePath}
-        onBrowseServers={isAuthenticated ? () => setIsBrowseServersOpen(true) : undefined}
-        onAddServer={
-          isAuthLoading
-            ? undefined
-            : () => {
-                if (!isAuthenticated) {
-                  router.push('/auth/login');
-                  return;
-                }
-                setIsCreateServerOpen(true);
-              }
-        }
-      />
-
-      {currentServer && (
-        <ChannelSidebar
-          server={currentServer}
-          channels={channels}
-          currentChannelId=''
-          currentUser={currentUser}
-          isOpen={false}
-          onClose={() => {}}
+  const content = (
+    <EmptyShellModalContext.Provider
+      value={{
+        openBrowseServers: () => setIsBrowseServersOpen(true),
+        openCreateServer: () => setIsCreateServerOpen(true),
+      }}
+    >
+      <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
+        <ServerRail
+          servers={localServers}
+          allChannels={allChannels}
+          currentServerId={currentServer?.id ?? ''}
           basePath={basePath}
-          isAuthenticated={isAuthenticated}
-          serverId={currentServer.id}
+          onBrowseServers={isAuthenticated ? () => setIsBrowseServersOpen(true) : undefined}
+          onAddServer={
+            isAuthLoading
+              ? undefined
+              : () => {
+                  if (!isAuthenticated) {
+                    router.push('/auth/login');
+                    return;
+                  }
+                  setIsCreateServerOpen(true);
+                }
+          }
         />
-      )}
 
-      <main className='flex flex-1 items-center justify-center bg-[#36393f]'>
-        {children}
-      </main>
+        {currentServer && (
+          <ChannelSidebar
+            server={currentServer}
+            channels={channels}
+            currentChannelId=''
+            currentUser={currentUser}
+            isOpen={false}
+            onClose={() => {}}
+            basePath={basePath}
+            isAuthenticated={isAuthenticated}
+            serverId={currentServer.id}
+          />
+        )}
 
-      <CreateServerModal
-        isOpen={isCreateServerOpen}
-        onClose={() => setIsCreateServerOpen(false)}
-        onCreated={handleServerCreated}
-      />
+        <main className='flex flex-1 items-center justify-center bg-[#36393f]'>
+          {children}
+        </main>
 
-      <BrowseServersModal
-        isOpen={isBrowseServersOpen}
-        onClose={() => setIsBrowseServersOpen(false)}
-        joinedServerIds={new Set(localServers.map(s => s.id))}
-        defaultChannelByServerId={defaultChannelByServerId}
-        basePath={basePath}
-        onJoined={notifyServerJoined}
-      />
-    </div>
+        <CreateServerModal
+          isOpen={isCreateServerOpen}
+          onClose={() => setIsCreateServerOpen(false)}
+          onCreated={handleServerCreated}
+        />
+
+        <BrowseServersModal
+          isOpen={isBrowseServersOpen}
+          onClose={() => setIsBrowseServersOpen(false)}
+          joinedServerIds={new Set(localServers.map(s => s.id))}
+          defaultChannelByServerId={defaultChannelByServerId}
+          basePath={basePath}
+          onJoined={notifyServerJoined}
+        />
+      </div>
+    </EmptyShellModalContext.Provider>
   );
+
+  // VoiceProvider is only needed when a server is active (enables voice channel joining).
+  if (currentServer) {
+    return (
+      <VoiceProvider serverId={currentServer.id} voiceChannelIds={voiceChannelIds}>
+        {content}
+      </VoiceProvider>
+    );
+  }
+  return content;
 }

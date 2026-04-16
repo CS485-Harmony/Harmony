@@ -1,8 +1,9 @@
 import { redirect } from 'next/navigation';
 import { getServers } from '@/services/serverService';
 import { getChannels } from '@/services/channelService';
-import { publicGet } from '@/lib/trpc-client';
+import { publicGet, TrpcHttpError } from '@/lib/trpc-client';
 import { ChannelType, ChannelVisibility } from '@/types';
+import type { Server, Channel } from '@/types';
 import { EmptyShell } from '@/components/layout/EmptyShell';
 import { NoChannelsContent } from '@/components/channel/NoChannelsContent';
 
@@ -13,12 +14,14 @@ interface PageProps {
 export default async function ServerPage({ params }: PageProps) {
   const { serverSlug } = await params;
 
-  let servers;
+  let servers: Server[];
   try {
     servers = await getServers();
-  } catch {
-    // Backend rejected the auth token (expired or invalid) — send to login.
-    redirect('/auth/login');
+  } catch (err) {
+    // Only redirect to login for auth failures; rethrow other errors (network, 5xx) so
+    // Next.js surfaces them honestly rather than masking them as an auth problem.
+    if (err instanceof TrpcHttpError && err.status === 401) redirect('/auth/login');
+    throw err;
   }
   const server = servers.find(s => s.slug === serverSlug);
 
@@ -33,7 +36,7 @@ export default async function ServerPage({ params }: PageProps) {
     redirect('/channels');
   }
 
-  let channels;
+  let channels: Channel[];
   try {
     channels = await getChannels(server.id);
   } catch {
@@ -84,11 +87,22 @@ export default async function ServerPage({ params }: PageProps) {
   );
   const showNoAccessMessage = channels.length === 0 || hasInaccessibleTextChannels;
 
+  // Only show channels members can actually navigate to in the sidebar. Private
+  // text/announcement channels are excluded so regular members don't see links they
+  // can't open; voice channels are kept so members can still join them.
+  const sidebarChannels = showNoAccessMessage
+    ? channels.filter(
+        c =>
+          c.type === ChannelType.VOICE ||
+          c.visibility !== ChannelVisibility.PRIVATE,
+      )
+    : channels;
+
   return (
     <EmptyShell
       servers={servers}
       currentServer={server}
-      channels={channels}
+      channels={sidebarChannels}
       allChannels={allChannels}
       basePath='/channels'
     >

@@ -3,8 +3,10 @@ import { getServers, getServerMembers } from '@/services/serverService';
 import { getChannels } from '@/services/channelService';
 import { getMessages } from '@/services/messageService';
 import { getCurrentUser } from '@/services/authService';
+import { TrpcHttpError } from '@/lib/trpc-client';
 import { HarmonyShell } from '@/components/layout/HarmonyShell';
 import { VisibilityGuard } from '@/components/channel/VisibilityGuard';
+import type { Server } from '@/types';
 
 interface ChannelPageContentProps {
   serverSlug: string;
@@ -18,12 +20,14 @@ export async function ChannelPageContent({
   channelSlug,
   isGuestView = false,
 }: ChannelPageContentProps) {
-  let servers;
+  let servers: Server[];
   try {
     servers = await getServers();
-  } catch {
-    // Backend rejected the auth token (expired or invalid) — send to login.
-    redirect('/auth/login');
+  } catch (err) {
+    // Only redirect to login for auth failures; rethrow other errors (network, 5xx) so
+    // Next.js surfaces them honestly rather than masking them as an auth problem.
+    if (err instanceof TrpcHttpError && err.status === 401) redirect('/auth/login');
+    throw err;
   }
   const server = servers.find(s => s.slug === serverSlug);
   // Server not found in member list — redirect to channels index which resolves

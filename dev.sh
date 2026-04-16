@@ -39,7 +39,23 @@ echo "Frontend PID: $FRONTEND_PID"
 echo ""
 echo "Press Ctrl+C to stop both servers."
 
-# Forward Ctrl+C to both child processes
-trap 'echo ""; echo "Stopping..."; kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit 0' INT TERM
+cleanup() {
+  local exit_code="${1:-0}"
+  trap - INT TERM EXIT
+  echo ""
+  echo "Stopping..."
+  kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
+  wait "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
+  exit "$exit_code"
+}
 
-wait $BACKEND_PID $FRONTEND_PID
+trap 'cleanup 130' INT
+trap 'cleanup 143' TERM
+trap 'cleanup $?' EXIT
+
+set +e
+wait -n "$BACKEND_PID" "$FRONTEND_PID"
+FIRST_EXIT_CODE=$?
+set -e
+
+cleanup "$FIRST_EXIT_CODE"

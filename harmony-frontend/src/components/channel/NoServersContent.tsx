@@ -6,23 +6,15 @@
  * create a new one.
  *
  * Designed to be mounted as children of EmptyShell, which provides the outer
- * 3-column layout (ServerRail + empty main area).
+ * 3-column layout (ServerRail + empty main area) and owns the modal state via
+ * EmptyShellModalContext. Buttons delegate to those shell-owned modals so there
+ * is only one modal tree on the page.
  */
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
-import { BrowseServersModal } from '@/components/server-rail/BrowseServersModal';
-import type { Server, Channel } from '@/types';
+import { useEmptyShellModals } from '@/components/layout/EmptyShell';
 
 export function NoServersContent() {
-  const router = useRouter();
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isBrowseOpen, setIsBrowseOpen] = useState(false);
-
-  function handleCreated(server: Server, defaultChannel: Channel) {
-    router.push(`/channels/${server.slug}/${defaultChannel.slug}`);
-  }
+  const shellModals = useEmptyShellModals();
 
   return (
     <div className='text-center'>
@@ -34,34 +26,19 @@ export function NoServersContent() {
       <div className='mt-6 flex justify-center gap-3'>
         <button
           type='button'
-          onClick={() => setIsBrowseOpen(true)}
+          onClick={() => shellModals?.openBrowseServers()}
           className='rounded bg-[#3ba55c] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#2d7d46]'
         >
           Browse Servers
         </button>
         <button
           type='button'
-          onClick={() => setIsCreateOpen(true)}
+          onClick={() => shellModals?.openCreateServer()}
           className='rounded bg-[#5865f2] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#4752c4]'
         >
           Create a Server
         </button>
       </div>
-
-      <CreateServerModal
-        isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
-        onCreated={handleCreated}
-      />
-
-      {/* User has no servers yet, so all public servers will show "Join". */}
-      <BrowseServersModal
-        isOpen={isBrowseOpen}
-        onClose={() => setIsBrowseOpen(false)}
-        joinedServerIds={new Set()}
-        defaultChannelByServerId={new Map()}
-        basePath='/channels'
-      />
     </div>
   );
 }
