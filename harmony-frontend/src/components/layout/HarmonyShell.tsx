@@ -83,6 +83,7 @@ export function HarmonyShell({
   basePath = '/c',
   lockedMessagePane,
 }: HarmonyShellProps) {
+  const isChannelLocked = lockedMessagePane !== undefined;
   // Track the user's explicit toggle preference; null means "follow viewport default".
   const [membersOverride, setMembersOverride] = useState<boolean | null>(null);
 
@@ -189,7 +190,7 @@ export function HarmonyShell({
   // permission (MODERATOR+) and will reject unauthorized calls with 403.
   // Client-side role filtering is unreliable here because localMembers carries the
   // global platform role, not the server-scoped membership role.
-  const canPin = isAuthenticated;
+  const canPin = isAuthenticated && !isChannelLocked;
 
   const handleServerCreated = useCallback(
     (server: Server, defaultChannel: Channel) => {
@@ -238,7 +239,7 @@ export function HarmonyShell({
     onMessageEdited: handleRealTimeEdited,
     onMessageDeleted: handleRealTimeDeleted,
     onServerUpdated: handleServerUpdated,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !isChannelLocked,
   });
 
   // ── Real-time channel list updates ────────────────────────────────────────
@@ -353,6 +354,7 @@ export function HarmonyShell({
   // #c10/#c23: single global Ctrl+K / Cmd+K handler — SearchModal no longer needs its own
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if (isChannelLocked) return;
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         setIsSearchOpen(v => !v);
@@ -360,7 +362,7 @@ export function HarmonyShell({
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isChannelLocked]);
 
   return (
     <VoiceProvider serverId={currentServer.id} voiceChannelIds={voiceChannelIds}>
@@ -425,8 +427,9 @@ export function HarmonyShell({
             isAdmin={checkIsAdmin(currentServer.ownerId)}
             isMembersOpen={isMembersOpen}
             onMembersToggle={() => setIsMembersOpen(!isMembersOpen)}
-            onSearchOpen={() => setIsSearchOpen(true)}
-            onPinsOpen={() => setIsPinsOpen(true)}
+            onSearchOpen={isChannelLocked ? undefined : () => setIsSearchOpen(true)}
+            onPinsOpen={isChannelLocked ? undefined : () => setIsPinsOpen(true)}
+            disableMessageActions={isChannelLocked}
             isMenuOpen={isMenuOpen}
             onMenuToggle={() => setIsMenuOpen(v => !v)}
           />
@@ -460,13 +463,15 @@ export function HarmonyShell({
                 </>
               )}
             </div>
-            <PinnedMessagesPanel
-              channelId={currentChannel.id}
-              serverId={currentServer.id}
-              channelName={currentChannel.name}
-              isOpen={isPinsOpen}
-              onClose={() => setIsPinsOpen(false)}
-            />
+            {!isChannelLocked && (
+              <PinnedMessagesPanel
+                channelId={currentChannel.id}
+                serverId={currentServer.id}
+                channelName={currentChannel.name}
+                isOpen={isPinsOpen}
+                onClose={() => setIsPinsOpen(false)}
+              />
+            )}
             <MembersSidebar
               members={members}
               isOpen={isMembersOpen}
@@ -490,12 +495,14 @@ export function HarmonyShell({
           onJoined={notifyServerJoined}
         />
 
-        <SearchModal
-          messages={localMessages}
-          channelName={currentChannel.name}
-          isOpen={isSearchOpen}
-          onClose={() => setIsSearchOpen(false)}
-        />
+        {!isChannelLocked && (
+          <SearchModal
+            messages={localMessages}
+            channelName={currentChannel.name}
+            isOpen={isSearchOpen}
+            onClose={() => setIsSearchOpen(false)}
+          />
+        )}
 
         {isCreateChannelOpen && (
           <CreateChannelModal

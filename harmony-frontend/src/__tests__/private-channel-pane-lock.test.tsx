@@ -5,6 +5,7 @@ import { ChannelType, ChannelVisibility } from '@/types';
 import type { Channel, Message, Server, User } from '@/types';
 
 const mockUseAuth = jest.fn();
+const mockUseChannelEvents = jest.fn();
 
 jest.mock('@/hooks/useAuth', () => ({
   useAuth: () => mockUseAuth(),
@@ -19,7 +20,7 @@ jest.mock('@/contexts/VoiceContext', () => ({
 }));
 
 jest.mock('@/hooks/useChannelEvents', () => ({
-  useChannelEvents: jest.fn(),
+  useChannelEvents: (options: unknown) => mockUseChannelEvents(options),
 }));
 
 jest.mock('@/hooks/useServerEvents', () => ({
@@ -42,7 +43,25 @@ jest.mock('@/components/channel/ChannelSidebar', () => ({
 }));
 
 jest.mock('@/components/channel/TopBar', () => ({
-  TopBar: () => <div>Top bar</div>,
+  TopBar: ({
+    onSearchOpen,
+    onPinsOpen,
+    disableMessageActions,
+  }: {
+    onSearchOpen?: () => void;
+    onPinsOpen?: () => void;
+    disableMessageActions?: boolean;
+  }) => (
+    <div>
+      <div>Top bar</div>
+      <button onClick={onSearchOpen} disabled={disableMessageActions}>
+        Search
+      </button>
+      <button onClick={onPinsOpen} disabled={disableMessageActions}>
+        Pinned messages
+      </button>
+    </div>
+  ),
 }));
 
 jest.mock('@/components/channel/MessageList', () => ({
@@ -78,7 +97,7 @@ jest.mock('@/components/server-rail/CreateServerModal', () => ({
 }));
 
 jest.mock('@/components/channel/SearchModal', () => ({
-  SearchModal: () => null,
+  SearchModal: () => <div>Search modal</div>,
 }));
 
 const server: Server = {
@@ -181,5 +200,10 @@ describe('Issue #338 — private channel denial keeps the shell mounted', () => 
     expect(screen.getByText('Private channel lock panel')).toBeInTheDocument();
     expect(screen.queryByText('Message list')).not.toBeInTheDocument();
     expect(screen.queryByText('Message input')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pinned messages panel')).not.toBeInTheDocument();
+    expect(screen.queryByText('Search modal')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Pinned messages' })).toBeDisabled();
+    expect(mockUseChannelEvents).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
   });
 });
