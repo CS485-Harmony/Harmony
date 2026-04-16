@@ -1,4 +1,4 @@
-import { prisma } from '../db/prisma';
+import { attachmentRepository } from '../repositories/attachment.repository';
 
 // ─── Validation constants ─────────────────────────────────────────────────────
 
@@ -75,14 +75,7 @@ export const attachmentService = {
    * transport-agnostic. The tRPC router maps it to TRPCError NOT_FOUND.
    */
   async listByMessage(messageId: string, serverId: string) {
-    const message = await prisma.message.findUnique({
-      where: { id: messageId },
-      select: {
-        id: true,
-        isDeleted: true,
-        channel: { select: { serverId: true } },
-      },
-    });
+    const message = await attachmentRepository.findMessageForAttachmentList(messageId);
 
     if (!message || message.isDeleted) {
       throw new AttachmentNotFoundError();
@@ -94,16 +87,6 @@ export const attachmentService = {
       throw new AttachmentNotFoundError();
     }
 
-    return prisma.attachment.findMany({
-      where: { messageId },
-      select: {
-        id: true,
-        filename: true,
-        url: true,
-        contentType: true,
-        // sizeBytes (BigInt) is intentionally excluded — tRPC's default
-        // JSON transformer cannot serialize BigInt.
-      },
-    });
+    return attachmentRepository.findByMessageId(messageId);
   },
 };

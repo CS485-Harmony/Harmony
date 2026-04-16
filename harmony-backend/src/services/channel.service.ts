@@ -1,9 +1,10 @@
 import { TRPCError } from '@trpc/server';
 import { ChannelType, ChannelVisibility } from '@prisma/client';
-import { prisma } from '../db/prisma';
 import { createLogger } from '../lib/logger';
 import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from './cache.service';
 import { eventBus, EventChannels } from '../events/eventBus';
+import { channelRepository } from '../repositories/channel.repository';
+import { serverRepository } from '../repositories/server.repository';
 
 export interface CreateChannelInput {
   serverId: string;
@@ -25,21 +26,16 @@ const logger = createLogger({ component: 'channel-service' });
 
 export const channelService = {
   async getChannels(serverId: string) {
-    return prisma.channel.findMany({
-      where: { serverId },
-      orderBy: { position: 'asc' },
-    });
+    return channelRepository.findByServerId(serverId);
   },
 
   async getChannelBySlug(serverSlug: string, channelSlug: string) {
-    const server = await prisma.server.findUnique({ where: { slug: serverSlug } });
+    const server = await serverRepository.findBySlug(serverSlug);
     if (!server) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
     }
 
-    const channel = await prisma.channel.findUnique({
-      where: { serverId_slug: { serverId: server.id, slug: channelSlug } },
-    });
+    const channel = await channelRepository.findByServerAndSlug(server.id, channelSlug);
     if (!channel) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found' });
     }
@@ -59,15 +55,13 @@ export const channelService = {
     }
 
     // Verify server exists
-    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    const server = await serverRepository.findById(serverId);
     if (!server) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
     }
 
     // Check slug uniqueness per server
-    const existing = await prisma.channel.findUnique({
-      where: { serverId_slug: { serverId, slug } },
-    });
+    const existing = await channelRepository.findByServerAndSlug(serverId, slug);
     if (existing) {
       throw new TRPCError({
         code: 'CONFLICT',
@@ -75,9 +69,7 @@ export const channelService = {
       });
     }
 
-    const channel = await prisma.channel.create({
-      data: { serverId, name, slug, type, visibility, topic, position },
-    });
+    const channel = await channelRepository.create({ serverId, name, slug, type, visibility, topic, position });
 
     // Write-through: cache new visibility and invalidate server channel list (best-effort)
     cacheService
@@ -117,18 +109,15 @@ export const channelService = {
   },
 
   async updateChannel(channelId: string, serverId: string, patch: UpdateChannelInput) {
-    const channel = await prisma.channel.findUnique({ where: { id: channelId } });
+    const channel = await channelRepository.findById(channelId);
     if (!channel || channel.serverId !== serverId) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
     }
 
-    const updated = await prisma.channel.update({
-      where: { id: channelId },
-      data: {
-        ...(patch.name !== undefined && { name: patch.name }),
-        ...(patch.topic !== undefined && { topic: patch.topic }),
-        ...(patch.position !== undefined && { position: patch.position }),
-      },
+    const updated = await channelRepository.update(channelId, {
+      ...(patch.name !== undefined && { name: patch.name }),
+      ...(patch.topic !== undefined && { topic: patch.topic }),
+      ...(patch.position !== undefined && { position: patch.position }),
     });
 
     // Write-through: invalidate message caches and server channel list (best-effort)
@@ -164,12 +153,12 @@ export const channelService = {
   },
 
   async deleteChannel(channelId: string, serverId: string) {
-    const channel = await prisma.channel.findUnique({ where: { id: channelId } });
+    const channel = await channelRepository.findById(channelId);
     if (!channel || channel.serverId !== serverId) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
     }
 
-    await prisma.channel.delete({ where: { id: channelId } });
+    await channelRepository.delete(channelId);
 
     // Write-through: invalidate all caches for deleted channel (best-effort)
     cacheService

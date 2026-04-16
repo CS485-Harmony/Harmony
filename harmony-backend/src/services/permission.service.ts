@@ -1,7 +1,8 @@
 import { RoleType } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
-import { prisma } from '../db/prisma';
 import { isSystemAdmin } from '../lib/admin.utils';
+import { serverRepository } from '../repositories/server.repository';
+import { serverMemberRepository } from '../repositories/serverMember.repository';
 
 // ─── Action types ─────────────────────────────────────────────────────────────
 
@@ -82,10 +83,7 @@ export const permissionService = {
    * the user is not a member.
    */
   async getMemberRole(userId: string, serverId: string): Promise<RoleType | null> {
-    const membership = await prisma.serverMember.findUnique({
-      where: { userId_serverId: { userId, serverId } },
-      select: { role: true },
-    });
+    const membership = await serverMemberRepository.findByUserAndServerSelect(userId, serverId);
     return membership?.role ?? null;
   },
 
@@ -99,10 +97,7 @@ export const permissionService = {
     // Dev admin bypass — remove before production
     if (await isSystemAdmin(userId)) return true;
 
-    const server = await prisma.server.findUnique({
-      where: { id: serverId },
-      select: { id: true },
-    });
+    const server = await serverRepository.findByIdSelect(serverId, { id: true });
     if (!server) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
     }

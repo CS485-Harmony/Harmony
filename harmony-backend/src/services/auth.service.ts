@@ -2,10 +2,13 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { Prisma } from '@prisma/client';
-import { prisma } from '../db/prisma';
 import { TRPCError } from '@trpc/server';
 import { serverMemberService } from './serverMember.service';
 import { ADMIN_EMAIL } from '../lib/admin.utils';
+import { userRepository } from '../repositories/user.repository';
+import { serverRepository } from '../repositories/server.repository';
+import { serverMemberRepository } from '../repositories/serverMember.repository';
+import { refreshTokenRepository } from '../repositories/refreshToken.repository';
 
 const BCRYPT_ROUNDS = 12;
 // Dummy hash used to equalise bcrypt timing when the email is not found
@@ -120,12 +123,10 @@ async function storeRefreshToken(userId: string, rawToken: string): Promise<void
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + REFRESH_EXPIRES_IN_DAYS);
 
-  await prisma.refreshToken.create({
-    data: {
-      tokenHash: hashToken(rawToken),
-      userId,
-      expiresAt,
-    },
+  await refreshTokenRepository.create({
+    tokenHash: hashToken(rawToken),
+    userId,
+    expiresAt,
   });
 }
 
@@ -139,25 +140,25 @@ async function ensureAdminUser() {
   const passwordHash = await bcrypt.hash(createDevAdminPasswordVerifier(), BCRYPT_ROUNDS);
   const encodedPasswordHash = encodePasswordVerifierRecord(DEV_ADMIN_PASSWORD_SALT, passwordHash);
 
-  const admin = await prisma.user.upsert({
-    where: { email: ADMIN_EMAIL },
-    update: { passwordHash: encodedPasswordHash },
-    create: {
+  const admin = await userRepository.upsert(
+    { email: ADMIN_EMAIL },
+    { passwordHash: encodedPasswordHash },
+    {
       email: ADMIN_EMAIL,
       username: 'admin',
       displayName: 'System Admin',
       passwordHash: encodedPasswordHash,
     },
-  });
+  );
 
   // Auto-join every server as OWNER so the admin can access everything.
-  const servers = await prisma.server.findMany({ select: { id: true } });
-  for (const server of servers) {
-    await prisma.serverMember.upsert({
-      where: { userId_serverId: { userId: admin.id, serverId: server.id } },
-      update: { role: 'OWNER' },
-      create: { userId: admin.id, serverId: server.id, role: 'OWNER' },
-    });
+  const allServers = await serverRepository.findAll(10000);
+  for (const server of allServers) {
+    await serverMemberRepository.upsert(
+      { userId_serverId: { userId: admin.id, serverId: server.id } },
+      { role: 'OWNER' },
+      { userId: admin.id, serverId: server.id, role: 'OWNER' as const },
+    );
   }
 
   return admin;
@@ -175,10 +176,7 @@ export const authService = {
       return DEV_ADMIN_PASSWORD_SALT;
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-      select: { passwordHash: true },
-    });
+    const user = await userRepository.findByEmailSelect(email);
     const decoded = user ? decodePasswordVerifierRecord(user.passwordHash) : null;
     return decoded?.passwordSalt ?? createDummyPasswordSalt(email);
   },
@@ -189,12 +187,12 @@ export const authService = {
     passwordSalt: string,
     passwordVerifier: string,
   ): Promise<AuthTokens> {
-    const existingEmail = await prisma.user.findUnique({ where: { email } });
+    const existingEmail = await userRepository.findByEmail(email);
     if (existingEmail) {
       throw new TRPCError({ code: 'CONFLICT', message: 'Email already in use' });
     }
 
-    const existingUsername = await prisma.user.findUnique({ where: { username } });
+    const existingUsername = await userRepository.findByUsername(username);
     if (existingUsername) {
       throw new TRPCError({ code: 'CONFLICT', message: 'Username already taken' });
     }
@@ -206,15 +204,13 @@ export const authService = {
       await bcrypt.hash(passwordVerifier, BCRYPT_ROUNDS),
     );
 
-    let user: Awaited<ReturnType<typeof prisma.user.create>>;
+    let user: Awaited<ReturnType<typeof userRepository.create>>;
     try {
-      user = await prisma.user.create({
-        data: {
-          email,
-          username,
-          passwordHash,
-          displayName: username,
-        },
+      user = await userRepository.create({
+        email,
+        username,
+        passwordHash,
+        displayName: username,
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
@@ -224,10 +220,10 @@ export const authService = {
     }
 
     // Auto-join the default public server so new users land in a usable state.
-    const defaultServer = await prisma.server.findFirst({
-      where: { slug: 'harmony-hq', isPublic: true },
-      select: { id: true },
-    });
+    const defaultServer = await serverRepository.findFirst(
+      { slug: 'harmony-hq', isPublic: true },
+      { id: true },
+    );
     if (defaultServer) {
       try {
         await serverMemberService.joinServer(user.id, defaultServer.id);
@@ -259,7 +255,7 @@ export const authService = {
       return { accessToken, refreshToken };
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await userRepository.findByEmail(email);
     if (!user) {
       // Equalise timing so unknown emails are indistinguishable from wrong passwords
       await bcrypt.compare(passwordVerifier, TIMING_DUMMY_HASH);
@@ -291,10 +287,7 @@ export const authService = {
 
   async logout(rawRefreshToken: string): Promise<void> {
     const hash = hashToken(rawRefreshToken);
-    await prisma.refreshToken.updateMany({
-      where: { tokenHash: hash, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await refreshTokenRepository.revokeByHash(hash);
   },
 
   async refreshTokens(rawRefreshToken: string): Promise<AuthTokens> {
@@ -309,10 +302,7 @@ export const authService = {
 
     // Atomic compare-and-revoke: succeeds only if the token exists, is not revoked, and is not expired.
     // Two concurrent requests with the same token will race; exactly one will get count === 1.
-    const revoked = await prisma.refreshToken.updateMany({
-      where: { tokenHash: hash, revokedAt: null, expiresAt: { gt: new Date() } },
-      data: { revokedAt: new Date() },
-    });
+    const revoked = await refreshTokenRepository.rotateByHash(hash);
 
     if (revoked.count === 0) {
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Refresh token revoked or expired' });

@@ -1,8 +1,8 @@
 import { TRPCError } from '@trpc/server';
-import { prisma } from '../db/prisma';
 import { createLogger } from '../lib/logger';
 import { cacheService, sanitizeKeySegment } from './cache.service';
 import { eventBus, EventChannels } from '../events/eventBus';
+import { reactionRepository } from '../repositories/reaction.repository';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,10 +44,7 @@ const logger = createLogger({ component: 'reaction-service' });
  * from probing channel or server IDs across boundaries.
  */
 async function requireMessageInChannel(messageId: string, channelId: string, serverId: string) {
-  const message = await prisma.message.findUnique({
-    where: { id: messageId },
-    include: { channel: { select: { serverId: true, id: true } } },
-  });
+  const message = await reactionRepository.findMessageWithChannel(messageId);
   if (
     !message ||
     message.isDeleted ||
@@ -78,9 +75,7 @@ export const reactionService = {
     const message = await requireMessageInChannel(messageId, channelId, serverId);
 
     try {
-      const reaction = await prisma.messageReaction.create({
-        data: { messageId, userId, emoji },
-      });
+      const reaction = await reactionRepository.create({ message: { connect: { id: messageId } }, user: { connect: { id: userId } }, emoji });
 
       cacheService
         .invalidatePattern(reactionCacheKey(serverId, messageId))
@@ -140,9 +135,7 @@ export const reactionService = {
 
     try {
       // Attempt delete atomically — no separate pre-check needed
-      await prisma.messageReaction.delete({
-        where: { messageId_userId_emoji: { messageId, userId, emoji } },
-      });
+      await reactionRepository.delete(messageId, userId, emoji);
     } catch (err: unknown) {
       // P2025: the caller's reaction did not exist
       if (
@@ -152,9 +145,7 @@ export const reactionService = {
         (err as { code: string }).code === 'P2025'
       ) {
         // Distinguish: does this emoji exist on the message for someone else?
-        const anyReaction = await prisma.messageReaction.findFirst({
-          where: { messageId, emoji },
-        });
+        const anyReaction = await reactionRepository.findFirst({ messageId, emoji });
         if (anyReaction) {
           throw new TRPCError({
             code: 'FORBIDDEN',
@@ -201,11 +192,7 @@ export const reactionService = {
 
     await requireMessageInChannel(messageId, channelId, serverId);
 
-    const reactions = await prisma.messageReaction.findMany({
-      where: { messageId },
-      select: { emoji: true, userId: true },
-      orderBy: { createdAt: 'asc' },
-    });
+    const reactions = await reactionRepository.findByMessageId(messageId);
 
     // Group by emoji
     const grouped = new Map<string, string[]>();

@@ -10,10 +10,10 @@
  * Listens to VISIBILITY_CHANGED events to keep sitemap data in sync.
  */
 
-import { ChannelVisibility } from '@prisma/client';
-import { prisma } from '../db/prisma';
 import { cacheService, sanitizeKeySegment } from './cache.service';
 import type { VisibilityChangedPayload } from '../events/eventTypes';
+import { channelRepository } from '../repositories/channel.repository';
+import { serverRepository } from '../repositories/server.repository';
 
 const SITEMAP_CACHE_TTL = 300; // 5 minutes
 const BASE_URL = process.env.BASE_URL ?? 'https://harmony.chat';
@@ -33,11 +33,7 @@ export const indexingService = {
     return cacheService.getOrRevalidate(
       CacheKeys_Sitemap.index,
       async () => {
-        const servers = await prisma.server.findMany({
-          where: { isPublic: true },
-          orderBy: { memberCount: 'desc' },
-          select: { slug: true },
-        });
+        const servers = await serverRepository.findPublicBySlugSelect();
         return buildSitemapIndexXml(servers.map((server) => server.slug));
       },
       { ttl: SITEMAP_CACHE_TTL },
@@ -49,10 +45,7 @@ export const indexingService = {
    * appears in the next generated sitemap.
    */
   async addToSitemap(channelId: string): Promise<void> {
-    const channel = await prisma.channel.findUnique({
-      where: { id: channelId },
-      select: { serverId: true, server: { select: { slug: true } } },
-    });
+    const channel = await channelRepository.findForSitemap(channelId);
     if (!channel) return;
 
     await cacheService.invalidate(CacheKeys_Sitemap.serverSitemap(channel.server.slug));
@@ -63,16 +56,10 @@ export const indexingService = {
    * the cached sitemap so the channel no longer appears on next generation.
    */
   async removeFromSitemap(channelId: string): Promise<void> {
-    const channel = await prisma.channel.findUnique({
-      where: { id: channelId },
-      select: { serverId: true, server: { select: { slug: true } } },
-    });
+    const channel = await channelRepository.findForSitemap(channelId);
     if (!channel) return;
 
-    await prisma.channel.update({
-      where: { id: channelId },
-      data: { indexedAt: null },
-    });
+    await channelRepository.update(channelId, { indexedAt: null });
 
     await cacheService.invalidate(CacheKeys_Sitemap.serverSitemap(channel.server.slug));
   },
@@ -82,10 +69,7 @@ export const indexingService = {
    * Uses stale-while-revalidate caching via getOrRevalidate.
    */
   async generateSitemap(serverSlug: string): Promise<string | null> {
-    const server = await prisma.server.findUnique({
-      where: { slug: serverSlug },
-      select: { id: true, slug: true },
-    });
+    const server = await serverRepository.findBySlug(serverSlug);
 
     if (!server) return null;
 
@@ -94,17 +78,7 @@ export const indexingService = {
     return cacheService.getOrRevalidate(
       cacheKey,
       async () => {
-        const channels = await prisma.channel.findMany({
-          where: {
-            serverId: server.id,
-            visibility: ChannelVisibility.PUBLIC_INDEXABLE,
-          },
-          orderBy: { position: 'asc' },
-          select: {
-            slug: true,
-            updatedAt: true,
-          },
-        });
+        const channels = await channelRepository.findPublicIndexableByServerId(server.id);
         return buildSitemapXml(server.slug, channels);
       },
       { ttl: SITEMAP_CACHE_TTL },

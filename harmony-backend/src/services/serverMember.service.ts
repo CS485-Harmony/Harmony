@@ -2,6 +2,8 @@ import { Prisma, RoleType, ServerMember } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { prisma } from '../db/prisma';
 import { eventBus, EventChannels } from '../events/eventBus';
+import { serverRepository } from '../repositories/server.repository';
+import { serverMemberRepository } from '../repositories/serverMember.repository';
 
 export interface ServerMemberWithUser {
   userId: string;
@@ -29,13 +31,11 @@ export const serverMemberService = {
    */
   async addOwner(userId: string, serverId: string): Promise<ServerMember> {
     return prisma.$transaction(async (tx) => {
-      const member = await tx.serverMember.create({
-        data: { userId, serverId, role: 'OWNER' },
-      });
-      await tx.server.update({
-        where: { id: serverId },
-        data: { memberCount: { increment: 1 } },
-      });
+      const member = await serverMemberRepository.create(
+        { userId, serverId, role: 'OWNER' },
+        tx,
+      );
+      await serverRepository.update(serverId, { memberCount: { increment: 1 } }, tx);
       return member;
     });
   },
@@ -45,7 +45,7 @@ export const serverMemberService = {
    * Throws CONFLICT if already a member. Rejects private servers.
    */
   async joinServer(userId: string, serverId: string): Promise<ServerMember> {
-    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    const server = await serverRepository.findById(serverId);
     if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
     if (!server.isPublic) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'This server is private' });
@@ -53,13 +53,11 @@ export const serverMemberService = {
 
     try {
       const member = await prisma.$transaction(async (tx) => {
-        const created = await tx.serverMember.create({
-          data: { userId, serverId, role: 'MEMBER' },
-        });
-        await tx.server.update({
-          where: { id: serverId },
-          data: { memberCount: { increment: 1 } },
-        });
+        const created = await serverMemberRepository.create(
+          { userId, serverId, role: 'MEMBER' },
+          tx,
+        );
+        await serverRepository.update(serverId, { memberCount: { increment: 1 } }, tx);
         return created;
       });
 
@@ -83,22 +81,15 @@ export const serverMemberService = {
    * Leave a server. Owners cannot leave — they must transfer ownership or delete.
    */
   async leaveServer(userId: string, serverId: string): Promise<void> {
-    const membership = await prisma.serverMember.findUnique({
-      where: { userId_serverId: { userId, serverId } },
-    });
+    const membership = await serverMemberRepository.findByUserAndServer(userId, serverId);
     if (!membership) throw new TRPCError({ code: 'NOT_FOUND', message: 'Not a member of this server' });
     if (membership.role === 'OWNER') {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Server owner cannot leave. Transfer ownership or delete the server.' });
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.serverMember.delete({
-        where: { userId_serverId: { userId, serverId } },
-      });
-      await tx.server.update({
-        where: { id: serverId },
-        data: { memberCount: { decrement: 1 } },
-      });
+      await serverMemberRepository.delete(userId, serverId, tx);
+      await serverRepository.update(serverId, { memberCount: { decrement: 1 } }, tx);
     });
 
     void eventBus.publish(EventChannels.MEMBER_LEFT, {
@@ -114,18 +105,10 @@ export const serverMemberService = {
    * Sorted by role hierarchy (OWNER first) then join date.
    */
   async getServerMembers(serverId: string): Promise<ServerMemberWithUser[]> {
-    const server = await prisma.server.findUnique({ where: { id: serverId }, select: { id: true } });
+    const server = await serverRepository.findByIdSelect(serverId, { id: true });
     if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
 
-    const members = await prisma.serverMember.findMany({
-      where: { serverId },
-      include: {
-        user: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true },
-        },
-      },
-      orderBy: { joinedAt: 'asc' },
-    });
+    const members = await serverMemberRepository.findByServerId(serverId);
 
     // Sort by role hierarchy (Prisma enum ordering is alphabetical, not semantic)
     return members.sort((a, b) => roleRank(a.role) - roleRank(b.role));
@@ -146,8 +129,8 @@ export const serverMemberService = {
     }
 
     const [actorMembership, targetMembership] = await Promise.all([
-      prisma.serverMember.findUnique({ where: { userId_serverId: { userId: actorId, serverId } } }),
-      prisma.serverMember.findUnique({ where: { userId_serverId: { userId: targetUserId, serverId } } }),
+      serverMemberRepository.findByUserAndServer(actorId, serverId),
+      serverMemberRepository.findByUserAndServer(targetUserId, serverId),
     ]);
 
     if (!actorMembership) throw new TRPCError({ code: 'FORBIDDEN', message: 'You are not a member of this server' });
@@ -164,10 +147,7 @@ export const serverMemberService = {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Cannot assign a role equal to or higher than your own' });
     }
 
-    return prisma.serverMember.update({
-      where: { userId_serverId: { userId: targetUserId, serverId } },
-      data: { role: newRole },
-    });
+    return serverMemberRepository.update(targetUserId, serverId, newRole);
   },
 
   /**
@@ -176,8 +156,8 @@ export const serverMemberService = {
    */
   async removeMember(targetUserId: string, serverId: string, actorId: string): Promise<void> {
     const [actorMembership, targetMembership] = await Promise.all([
-      prisma.serverMember.findUnique({ where: { userId_serverId: { userId: actorId, serverId } } }),
-      prisma.serverMember.findUnique({ where: { userId_serverId: { userId: targetUserId, serverId } } }),
+      serverMemberRepository.findByUserAndServer(actorId, serverId),
+      serverMemberRepository.findByUserAndServer(targetUserId, serverId),
     ]);
 
     if (!actorMembership) throw new TRPCError({ code: 'FORBIDDEN', message: 'You are not a member of this server' });
@@ -190,13 +170,8 @@ export const serverMemberService = {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.serverMember.delete({
-        where: { userId_serverId: { userId: targetUserId, serverId } },
-      });
-      await tx.server.update({
-        where: { id: serverId },
-        data: { memberCount: { decrement: 1 } },
-      });
+      await serverMemberRepository.delete(targetUserId, serverId, tx);
+      await serverRepository.update(serverId, { memberCount: { decrement: 1 } }, tx);
     });
 
     void eventBus.publish(EventChannels.MEMBER_LEFT, {

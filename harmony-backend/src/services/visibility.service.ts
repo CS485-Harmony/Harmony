@@ -17,6 +17,7 @@ import { ChannelType, ChannelVisibility } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { eventBus, EventChannels } from '../events/eventBus';
 import { auditLogService } from './auditLog.service';
+import { channelRepository } from '../repositories/channel.repository';
 
 export interface SetVisibilityInput {
   channelId: string;
@@ -44,10 +45,7 @@ export const visibilityService = {
    * cross-server channel probing.
    */
   async getVisibility(channelId: string, serverId: string): Promise<ChannelVisibility> {
-    const channel = await prisma.channel.findUnique({
-      where: { id: channelId },
-      select: { visibility: true, serverId: true },
-    });
+    const channel = await channelRepository.findVisibilityAndServerId(channelId);
     if (!channel || channel.serverId !== serverId) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
     }
@@ -68,7 +66,7 @@ export const visibilityService = {
     // Atomic DB write: read current state inside the transaction to avoid a
     // race where two concurrent calls record stale oldVisibility.
     const result = await prisma.$transaction(async (tx) => {
-      const current = await tx.channel.findUnique({ where: { id: channelId } });
+      const current = await channelRepository.findById(channelId, tx);
       if (!current || current.serverId !== serverId) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
       }
@@ -86,9 +84,9 @@ export const visibilityService = {
         });
       }
 
-      const updated = await tx.channel.update({
-        where: { id: channelId },
-        data: {
+      const updated = await channelRepository.update(
+        channelId,
+        {
           visibility,
           // §6.3: set indexedAt only when transitioning TO PUBLIC_INDEXABLE (not on no-op updates)
           ...(visibility === ChannelVisibility.PUBLIC_INDEXABLE &&
@@ -97,7 +95,8 @@ export const visibilityService = {
           ...(visibility === ChannelVisibility.PRIVATE &&
             current.visibility !== ChannelVisibility.PRIVATE && { indexedAt: null }),
         },
-      });
+        tx,
+      );
 
       const audit = await auditLogService.logVisibilityChange(
         {

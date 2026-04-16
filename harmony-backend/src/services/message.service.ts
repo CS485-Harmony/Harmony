@@ -4,6 +4,8 @@ import { createLogger } from '../lib/logger';
 import { cacheService, CacheTTL, sanitizeKeySegment } from './cache.service';
 import { permissionService } from './permission.service';
 import { eventBus, EventChannels } from '../events/eventBus';
+import { channelRepository } from '../repositories/channel.repository';
+import { messageRepository } from '../repositories/message.repository';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,31 +61,6 @@ export interface DeleteMessageInput {
 
 const logger = createLogger({ component: 'message-service' });
 
-// ─── Author / attachment projections ─────────────────────────────────────────
-
-const AUTHOR_SELECT = {
-  id: true,
-  username: true,
-  displayName: true,
-  avatarUrl: true,
-} as const;
-
-// sizeBytes excluded from select — Prisma returns it as BigInt which JSON
-// cannot serialize with the default tRPC transformer. Clients that need the
-// raw byte count should read it from the HTTP Content-Length header or a
-// dedicated metadata endpoint once superjson is configured end-to-end.
-const ATTACHMENT_SELECT = {
-  id: true,
-  filename: true,
-  url: true,
-  contentType: true,
-} as const;
-
-const MESSAGE_INCLUDE = {
-  author: { select: AUTHOR_SELECT },
-  attachments: { select: ATTACHMENT_SELECT },
-} as const;
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -109,7 +86,7 @@ function msgCacheKey(
  * prevent callers from probing channel IDs across servers.
  */
 async function requireChannelInServer(channelId: string, serverId: string) {
-  const channel = await prisma.channel.findUnique({ where: { id: channelId } });
+  const channel = await channelRepository.findById(channelId);
   if (!channel || channel.serverId !== serverId) {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
   }
@@ -120,10 +97,7 @@ async function requireChannelInServer(channelId: string, serverId: string) {
  * Resolve a message (non-deleted) and assert its channel belongs to `serverId`.
  */
 async function requireMessageInServer(messageId: string, serverId: string) {
-  const message = await prisma.message.findUnique({
-    where: { id: messageId },
-    include: { channel: { select: { serverId: true } } },
-  });
+  const message = await messageRepository.findByIdWithChannel(messageId);
   if (!message || message.isDeleted || message.channel.serverId !== serverId) {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Message not found in this server' });
   }
@@ -149,14 +123,12 @@ export const messageService = {
     return cacheService.getOrRevalidate(
       cacheKey,
       async () => {
-        const messages = await prisma.message.findMany({
-          where: { channelId, isDeleted: false },
-          take: clampedLimit + 1, // fetch one extra to determine hasMore
-          cursor: cursor ? { id: cursor } : undefined,
-          skip: cursor ? 1 : 0,
-          orderBy: { createdAt: 'asc' },
-          include: MESSAGE_INCLUDE,
-        });
+        const messages = await messageRepository.findManyPaginated(
+          { channelId, isDeleted: false },
+          clampedLimit + 1,
+          cursor,
+          { createdAt: 'asc' },
+        );
 
         const hasMore = messages.length > clampedLimit;
         const page = hasMore ? messages.slice(0, clampedLimit) : messages;
@@ -176,20 +148,17 @@ export const messageService = {
 
     await requireChannelInServer(channelId, serverId);
 
-    const message = await prisma.message.create({
-      data: {
-        channelId,
-        authorId,
-        content,
-        ...(attachments &&
-          attachments.length > 0 && {
-            attachments: {
-              // Cast number → BigInt for Prisma; sizeBytes is excluded from responses
-              create: attachments.map((a) => ({ ...a, sizeBytes: BigInt(a.sizeBytes) })),
-            },
-          }),
-      },
-      include: MESSAGE_INCLUDE,
+    const message = await messageRepository.create({
+      channel: { connect: { id: channelId } },
+      author: { connect: { id: authorId } },
+      content,
+      ...(attachments &&
+        attachments.length > 0 && {
+          attachments: {
+            // Cast number → BigInt for Prisma; sizeBytes is excluded from responses
+            create: attachments.map((a) => ({ ...a, sizeBytes: BigInt(a.sizeBytes) })),
+          },
+        }),
     });
 
     cacheService
@@ -232,11 +201,7 @@ export const messageService = {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only edit your own messages' });
     }
 
-    const updated = await prisma.message.update({
-      where: { id: messageId },
-      data: { content, editedAt: new Date() },
-      include: MESSAGE_INCLUDE,
-    });
+    const updated = await messageRepository.update(messageId, { content, editedAt: new Date() });
 
     cacheService
       .invalidatePattern(
@@ -291,31 +256,22 @@ export const messageService = {
 
     await prisma.$transaction(async (tx) => {
       // Soft-delete the message itself
-      await tx.message.update({
-        where: { id: messageId },
-        data: { isDeleted: true },
-      });
+      await messageRepository.updateRaw(messageId, { isDeleted: true }, tx);
 
       // If this message is a reply, decrement the parent's replyCount floored at 0.
       // Prisma's { decrement: 1 } maps to raw subtraction with no floor; use
       // GREATEST(..., 0) to guard against negative counts from races or anomalies.
       if (message.parentMessageId) {
-        await tx.$executeRaw`
-          UPDATE "messages"
-          SET reply_count = GREATEST(reply_count - 1, 0)
-          WHERE id = ${message.parentMessageId}::uuid
-        `;
+        await messageRepository.decrementReplyCountFloored(message.parentMessageId, tx);
       }
 
       // Cascade soft-delete any non-deleted replies and reset the denormalised counter
-      await tx.message.updateMany({
-        where: { parentMessageId: messageId, isDeleted: false },
-        data: { isDeleted: true },
-      });
-      await tx.message.update({
-        where: { id: messageId },
-        data: { replyCount: 0 },
-      });
+      await messageRepository.updateMany(
+        { parentMessageId: messageId, isDeleted: false },
+        { isDeleted: true },
+        tx,
+      );
+      await messageRepository.updateRaw(messageId, { replyCount: 0 }, tx);
     });
 
     // If this message is a reply, its thread cache lives under the parent's id.
@@ -359,10 +315,7 @@ export const messageService = {
    */
   async pinMessage(messageId: string, serverId: string) {
     const updated = await prisma.$transaction(async (tx) => {
-      const msg = await tx.message.findUnique({
-        where: { id: messageId },
-        include: { channel: { select: { serverId: true } } },
-      });
+      const msg = await messageRepository.findByIdWithChannel(messageId, tx);
 
       if (!msg || msg.isDeleted || msg.channel.serverId !== serverId) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Message not found in this server' });
@@ -371,11 +324,7 @@ export const messageService = {
         throw new TRPCError({ code: 'CONFLICT', message: 'Message is already pinned' });
       }
 
-      return tx.message.update({
-        where: { id: messageId },
-        data: { pinned: true, pinnedAt: new Date() },
-        include: MESSAGE_INCLUDE,
-      });
+      return messageRepository.update(messageId, { pinned: true, pinnedAt: new Date() }, tx);
     });
 
     cacheService
@@ -398,10 +347,7 @@ export const messageService = {
    */
   async unpinMessage(messageId: string, serverId: string) {
     const updated = await prisma.$transaction(async (tx) => {
-      const msg = await tx.message.findUnique({
-        where: { id: messageId },
-        include: { channel: { select: { serverId: true } } },
-      });
+      const msg = await messageRepository.findByIdWithChannel(messageId, tx);
 
       if (!msg || msg.isDeleted || msg.channel.serverId !== serverId) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Message not found in this server' });
@@ -410,11 +356,7 @@ export const messageService = {
         throw new TRPCError({ code: 'CONFLICT', message: 'Message is not pinned' });
       }
 
-      return tx.message.update({
-        where: { id: messageId },
-        data: { pinned: false, pinnedAt: null },
-        include: MESSAGE_INCLUDE,
-      });
+      return messageRepository.update(messageId, { pinned: false, pinnedAt: null }, tx);
     });
 
     cacheService
@@ -436,12 +378,7 @@ export const messageService = {
    */
   async getPinnedMessages(channelId: string, serverId: string) {
     await requireChannelInServer(channelId, serverId);
-
-    return prisma.message.findMany({
-      where: { channelId, pinned: true, isDeleted: false },
-      orderBy: { pinnedAt: 'desc' },
-      include: MESSAGE_INCLUDE,
-    });
+    return messageRepository.findPinnedByChannel(channelId);
   },
 
   /**
@@ -455,10 +392,7 @@ export const messageService = {
     await requireChannelInServer(channelId, serverId);
 
     const reply = await prisma.$transaction(async (tx) => {
-      const parent = await tx.message.findUnique({
-        where: { id: parentMessageId },
-        include: { channel: { select: { id: true, serverId: true } } },
-      });
+      const parent = await messageRepository.findByIdWithChannelFull(parentMessageId, tx);
 
       if (
         !parent ||
@@ -480,15 +414,21 @@ export const messageService = {
         });
       }
 
-      const created = await tx.message.create({
-        data: { channelId, authorId, content, parentMessageId },
-        include: MESSAGE_INCLUDE,
-      });
+      const created = await messageRepository.create(
+        {
+          channel: { connect: { id: channelId } },
+          author: { connect: { id: authorId } },
+          content,
+          parent: { connect: { id: parentMessageId } },
+        },
+        tx,
+      );
 
-      await tx.message.update({
-        where: { id: parentMessageId },
-        data: { replyCount: { increment: 1 } },
-      });
+      await messageRepository.updateRaw(
+        parentMessageId,
+        { replyCount: { increment: 1 } },
+        tx,
+      );
 
       return created;
     });
@@ -549,10 +489,7 @@ export const messageService = {
         // soft-deleted parent's cache entries are always busted before this guard could
         // serve a stale thread. The check is therefore redundant in the happy path and
         // only fires for genuinely invalid requests.
-        const parent = await prisma.message.findUnique({
-          where: { id: parentMessageId },
-          include: { channel: { select: { id: true, serverId: true } } },
-        });
+        const parent = await messageRepository.findByIdWithChannelFull(parentMessageId);
 
         if (
           !parent ||
@@ -574,14 +511,12 @@ export const messageService = {
           });
         }
 
-        const replies = await prisma.message.findMany({
-          where: { parentMessageId, isDeleted: false },
-          take: clampedLimit + 1,
-          cursor: cursor ? { id: cursor } : undefined,
-          skip: cursor ? 1 : 0,
-          orderBy: { createdAt: 'asc' },
-          include: MESSAGE_INCLUDE,
-        });
+        const replies = await messageRepository.findManyPaginated(
+          { parentMessageId, isDeleted: false },
+          clampedLimit + 1,
+          cursor,
+          { createdAt: 'asc' },
+        );
 
         const hasMore = replies.length > clampedLimit;
         const page = hasMore ? replies.slice(0, clampedLimit) : replies;

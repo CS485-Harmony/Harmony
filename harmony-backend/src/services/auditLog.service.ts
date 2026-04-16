@@ -14,7 +14,7 @@
  */
 
 import { Prisma, VisibilityAuditLog } from '@prisma/client';
-import { prisma } from '../db/prisma';
+import { auditLogRepository } from '../repositories/auditLog.repository';
 
 /** Max characters stored for User-Agent — matches the @db.VarChar(500) column. */
 const USER_AGENT_MAX_LEN = 500;
@@ -61,18 +61,18 @@ export const auditLogService = {
     input: LogVisibilityChangeInput,
     tx?: Prisma.TransactionClient,
   ): Promise<VisibilityAuditLog> {
-    const client = tx ?? prisma;
-    return client.visibilityAuditLog.create({
-      data: {
-        channelId: input.channelId,
-        actorId: input.actorId,
+    return auditLogRepository.create(
+      {
+        channel: { connect: { id: input.channelId } },
+        actor: { connect: { id: input.actorId } },
         action: 'VISIBILITY_CHANGED',
         oldValue: input.oldValue,
         newValue: input.newValue,
         ipAddress: input.ipAddress,
         userAgent: (input.userAgent ?? '').slice(0, USER_AGENT_MAX_LEN),
       },
-    });
+      tx,
+    );
   },
 
   /**
@@ -95,13 +95,8 @@ export const auditLogService = {
     };
 
     const [entries, total] = await Promise.all([
-      prisma.visibilityAuditLog.findMany({
-        where,
-        orderBy: { timestamp: 'desc' },
-        skip: safeOffset,
-        take: clampedLimit,
-      }),
-      prisma.visibilityAuditLog.count({ where }),
+      auditLogRepository.findMany(where, safeOffset, clampedLimit),
+      auditLogRepository.count(where),
     ]);
 
     return { entries, total };
