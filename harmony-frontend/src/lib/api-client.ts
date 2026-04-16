@@ -240,3 +240,55 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient();
+
+/**
+ * Proactively refreshes the access token using the stored refresh token.
+ * Safe to call from SSE hooks before reconnecting after a dropped connection.
+ *
+ * Reuses the module-level _isRefreshing/_refreshQueue so concurrent calls
+ * (e.g. an interceptor refresh already in flight) are coalesced rather than
+ * issuing a second /refresh request.
+ *
+ * On failure the function returns silently — it does NOT redirect or clear
+ * tokens. The caller (SSE reconnect logic) should proceed with whatever token
+ * is currently in memory; if that token is also expired the EventSource will
+ * fail cleanly on its next connection attempt.
+ */
+export async function refreshAccessToken(): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return;
+
+  // Piggyback on an in-flight interceptor refresh rather than racing it.
+  if (_isRefreshing) {
+    await new Promise<void>(resolve => {
+      _refreshQueue.push(() => resolve());
+    });
+    return;
+  }
+
+  _isRefreshing = true;
+  try {
+    const res = await axios.post<{ accessToken: string; refreshToken: string }>(
+      `${API_CONFIG.BASE_URL}/api/auth/refresh`,
+      { refreshToken },
+    );
+    const { accessToken: newAt, refreshToken: newRt } = res.data;
+    setTokens(newAt, newRt);
+    try {
+      await setSessionCookie(newAt);
+    } catch {
+      // Best-effort — same rationale as the interceptor refresh path
+    }
+    notifyRefreshQueue(newAt);
+  } catch {
+    // Silent failure: do not redirect or clear tokens.
+    // The SSE reconnect path will attempt the connection with the stale token
+    // and fail cleanly (everOpened=false → es.close()) rather than logging the
+    // user out just because they were idle in another tab.
+    notifyRefreshQueue(null);
+  } finally {
+    _isRefreshing = false;
+  }
+}
