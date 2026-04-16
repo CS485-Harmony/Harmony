@@ -9,6 +9,8 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { createFrontendLogger } from '@/lib/frontend-logger';
 
 interface ErrorPageProps {
   error: Error & { digest?: string };
@@ -16,10 +18,19 @@ interface ErrorPageProps {
 }
 
 export default function ErrorPage({ error, reset }: ErrorPageProps) {
+  const pathname = usePathname();
+
   useEffect(() => {
-    // Log to an error reporting service in the future
-    console.error('[ErrorPage]', error);
-  }, [error]);
+    createFrontendLogger({ component: 'app-error-boundary' }).error(
+      'Route segment error boundary rendered',
+      {
+        feature: 'react-error-boundary',
+        event: 'render_error_boundary',
+        route: pathname ?? '/',
+        error,
+      },
+    );
+  }, [error, pathname]);
 
   return (
     <div className='flex min-h-screen flex-col items-center justify-center bg-discord-bg-primary px-4 text-center'>

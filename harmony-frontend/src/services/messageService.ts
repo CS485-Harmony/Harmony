@@ -4,8 +4,11 @@
  * References: dev-spec-guest-public-channel-view.md
  */
 
+import { createFrontendLogger } from '@/lib/frontend-logger';
 import type { Message } from '@/types';
 import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
+
+const logger = createFrontendLogger({ component: 'message-service' });
 
 // ─── Type adapters ────────────────────────────────────────────────────────────
 
@@ -13,8 +16,10 @@ import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
 function toFrontendMessage(raw: Record<string, unknown>, fallbackChannelId = ''): Message {
   // Warn on missing required fields to catch backend shape mismatches early.
   if (typeof raw.id !== 'string') console.warn('[toFrontendMessage] missing or non-string "id"');
-  if (!raw.channelId && !raw.channel_id && !fallbackChannelId) console.warn('[toFrontendMessage] missing "channelId"/"channel_id"');
-  if (!raw.createdAt && !raw.created_at && !raw.timestamp) console.warn('[toFrontendMessage] missing timestamp field');
+  if (!raw.channelId && !raw.channel_id && !fallbackChannelId)
+    console.warn('[toFrontendMessage] missing "channelId"/"channel_id"');
+  if (!raw.createdAt && !raw.created_at && !raw.timestamp)
+    console.warn('[toFrontendMessage] missing timestamp field');
   const author = raw.author as Record<string, unknown> | undefined;
   return {
     id: raw.id as string,
@@ -57,19 +62,29 @@ export async function getMessages(
 
     // null means HTTP 404 — channel not found on public API. Throw so the catch
     // block can attempt the tRPC fallback (or re-throw if no serverId).
-    if (data === null) throw new Error(`getMessages: public channel not found for channelId=${channelId}`);
+    if (data === null)
+      throw new Error(`getMessages: public channel not found for channelId=${channelId}`);
 
     return {
       // Public endpoint returns newest-first; populate channelId from param since
       // the backend select does not include it.
-      messages: data.messages.map((m) => toFrontendMessage(m, channelId)),
+      messages: data.messages.map(m => toFrontendMessage(m, channelId)),
       hasMore: data.messages.length >= (data.pageSize ?? 50),
     };
   } catch (err) {
     // Public endpoint unavailable or channel is not PUBLIC_INDEXABLE — try tRPC.
-    console.warn('[getMessages] public endpoint failed, falling back to tRPC:', err instanceof Error ? err.message : err);
+    logger.warn('Public message fetch failed; falling back to tRPC', {
+      feature: 'message-service',
+      event: 'public_fetch_failed',
+      procedure: 'publicGet',
+      route: '/channels/[channelId]/messages',
+      error: err,
+    });
     // If serverId is not provided we cannot authenticate, so re-throw.
-    if (!options?.serverId) throw new Error('getMessages: channel is not publicly accessible and no serverId was provided');
+    if (!options?.serverId)
+      throw new Error(
+        'getMessages: channel is not publicly accessible and no serverId was provided',
+      );
 
     // tRPC errors propagate to the caller.
     const data = await trpcQuery<{
@@ -80,12 +95,13 @@ export async function getMessages(
       channelId,
       limit: 50,
     });
-    if (data === null) throw new Error(`getMessages: tRPC returned no data for channelId=${channelId}`);
+    if (data === null)
+      throw new Error(`getMessages: tRPC returned no data for channelId=${channelId}`);
     // tRPC backend returns oldest-first (orderBy createdAt: 'asc'); reverse to
     // match the public endpoint's newest-first ordering so callers get a
     // consistent contract regardless of which path was taken.
     return {
-      messages: [...data.messages].reverse().map((m) => toFrontendMessage(m, channelId)),
+      messages: [...data.messages].reverse().map(m => toFrontendMessage(m, channelId)),
       hasMore: !!data.nextCursor,
     };
   }
@@ -113,10 +129,7 @@ export async function sendMessage(
 /**
  * Deletes a message by ID via tRPC. Returns true if deleted.
  */
-export async function deleteMessage(
-  id: string,
-  serverId?: string,
-): Promise<boolean> {
+export async function deleteMessage(id: string, serverId?: string): Promise<boolean> {
   if (!serverId) {
     throw new Error('serverId is required for deleteMessage');
   }

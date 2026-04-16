@@ -98,7 +98,10 @@ describe('channelService', () => {
 
   describe('getChannels', () => {
     it('returns mapped channels from tRPC query', async () => {
-      const raw = [makeRawChannel(), makeRawChannel({ id: 'ch-2', name: 'random', slug: 'random' })];
+      const raw = [
+        makeRawChannel(),
+        makeRawChannel({ id: 'ch-2', name: 'random', slug: 'random' }),
+      ];
       mockedTrpcQuery.mockResolvedValue(raw);
 
       const result = await getChannels('srv-1');
@@ -213,9 +216,16 @@ describe('channelService', () => {
       const result = await getChannel('my-server', 'general');
 
       expect(result).toBeNull();
-      expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining('my-server/general'),
-        expect.any(Error),
+      expect(console.warn).toHaveBeenCalledWith(
+        '[frontend]',
+        expect.objectContaining({
+          message: 'Channel lookup failed',
+          fields: expect.objectContaining({
+            feature: 'channel-service',
+            event: 'get_channel_failed',
+            procedure: 'channel.getChannel',
+          }),
+        }),
       );
     });
 
@@ -227,19 +237,17 @@ describe('channelService', () => {
     });
 
     it('fills default position=0 and createdAt=epoch for public hit missing those fields', async () => {
-      mockedPublicGet
-        .mockResolvedValueOnce({ id: 'srv-1' } as never)
-        .mockResolvedValueOnce({
-          channels: [
-            {
-              id: 'ch-pub',
-              name: 'public-chan',
-              slug: 'public-chan',
-              type: 'TEXT',
-              // position and createdAt intentionally omitted
-            },
-          ],
-        } as never);
+      mockedPublicGet.mockResolvedValueOnce({ id: 'srv-1' } as never).mockResolvedValueOnce({
+        channels: [
+          {
+            id: 'ch-pub',
+            name: 'public-chan',
+            slug: 'public-chan',
+            type: 'TEXT',
+            // position and createdAt intentionally omitted
+          },
+        ],
+      } as never);
 
       const result = await getChannel('my-server', 'public-chan');
 
@@ -564,10 +572,18 @@ describe('channelService', () => {
 
       await getChannels('srv-1');
 
-      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('missing or non-string "id"'));
-      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('missing or non-string "serverId"'));
-      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('missing or non-string "slug"'));
-      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('missing or non-string "createdAt"'));
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('missing or non-string "id"'),
+      );
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('missing or non-string "serverId"'),
+      );
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('missing or non-string "slug"'),
+      );
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('missing or non-string "createdAt"'),
+      );
     });
   });
 
@@ -603,10 +619,18 @@ describe('channelService', () => {
 
       await getAuditLog('srv-1', 'ch-1');
 
-      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('missing or non-string "id"'));
-      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('missing or non-string "channelId"'));
-      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('missing or non-string "actorId"'));
-      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('missing or non-string "action"'));
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('missing or non-string "id"'),
+      );
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('missing or non-string "channelId"'),
+      );
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('missing or non-string "actorId"'),
+      );
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('missing or non-string "action"'),
+      );
     });
 
     it('defaults to epoch timestamp when timestamp is invalid', async () => {
