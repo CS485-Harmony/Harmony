@@ -13,8 +13,10 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Image from 'next/image';
+import { useRouter, usePathname } from 'next/navigation';
 import { formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
 import { pinMessageAction, unpinMessageAction } from '@/app/actions/pinMessage';
+import { useAuth } from '@/hooks/useAuth';
 import type { Message, Reaction } from '@/types';
 
 // ─── ReactionList ─────────────────────────────────────────────────────────────
@@ -70,6 +72,9 @@ function ActionBar({
   canPin?: boolean;
   initialPinned?: boolean;
 }) {
+  const { isAuthenticated } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
@@ -139,11 +144,12 @@ function ActionBar({
         <span className='px-2 text-xs text-red-400'>{pinErrorMsg}</span>
       )}
 
-      {/* Reply (stub) */}
+      {/* Reply — redirects guests to login; stub for authenticated users */}
       <button
         type='button'
         aria-label='Reply'
         title='Reply'
+        onClick={!isAuthenticated ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`) : undefined}
         className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
       >
         <svg className='h-4 w-4' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true' focusable='false'>
