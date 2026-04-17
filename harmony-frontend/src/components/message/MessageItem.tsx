@@ -192,11 +192,12 @@ function ActionBar({
         </svg>
       </button>
 
-      {/* Add Reaction (stub) */}
+      {/* Add Reaction — redirects guests to login; stub for authenticated users */}
       <button
         type='button'
         aria-label='Add Reaction'
         title='Add Reaction'
+        onClick={!isAuthenticated ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`) : undefined}
         className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
       >
         <svg className='h-4 w-4' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true' focusable='false'>
