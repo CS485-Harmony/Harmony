@@ -201,13 +201,13 @@ export const channelService = {
       );
   },
 
-  async createDefaultChannel(serverId: string) {
+  async createDefaultChannel(serverId: string, isPublic = false) {
     return channelService.createChannel({
       serverId,
       name: 'general',
       slug: 'general',
       type: ChannelType.TEXT,
-      visibility: ChannelVisibility.PRIVATE,
+      visibility: isPublic ? ChannelVisibility.PUBLIC_INDEXABLE : ChannelVisibility.PRIVATE,
       position: 0,
     });
   },

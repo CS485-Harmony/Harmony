@@ -195,7 +195,7 @@ describe('server flow integration', () => {
       name: 'general',
       slug: 'general',
       type: ChannelType.TEXT,
-      visibility: ChannelVisibility.PRIVATE,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
       position: 0,
     });
 

@@ -114,7 +114,7 @@ export const serverService = {
     const server = await withSlugRetry(input.name, slug, (s) =>
       serverRepository.create({ ...input, slug: s }),
     );
-    await channelService.createDefaultChannel(server.id);
+    await channelService.createDefaultChannel(server.id, input.isPublic ?? false);
     await serverMemberService.addOwner(input.ownerId, server.id);
     return server;
   },

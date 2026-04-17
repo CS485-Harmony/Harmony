@@ -311,7 +311,7 @@ describe('serverService.createServer', () => {
     });
 
     expect(result).toEqual(created);
-    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('new-id');
+    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('new-id', true);
     expect(serverMemberService.addOwner).toHaveBeenCalledWith('owner-1', 'new-id');
     // createDefaultChannel must be called before addOwner
     const createOrder = (channelService.createDefaultChannel as jest.Mock).mock.invocationCallOrder[0];
@@ -326,7 +326,7 @@ describe('serverService.createServer', () => {
 
     const result = await serverService.createServer({ name: 'Minimal', ownerId: 'owner-1' });
     expect(result).toEqual(created);
-    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('min-id');
+    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('min-id', false);
     expect(serverMemberService.addOwner).toHaveBeenCalledWith('owner-1', 'min-id');
   });
 
@@ -422,7 +422,7 @@ describe('serverService.createServer', () => {
     await expect(serverService.createServer({ name: 'New Server', ownerId: 'owner-1' }))
       .rejects.toThrow('addOwner failed');
     // createDefaultChannel was called and completed before addOwner threw.
-    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('new-id');
+    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('new-id', false);
   });
 });
 
