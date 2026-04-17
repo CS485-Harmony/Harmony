@@ -34,6 +34,16 @@ function toFrontendMessage(raw: Record<string, unknown>, fallbackChannelId = '')
     },
     content: raw.content as string,
     timestamp: (raw.createdAt ?? raw.created_at ?? raw.timestamp) as string,
+    attachments: Array.isArray(raw.attachments)
+      ? (raw.attachments as Array<Record<string, unknown>>).map(a => ({
+          id: a.id as string,
+          messageId: raw.id as string,
+          url: a.url as string,
+          filename: (a.filename ?? '') as string,
+          type: (a.contentType ?? a.type ?? '') as string,
+          size: typeof a.sizeBytes === 'number' ? a.sizeBytes : 0,
+        }))
+      : undefined,
   };
 }
 
