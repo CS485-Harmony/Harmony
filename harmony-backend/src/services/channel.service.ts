@@ -71,39 +71,43 @@ export const channelService = {
 
     const channel = await channelRepository.create({ serverId, name, slug, type, visibility, topic, position }, tx);
 
-    // Write-through: cache new visibility and invalidate server channel list (best-effort)
-    cacheService
-      .set(CacheKeys.channelVisibility(channel.id), channel.visibility, {
-        ttl: CacheTTL.channelVisibility,
-      })
-      .catch((err) =>
-        logger.warn(
-          { err, channelId: channel.id },
-          'Failed to cache channel visibility after creation',
-        ),
-      );
-    cacheService
-      .invalidate(`server:${sanitizeKeySegment(serverId)}:public_channels`)
-      .catch((err) =>
-        logger.warn(
-          { err, serverId },
-          'Failed to invalidate public channel cache after channel creation',
-        ),
-      );
+    // Skip cache/event side effects when participating in an outer transaction — they must
+    // not fire before the transaction commits, or they may leak state if the tx rolls back.
+    if (!tx) {
+      // Write-through: cache new visibility and invalidate server channel list (best-effort)
+      cacheService
+        .set(CacheKeys.channelVisibility(channel.id), channel.visibility, {
+          ttl: CacheTTL.channelVisibility,
+        })
+        .catch((err) =>
+          logger.warn(
+            { err, channelId: channel.id },
+            'Failed to cache channel visibility after creation',
+          ),
+        );
+      cacheService
+        .invalidate(`server:${sanitizeKeySegment(serverId)}:public_channels`)
+        .catch((err) =>
+          logger.warn(
+            { err, serverId },
+            'Failed to invalidate public channel cache after channel creation',
+          ),
+        );
 
-    // Notify connected clients (fire-and-forget)
-    eventBus
-      .publish(EventChannels.CHANNEL_CREATED, {
-        channelId: channel.id,
-        serverId: channel.serverId,
-        timestamp: new Date().toISOString(),
-      })
-      .catch((err) =>
-        logger.warn(
-          { err, channelId: channel.id, serverId },
-          'Failed to publish channel created event',
-        ),
-      );
+      // Notify connected clients (fire-and-forget)
+      eventBus
+        .publish(EventChannels.CHANNEL_CREATED, {
+          channelId: channel.id,
+          serverId: channel.serverId,
+          timestamp: new Date().toISOString(),
+        })
+        .catch((err) =>
+          logger.warn(
+            { err, channelId: channel.id, serverId },
+            'Failed to publish channel created event',
+          ),
+        );
+    }
 
     return channel;
   },
