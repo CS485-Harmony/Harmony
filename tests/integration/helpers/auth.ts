@@ -12,6 +12,34 @@ function derivePasswordVerifier(password: string, saltHex: string): string {
     .toString('base64');
 }
 
+export async function register(
+  email: string,
+  username: string,
+  password: string,
+): Promise<AuthTokens> {
+  const challengeRes = await fetch(`${BACKEND_URL}/api/auth/register/challenge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  if (!challengeRes.ok) {
+    throw new Error(`Register challenge failed: ${challengeRes.status}`);
+  }
+  const { passwordSalt } = (await challengeRes.json()) as { passwordSalt: string };
+  const passwordVerifier = derivePasswordVerifier(password, passwordSalt);
+
+  const regRes = await fetch(`${BACKEND_URL}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, username, passwordSalt, passwordVerifier }),
+  });
+  if (!regRes.ok) {
+    const body = await regRes.text();
+    throw new Error(`Register failed (${regRes.status}): ${body}`);
+  }
+  return regRes.json() as Promise<AuthTokens>;
+}
+
 export async function login(email: string, password: string): Promise<AuthTokens> {
   const challengeRes = await fetch(`${BACKEND_URL}/api/auth/login/challenge`, {
     method: 'POST',

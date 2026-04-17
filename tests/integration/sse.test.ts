@@ -8,7 +8,7 @@
  */
 
 import { BACKEND_URL, LOCAL_SEEDS, localOnlyDescribe } from './env';
-import { login } from './helpers/auth';
+import { login, register } from './helpers/auth';
 
 // ─── Cloud-read-only smoke ────────────────────────────────────────────────────
 
@@ -119,26 +119,41 @@ localOnlyDescribe('SSE (local-only)', () => {
     }
   });
 
-  test('SSE-3: SSE endpoint rejects access to channel user is not a member of with 403', async () => {
-    // A fresh user not joined to any server would get 403, but we only have
-    // alice_admin who IS a member of harmony-hq. We test with an invalid UUID
-    // channel to verify the 404/403 guard fires.
-    const nonExistentChannelId = '00000000-0000-0000-0000-000000000001';
+  test('SSE-3: SSE endpoint rejects access to channel for authenticated non-member with 403', async () => {
+    // Register a fresh user who is not a member of any server.
+    // alice_admin is a member of all three seeded servers, so she cannot exercise
+    // the non-member authorization path. A freshly registered user has no memberships.
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const freshEmail = `sse3-test-${suffix}@integration.test`;
+    const freshUsername = `sse3_${suffix}`.slice(0, 32);
+    const { accessToken: freshToken, refreshToken } = await register(
+      freshEmail,
+      freshUsername,
+      'TestPass123!',
+    );
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
     try {
       const res = await fetch(
-        `${BACKEND_URL}/api/events/channel/${nonExistentChannelId}?token=${accessToken}`,
+        `${BACKEND_URL}/api/events/channel/${channelId}?token=${freshToken}`,
         { signal: controller.signal },
       );
       clearTimeout(timeoutId);
-      // 403 (not a member) or 404 (channel not found) are both acceptable
-      expect([403, 404]).toContain(res.status);
+      // Fresh user is not a member of harmony-hq → expect 403 Forbidden
+      expect(res.status).toBe(403);
     } catch (err: unknown) {
       clearTimeout(timeoutId);
       if (err instanceof Error && err.name === 'AbortError') return;
       throw err;
+    } finally {
+      // Revoke the refresh token to clean up session state
+      await fetch(`${BACKEND_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      }).catch(() => {});
     }
   });
 

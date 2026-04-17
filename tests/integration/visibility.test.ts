@@ -133,17 +133,16 @@ localOnlyDescribe('Visibility Change Impact (local-only)', () => {
     expect(html).not.toMatch(/content=["']index,\s*follow["']/i);
   });
 
-  test('VIS-5: non-admin authenticated user cannot access PRIVATE channel via channel.getChannel', async () => {
-    // Ensure channel is PRIVATE
+  // VIS-5: requires a loginable non-admin seeded account.
+  // The mock seed only exposes alice_admin (an OWNER) as a loginable user; all
+  // other mock users have an invalid password hash. Until a second non-admin
+  // loginable account is added to the mock seed, this case cannot be exercised.
+  test.todo(
+    'VIS-5: non-admin authenticated user cannot access PRIVATE channel — requires a non-admin loginable seed account',
+  );
+
+  test('VIS-5-unauthed: unauthenticated request to a PRIVATE channel is rejected with 401', async () => {
     await setVisibility('PRIVATE');
-    // Use a non-admin token — for now we only have alice_admin.
-    // This test verifies the API-level permission: alice IS an admin so this
-    // validates that the channel is accessible to the admin. VIS-5 coverage
-    // of a non-admin user requires a second seeded account, which the mock seed
-    // does not expose with a loginable password. Mark as pending until a
-    // non-admin loginable account is available in the mock seed.
-    //
-    // For now we verify that an UNAUTHENTICATED user gets 401 for a private channel.
     const input = encodeURIComponent(
       JSON.stringify({ serverSlug, serverId, channelSlug: LOCAL_SEEDS.channels.publicIndexable }),
     );
