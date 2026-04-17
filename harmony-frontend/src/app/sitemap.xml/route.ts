@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from '@/lib/runtime-config';
+import { rewriteSitemapLocOrigins } from '@/lib/seo-sitemap';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,7 +8,7 @@ export const dynamic = 'force-dynamic';
  * still sourced from the backend so the backend remains the data producer while
  * the frontend owns the public SEO entrypoint.
  */
-export async function GET() {
+export async function GET(request: Request) {
   const response = await fetch(`${getApiBaseUrl()}/sitemap-index.xml`, {
     cache: 'no-store',
   });
@@ -19,7 +20,9 @@ export async function GET() {
     });
   }
 
-  return new Response(response.body, {
+  const xml = await response.text();
+
+  return new Response(rewriteSitemapLocOrigins(xml, request), {
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
       'Cache-Control': 'public, max-age=300, stale-while-revalidate=300',

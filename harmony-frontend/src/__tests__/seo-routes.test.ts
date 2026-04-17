@@ -71,20 +71,30 @@ describe('frontend SEO route handlers', () => {
 
   it('proxies the sitemap index from the backend API origin', async () => {
     (global.fetch as jest.Mock).mockResolvedValue(
-      new Response('<sitemapindex />', { status: 200 }),
+      new Response(
+        '<?xml version="1.0"?><sitemapindex><sitemap><loc>https://harmony.chat/sitemap/harmony-hq</loc></sitemap></sitemapindex>',
+        { status: 200 },
+      ),
     );
 
-    const response = await getSitemapIndex();
+    const response = await getSitemapIndex(new Request('http://localhost:3000/sitemap.xml'));
 
     expect(global.fetch).toHaveBeenCalledWith('https://api.harmony.chat/sitemap-index.xml', {
       cache: 'no-store',
     });
-    await expect(response.text()).resolves.toBe('<sitemapindex />');
+    await expect(response.text()).resolves.toContain(
+      '<loc>http://localhost:3000/sitemap/harmony-hq</loc>',
+    );
     expect(response.headers.get('content-type')).toContain('application/xml');
   });
 
   it('proxies per-server sitemap XML from the backend API origin', async () => {
-    (global.fetch as jest.Mock).mockResolvedValue(new Response('<urlset />', { status: 200 }));
+    (global.fetch as jest.Mock).mockResolvedValue(
+      new Response(
+        '<?xml version="1.0"?><urlset><url><loc>https://harmony.chat/c/demo/general</loc></url></urlset>',
+        { status: 200 },
+      ),
+    );
 
     const response = await getServerSitemap(new Request('https://harmony.chat/sitemap/demo'), {
       params: Promise.resolve({ serverSlug: 'demo' }),
@@ -93,6 +103,25 @@ describe('frontend SEO route handlers', () => {
     expect(global.fetch).toHaveBeenCalledWith('https://api.harmony.chat/sitemap/demo.xml', {
       cache: 'no-store',
     });
-    await expect(response.text()).resolves.toBe('<urlset />');
+    await expect(response.text()).resolves.toContain(
+      '<loc>https://harmony.chat/c/demo/general</loc>',
+    );
+  });
+
+  it('rewrites per-server sitemap XML to the current frontend host', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue(
+      new Response(
+        '<?xml version="1.0"?><urlset><url><loc>https://harmony.chat/c/demo/general</loc></url></urlset>',
+        { status: 200 },
+      ),
+    );
+
+    const response = await getServerSitemap(new Request('http://localhost:3000/sitemap/demo'), {
+      params: Promise.resolve({ serverSlug: 'demo' }),
+    });
+
+    await expect(response.text()).resolves.toContain(
+      '<loc>http://localhost:3000/c/demo/general</loc>',
+    );
   });
 });

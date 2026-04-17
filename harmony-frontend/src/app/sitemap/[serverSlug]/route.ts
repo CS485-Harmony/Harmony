@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from '@/lib/runtime-config';
+import { rewriteSitemapLocOrigins } from '@/lib/seo-sitemap';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +12,7 @@ interface RouteContext {
  * backend XML generator at request time so crawlers never need the API domain
  * as the primary SEO surface.
  */
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   const { serverSlug } = await context.params;
   const response = await fetch(`${getApiBaseUrl()}/sitemap/${encodeURIComponent(serverSlug)}.xml`, {
     cache: 'no-store',
@@ -24,7 +25,9 @@ export async function GET(_request: Request, context: RouteContext) {
     });
   }
 
-  return new Response(response.body, {
+  const xml = await response.text();
+
+  return new Response(rewriteSitemapLocOrigins(xml, request), {
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
       'Cache-Control': 'public, max-age=300, stale-while-revalidate=300',
