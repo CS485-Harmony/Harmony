@@ -2,12 +2,11 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  setupFiles: ['dotenv/config'],
-  roots: ['<rootDir>'],
+  roots: ['<rootDir>/src'],
   testMatch: ['**/*.test.ts'],
-  testTimeout: 15000,
   moduleFileExtensions: ['ts', 'js', 'json'],
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
+    '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
   },
+  testTimeout: 30000,
 };
