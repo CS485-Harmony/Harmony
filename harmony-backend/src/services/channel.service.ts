@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { ChannelType, ChannelVisibility } from '@prisma/client';
+import { ChannelType, ChannelVisibility, Prisma } from '@prisma/client';
 import { createLogger } from '../lib/logger';
 import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from './cache.service';
 import { eventBus, EventChannels } from '../events/eventBus';
@@ -201,7 +201,7 @@ export const channelService = {
       );
   },
 
-  async createDefaultChannel(serverId: string, isPublic = false) {
+  async createDefaultChannel(serverId: string, isPublic = false, _tx?: Prisma.TransactionClient) {
     return channelService.createChannel({
       serverId,
       name: 'general',
