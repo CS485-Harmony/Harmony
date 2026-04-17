@@ -19,6 +19,41 @@ import { pinMessageAction, unpinMessageAction } from '@/app/actions/pinMessage';
 import { useAuth } from '@/hooks/useAuth';
 import type { Message, Reaction } from '@/types';
 
+// ─── AttachmentList ───────────────────────────────────────────────────────────
+
+function AttachmentList({ attachments }: { attachments: Message['attachments'] }) {
+  if (!attachments || attachments.length === 0) return null;
+  return (
+    <div className='mt-1.5 flex flex-col gap-2'>
+      {attachments.map(a => {
+        const isImage = a.type?.startsWith('image/');
+        if (isImage) {
+          return (
+            <a key={a.id} href={a.url} target='_blank' rel='noopener noreferrer' className='inline-block max-w-sm'>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={a.url} alt={a.filename} className='max-h-64 rounded-md object-contain' />
+            </a>
+          );
+        }
+        return (
+          <a
+            key={a.id}
+            href={a.url}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-blue-400 hover:bg-white/10 hover:text-blue-300 transition-colors w-fit'
+          >
+            <svg className='h-4 w-4 flex-shrink-0' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={2} aria-hidden='true'>
+              <path d='M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48' />
+            </svg>
+            <span className='truncate max-w-xs'>{a.filename}</span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── ReactionList ─────────────────────────────────────────────────────────────
 
 function ReactionList({ reactions, messageId }: { reactions: Reaction[]; messageId: string }) {
@@ -265,6 +300,7 @@ export function MessageItem({
             {message.content}
             {message.editedAt && <span className='ml-1 text-[10px] text-gray-500'>(edited)</span>}
           </p>
+          <AttachmentList attachments={message.attachments} />
           <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
         </div>
       </div>
@@ -306,6 +342,7 @@ export function MessageItem({
         <p className='mt-0.5 whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
           {message.content}
         </p>
+        <AttachmentList attachments={message.attachments} />
         <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
       </div>
     </div>

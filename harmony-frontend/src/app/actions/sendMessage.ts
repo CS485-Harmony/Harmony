@@ -1,6 +1,6 @@
 'use server';
 
-import type { Message } from '@/types';
+import type { Message, AttachmentInput } from '@/types';
 import { sendMessage as sendMessageService } from '@/services/messageService';
 
 /**
@@ -12,6 +12,7 @@ export async function sendMessageAction(
   channelId: string,
   content: string,
   serverId: string,
+  attachments?: AttachmentInput[],
 ): Promise<Message> {
-  return sendMessageService(channelId, content, serverId);
+  return sendMessageService(channelId, content, serverId, attachments);
 }

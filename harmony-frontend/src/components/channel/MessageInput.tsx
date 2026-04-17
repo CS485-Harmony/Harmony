@@ -1,7 +1,8 @@
 /**
  * Channel Component: MessageInput
  * Message composition bar at the bottom of the channel view.
- * Supports multi-line input, Enter-to-send, character limit, and read-only guest state.
+ * Supports multi-line input, Enter-to-send, character limit, file attachments,
+ * and read-only guest state.
  * Ref: dev-spec-guest-public-channel-view.md — M3, CL-C3
  */
 
@@ -10,7 +11,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { sendMessageAction } from '@/app/actions/sendMessage';
-import type { Message } from '@/types';
+import type { Message, AttachmentInput } from '@/types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,13 +41,16 @@ export function MessageInput({
   const [value, setValue] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<AttachmentInput[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // On channel switch: clear draft, clear any send error, and autofocus the
-  // textarea so the user can start typing without clicking the input first
+  // On channel switch: clear draft, clear attachments, clear any send error, and autofocus
   useEffect(() => {
     setValue('');
     setSendError(null);
+    setPendingAttachments([]);
     textareaRef.current?.focus();
   }, [channelId]);
 
@@ -58,23 +62,82 @@ export function MessageInput({
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
   }, [value]);
 
+  const handleAttachClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      // Reset the input so selecting the same file again triggers onChange
+      e.target.value = '';
+
+      setIsUploading(true);
+      setSendError(null);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const res = await fetch('/api/attachments/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          const msg =
+            typeof body?.error === 'string'
+              ? body.error
+              : res.status === 401
+                ? 'You must be logged in to upload files.'
+                : res.status === 413
+                  ? 'File is too large (max 25 MB).'
+                  : 'Upload failed. Unsupported file type or server error.';
+          setSendError(msg);
+          return;
+        }
+
+        const attachment = (await res.json()) as AttachmentInput;
+        setPendingAttachments(prev => [...prev, attachment]);
+      } catch {
+        setSendError('Upload failed. Please try again.');
+      } finally {
+        setIsUploading(false);
+        textareaRef.current?.focus();
+      }
+    },
+    [],
+  );
+
+  const removeAttachment = (index: number) => {
+    setPendingAttachments(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSend = useCallback(async () => {
     const trimmed = value.trim();
-    if (!trimmed || isSending || isReadOnly) return;
+    if ((!trimmed && !pendingAttachments.length) || isSending || isUploading || isReadOnly) return;
     setIsSending(true);
     setSendError(null);
     try {
-      const msg = await sendMessageAction(channelId, trimmed, serverId);
+      const msg = await sendMessageAction(
+        channelId,
+        trimmed,
+        serverId,
+        pendingAttachments.length ? pendingAttachments : undefined,
+      );
       setValue('');
+      setPendingAttachments([]);
       onMessageSent?.(msg);
     } catch {
       setSendError('Failed to send message. Please try again.');
     } finally {
       setIsSending(false);
-      // Return focus to textarea after send
       textareaRef.current?.focus();
     }
-  }, [value, isSending, isReadOnly, channelId, serverId, onMessageSent]);
+  }, [value, isSending, isUploading, isReadOnly, channelId, serverId, onMessageSent, pendingAttachments]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Enter sends; Shift+Enter inserts a newline
@@ -114,22 +177,75 @@ export function MessageInput({
           {sendError}
         </p>
       )}
+
+      {/* Pending attachment chips */}
+      {pendingAttachments.length > 0 && (
+        <div className='mb-1 flex flex-wrap gap-1 px-1' aria-label='Pending attachments'>
+          {pendingAttachments.map((att, i) => (
+            <span
+              key={`${att.url}-${i}`}
+              className='flex items-center gap-1 rounded bg-[#36393f] px-2 py-1 text-xs text-gray-300'
+            >
+              <svg className='h-3 w-3 flex-shrink-0' viewBox='0 0 24 24' fill='currentColor'>
+                <path d='M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z' />
+              </svg>
+              <span className='max-w-[120px] truncate'>{att.filename}</span>
+              <button
+                type='button'
+                aria-label={`Remove attachment ${att.filename}`}
+                onClick={() => removeAttachment(i)}
+                className='ml-0.5 text-gray-400 hover:text-gray-100'
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div
         className={cn(
           'flex items-end gap-1 rounded-lg bg-[#40444b] px-2 py-2',
           isAtLimit && 'ring-1 ring-red-500/60',
         )}
       >
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type='file'
+          className='hidden'
+          aria-hidden='true'
+          onChange={handleFileChange}
+          accept='image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        />
+
         {/* Attachment button */}
         <button
           type='button'
-          title='Attach file (coming soon)'
-          aria-label='Attach file'
-          className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-white/10 hover:text-gray-200'
+          title={isUploading ? 'Uploading…' : 'Attach file'}
+          aria-label={isUploading ? 'Uploading file' : 'Attach file'}
+          aria-busy={isUploading}
+          disabled={isUploading || isSending}
+          onClick={handleAttachClick}
+          className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-white/10 hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50'
         >
-          <svg className='h-5 w-5' viewBox='0 0 24 24' fill='currentColor'>
-            <path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z' />
-          </svg>
+          {isUploading ? (
+            /* Spinner while uploading */
+            <svg
+              className='h-4 w-4 animate-spin'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth={2}
+            >
+              <circle cx='12' cy='12' r='10' strokeOpacity={0.25} />
+              <path d='M12 2a10 10 0 0 1 10 10' />
+            </svg>
+          ) : (
+            <svg className='h-5 w-5' viewBox='0 0 24 24' fill='currentColor'>
+              <path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z' />
+            </svg>
+          )}
         </button>
 
         {/* Textarea */}

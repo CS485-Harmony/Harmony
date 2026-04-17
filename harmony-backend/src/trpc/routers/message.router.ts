@@ -37,9 +37,12 @@ export const messageRouter = router({
       z.object({
         serverId: z.string().uuid(),
         channelId: z.string().uuid(),
-        content: z.string().min(1).max(4000),
+        content: z.string().max(4000),
         attachments: z.array(AttachmentInputSchema).max(10).optional(),
-      }),
+      }).refine(
+        data => data.content.trim().length > 0 || (data.attachments?.length ?? 0) > 0,
+        { message: 'Message must have content or at least one attachment.' },
+      ),
     )
     .mutation(({ input, ctx }) =>
       messageService.sendMessage({

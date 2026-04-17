@@ -45,6 +45,14 @@ export interface Attachment {
   size: number;
 }
 
+/** Attachment data returned by the upload endpoint, ready to attach to a message. */
+export interface AttachmentInput {
+  url: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+}
+
 export interface MessageDTO {
   id: string;
   channelId: string;
