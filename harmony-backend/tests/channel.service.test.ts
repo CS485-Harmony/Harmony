@@ -543,7 +543,7 @@ describe('channelService.createDefaultChannel', () => {
       type: 'TEXT',
       visibility: 'PRIVATE',
       position: 0,
-    });
+    }, undefined);
     expect(result.name).toBe('general');
     expect(result.slug).toBe('general');
 
