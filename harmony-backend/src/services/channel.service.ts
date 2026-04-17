@@ -43,7 +43,7 @@ export const channelService = {
     return channel;
   },
 
-  async createChannel(input: CreateChannelInput, _tx?: Prisma.TransactionClient) {
+  async createChannel(input: CreateChannelInput, tx?: Prisma.TransactionClient) {
     const { serverId, name, slug, type, visibility, topic, position = 0 } = input;
 
     // VOICE channels cannot be PUBLIC_INDEXABLE
@@ -55,13 +55,13 @@ export const channelService = {
     }
 
     // Verify server exists
-    const server = await serverRepository.findById(serverId);
+    const server = await serverRepository.findById(serverId, tx);
     if (!server) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
     }
 
     // Check slug uniqueness per server
-    const existing = await channelRepository.findByServerAndSlug(serverId, slug);
+    const existing = await channelRepository.findByServerAndSlug(serverId, slug, tx);
     if (existing) {
       throw new TRPCError({
         code: 'CONFLICT',
@@ -69,41 +69,45 @@ export const channelService = {
       });
     }
 
-    const channel = await channelRepository.create({ serverId, name, slug, type, visibility, topic, position });
+    const channel = await channelRepository.create({ serverId, name, slug, type, visibility, topic, position }, tx);
 
-    // Write-through: cache new visibility and invalidate server channel list (best-effort)
-    cacheService
-      .set(CacheKeys.channelVisibility(channel.id), channel.visibility, {
-        ttl: CacheTTL.channelVisibility,
-      })
-      .catch((err) =>
-        logger.warn(
-          { err, channelId: channel.id },
-          'Failed to cache channel visibility after creation',
-        ),
-      );
-    cacheService
-      .invalidate(`server:${sanitizeKeySegment(serverId)}:public_channels`)
-      .catch((err) =>
-        logger.warn(
-          { err, serverId },
-          'Failed to invalidate public channel cache after channel creation',
-        ),
-      );
+    // Skip cache/event side effects when participating in an outer transaction — they must
+    // not fire before the transaction commits, or they may leak state if the tx rolls back.
+    if (!tx) {
+      // Write-through: cache new visibility and invalidate server channel list (best-effort)
+      cacheService
+        .set(CacheKeys.channelVisibility(channel.id), channel.visibility, {
+          ttl: CacheTTL.channelVisibility,
+        })
+        .catch((err) =>
+          logger.warn(
+            { err, channelId: channel.id },
+            'Failed to cache channel visibility after creation',
+          ),
+        );
+      cacheService
+        .invalidate(`server:${sanitizeKeySegment(serverId)}:public_channels`)
+        .catch((err) =>
+          logger.warn(
+            { err, serverId },
+            'Failed to invalidate public channel cache after channel creation',
+          ),
+        );
 
-    // Notify connected clients (fire-and-forget)
-    eventBus
-      .publish(EventChannels.CHANNEL_CREATED, {
-        channelId: channel.id,
-        serverId: channel.serverId,
-        timestamp: new Date().toISOString(),
-      })
-      .catch((err) =>
-        logger.warn(
-          { err, channelId: channel.id, serverId },
-          'Failed to publish channel created event',
-        ),
-      );
+      // Notify connected clients (fire-and-forget)
+      eventBus
+        .publish(EventChannels.CHANNEL_CREATED, {
+          channelId: channel.id,
+          serverId: channel.serverId,
+          timestamp: new Date().toISOString(),
+        })
+        .catch((err) =>
+          logger.warn(
+            { err, channelId: channel.id, serverId },
+            'Failed to publish channel created event',
+          ),
+        );
+    }
 
     return channel;
   },

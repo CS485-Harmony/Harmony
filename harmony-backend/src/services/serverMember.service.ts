@@ -28,16 +28,18 @@ function roleRank(role: RoleType): number {
 export const serverMemberService = {
   /**
    * Add the server owner as an OWNER member. Called when a server is created.
+   * Accepts an optional transaction client so callers can include this work in a larger transaction.
    */
-  async addOwner(userId: string, serverId: string): Promise<ServerMember> {
-    return prisma.$transaction(async (tx) => {
+  async addOwner(userId: string, serverId: string, tx?: Prisma.TransactionClient): Promise<ServerMember> {
+    const run = async (client: Prisma.TransactionClient) => {
       const member = await serverMemberRepository.create(
         { userId, serverId, role: 'OWNER' },
-        tx,
+        client,
       );
-      await serverRepository.update(serverId, { memberCount: { increment: 1 } }, tx);
+      await serverRepository.update(serverId, { memberCount: { increment: 1 } }, client);
       return member;
-    });
+    };
+    return tx ? run(tx) : prisma.$transaction(run);
   },
 
   /**

@@ -6,6 +6,7 @@ import { isSystemAdmin } from '../lib/admin.utils';
 import { eventBus, EventChannels } from '../events/eventBus';
 import { serverRepository } from '../repositories/server.repository';
 import { serverMemberRepository } from '../repositories/serverMember.repository';
+import { prisma } from '../db/prisma';
 
 // Role hierarchy for sorting: lower rank = higher privilege
 const ROLE_RANK: Record<string, number> = {
@@ -111,12 +112,14 @@ export const serverService = {
     ownerId: string;
   }): Promise<Server> {
     const slug = await generateUniqueSlug(input.name);
-    const server = await withSlugRetry(input.name, slug, (s) =>
-      serverRepository.create({ ...input, slug: s }),
+    return withSlugRetry(input.name, slug, (s) =>
+      prisma.$transaction(async (tx) => {
+        const server = await serverRepository.create({ ...input, slug: s }, tx);
+        await channelService.createDefaultChannel(server.id, input.isPublic ?? false, tx);
+        await serverMemberService.addOwner(input.ownerId, server.id, tx);
+        return server;
+      }),
     );
-    await channelService.createDefaultChannel(server.id, input.isPublic ?? false);
-    await serverMemberService.addOwner(input.ownerId, server.id);
-    return server;
   },
 
   async updateServer(

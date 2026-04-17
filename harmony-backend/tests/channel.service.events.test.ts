@@ -91,6 +91,39 @@ beforeEach(() => {
 
 // ─── createChannel publishes CHANNEL_CREATED ──────────────────────────────────
 
+describe('channelService.createChannel — transactional side-effect suppression', () => {
+  it('does NOT publish or update cache when a tx is passed (outer transaction path)', async () => {
+    // Build a minimal tx client that mirrors what Prisma's TransactionClient exposes,
+    // reusing the same mock functions already set up for the global prisma client.
+    const mockTx = {
+      server: { findUnique: mockServerFindUnique },
+      channel: { findUnique: mockChannelFindUnique, create: mockChannelCreate },
+    };
+
+    mockChannelFindUnique.mockResolvedValue(null);
+    mockChannelCreate.mockResolvedValue(MOCK_CHANNEL);
+
+    const { cacheService } = jest.requireMock('../src/services/cache.service') as {
+      cacheService: { set: jest.Mock; invalidate: jest.Mock };
+    };
+
+    await channelService.createChannel(
+      {
+        serverId: SERVER_ID,
+        name: 'test-channel',
+        slug: 'test-channel',
+        type: ChannelType.TEXT,
+        visibility: ChannelVisibility.PRIVATE,
+      },
+      mockTx as never,
+    );
+
+    expect(mockPublish).not.toHaveBeenCalled();
+    expect(cacheService.set).not.toHaveBeenCalled();
+    expect(cacheService.invalidate).not.toHaveBeenCalled();
+  });
+});
+
 describe('channelService.createChannel — event publishing', () => {
   it('publishes CHANNEL_CREATED with channelId and serverId after create', async () => {
     // findUnique for slug conflict check returns null (no conflict), then create returns channel

@@ -13,8 +13,8 @@ import { TRPCError } from '@trpc/server';
 
 // ─── Module mocks (must appear before any import that resolves them) ──────────
 
-jest.mock('../src/db/prisma', () => ({
-  prisma: {
+jest.mock('../src/db/prisma', () => {
+  const mockClient = {
     server: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
@@ -26,8 +26,14 @@ jest.mock('../src/db/prisma', () => ({
     serverMember: {
       findMany: jest.fn(),
     },
-  },
-}));
+  };
+  return {
+    prisma: {
+      ...mockClient,
+      $transaction: jest.fn((fn: (tx: typeof mockClient) => Promise<unknown>) => fn(mockClient)),
+    },
+  };
+});
 
 jest.mock('../src/events/eventBus', () => ({
   eventBus: { publish: jest.fn().mockResolvedValue(undefined) },
@@ -311,8 +317,8 @@ describe('serverService.createServer', () => {
     });
 
     expect(result).toEqual(created);
-    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('new-id', true);
-    expect(serverMemberService.addOwner).toHaveBeenCalledWith('owner-1', 'new-id');
+    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('new-id', true, expect.anything());
+    expect(serverMemberService.addOwner).toHaveBeenCalledWith('owner-1', 'new-id', expect.anything());
     // createDefaultChannel must be called before addOwner
     const createOrder = (channelService.createDefaultChannel as jest.Mock).mock.invocationCallOrder[0];
     const ownerOrder = (serverMemberService.addOwner as jest.Mock).mock.invocationCallOrder[0];
@@ -326,8 +332,8 @@ describe('serverService.createServer', () => {
 
     const result = await serverService.createServer({ name: 'Minimal', ownerId: 'owner-1' });
     expect(result).toEqual(created);
-    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('min-id', false);
-    expect(serverMemberService.addOwner).toHaveBeenCalledWith('owner-1', 'min-id');
+    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('min-id', false, expect.anything());
+    expect(serverMemberService.addOwner).toHaveBeenCalledWith('owner-1', 'min-id', expect.anything());
   });
 
   it('throws BAD_REQUEST when name produces an empty slug', async () => {
@@ -393,10 +399,8 @@ describe('serverService.createServer', () => {
   });
 
   it('propagates a createDefaultChannel rejection and does not proceed to addOwner', async () => {
-    // createServer is implemented as sequential awaits (no prisma.$transaction), so a
-    // failure in createDefaultChannel stops execution at that point.  The server record
-    // created by prisma.server.create is NOT rolled back — this test documents that
-    // actual sequential behavior: addOwner is never reached when the prior step throws.
+    // createServer wraps all three steps in prisma.$transaction. A failure in
+    // createDefaultChannel aborts the transaction: addOwner is never reached.
     const created = makeServer({ id: 'new-id' });
     mockServer.count.mockResolvedValue(0);
     mockServer.create.mockResolvedValue(created);
@@ -405,14 +409,12 @@ describe('serverService.createServer', () => {
 
     await expect(serverService.createServer({ name: 'New Server', ownerId: 'owner-1' }))
       .rejects.toThrow('channel creation failed');
-    // Execution must stop at createDefaultChannel; addOwner must not be called.
     expect(serverMemberService.addOwner).not.toHaveBeenCalled();
   });
 
   it('propagates an addOwner rejection after createDefaultChannel has already succeeded', async () => {
-    // Documents that createDefaultChannel ran and completed before addOwner was called,
-    // confirming the sequential execution order.  Neither the server record nor the
-    // default channel is rolled back (no prisma.$transaction in the implementation).
+    // createServer wraps all steps in prisma.$transaction. A failure in addOwner
+    // aborts the entire transaction — the server row and default channel are rolled back.
     const created = makeServer({ id: 'new-id' });
     mockServer.count.mockResolvedValue(0);
     mockServer.create.mockResolvedValue(created);
@@ -422,7 +424,18 @@ describe('serverService.createServer', () => {
     await expect(serverService.createServer({ name: 'New Server', ownerId: 'owner-1' }))
       .rejects.toThrow('addOwner failed');
     // createDefaultChannel was called and completed before addOwner threw.
-    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('new-id', false);
+    expect(channelService.createDefaultChannel).toHaveBeenCalledWith('new-id', false, expect.anything());
+  });
+
+  it('wraps server creation in prisma.$transaction for atomicity', async () => {
+    const created = makeServer({ id: 'new-id', name: 'New Server', slug: 'new-server' });
+    mockServer.count.mockResolvedValue(0);
+    mockServer.create.mockResolvedValue(created);
+
+    await serverService.createServer({ name: 'New Server', ownerId: 'owner-1' });
+
+    const { prisma: mockPrisma } = jest.requireMock('../src/db/prisma');
+    expect(mockPrisma.$transaction).toHaveBeenCalled();
   });
 });
 
