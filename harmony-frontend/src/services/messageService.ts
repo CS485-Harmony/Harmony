@@ -4,12 +4,8 @@
  * References: dev-spec-guest-public-channel-view.md
  */
 
-import { createFrontendLogger } from '@/lib/frontend-logger';
-import type { Message } from '@/types';
+import type { Message, AttachmentInput } from '@/types';
 import { publicGet, trpcQuery, trpcMutate } from '@/lib/trpc-client';
-import type { AttachmentInput } from '@/types';
-
-const logger = createFrontendLogger({ component: 'message-service' });
 
 // ─── Type adapters ────────────────────────────────────────────────────────────
 
@@ -51,8 +47,11 @@ function toFrontendMessage(raw: Record<string, unknown>, fallbackChannelId = '')
 
 /**
  * Returns a page of messages for a channel.
- * Uses the public REST endpoint for PUBLIC_INDEXABLE channels.
- * Falls back to tRPC for authenticated access (pass options.serverId).
+ *
+ * When serverId is provided (authenticated context), fetches via tRPC so that
+ * responses are always fresh and include attachment data. The public REST
+ * endpoint is ISR-cached and omits attachments, so it is only used for
+ * unauthenticated / SEO access when no serverId is available.
  *
  * Errors propagate to the caller — the UI is responsible for rendering
  * failure state so users can distinguish a fetch error from an empty channel.
@@ -62,42 +61,8 @@ export async function getMessages(
   page = 1,
   options?: { serverId?: string },
 ): Promise<{ messages: Message[]; hasMore: boolean }> {
-  // Try public endpoint first (works for PUBLIC_INDEXABLE channels).
-  // A non-2xx response throws, which we catch only to attempt the tRPC fallback.
-  try {
-    const data = await publicGet<{
-      messages: Record<string, unknown>[];
-      page: number;
-      pageSize: number;
-    }>(`/channels/${encodeURIComponent(channelId)}/messages?page=${page}`);
-
-    // null means HTTP 404 — channel not found on public API. Throw so the catch
-    // block can attempt the tRPC fallback (or re-throw if no serverId).
-    if (data === null)
-      throw new Error(`getMessages: public channel not found for channelId=${channelId}`);
-
-    return {
-      // Public endpoint returns newest-first; populate channelId from param since
-      // the backend select does not include it.
-      messages: data.messages.map(m => toFrontendMessage(m, channelId)),
-      hasMore: data.messages.length >= (data.pageSize ?? 50),
-    };
-  } catch (err) {
-    // Public endpoint unavailable or channel is not PUBLIC_INDEXABLE — try tRPC.
-    logger.warn('Public message fetch failed; falling back to tRPC', {
-      feature: 'message-service',
-      event: 'public_fetch_failed',
-      procedure: 'publicGet',
-      route: '/channels/[channelId]/messages',
-      error: err,
-    });
-    // If serverId is not provided we cannot authenticate, so re-throw.
-    if (!options?.serverId)
-      throw new Error(
-        'getMessages: channel is not publicly accessible and no serverId was provided',
-      );
-
-    // tRPC errors propagate to the caller.
+  // Authenticated path: tRPC returns fresh data and includes attachments.
+  if (options?.serverId) {
     const data = await trpcQuery<{
       messages: Record<string, unknown>[];
       nextCursor?: string;
@@ -108,14 +73,27 @@ export async function getMessages(
     });
     if (data === null)
       throw new Error(`getMessages: tRPC returned no data for channelId=${channelId}`);
-    // tRPC backend returns oldest-first (orderBy createdAt: 'asc'); reverse to
-    // match the public endpoint's newest-first ordering so callers get a
-    // consistent contract regardless of which path was taken.
+    // tRPC returns oldest-first; reverse so callers get newest-first.
     return {
       messages: [...data.messages].reverse().map(m => toFrontendMessage(m, channelId)),
       hasMore: !!data.nextCursor,
     };
   }
+
+  // Unauthenticated path: public REST endpoint (ISR-cached, SEO-friendly).
+  const data = await publicGet<{
+    messages: Record<string, unknown>[];
+    page: number;
+    pageSize: number;
+  }>(`/channels/${encodeURIComponent(channelId)}/messages?page=${page}`);
+
+  if (data === null)
+    throw new Error(`getMessages: public channel not found for channelId=${channelId}`);
+
+  return {
+    messages: data.messages.map(m => toFrontendMessage(m, channelId)),
+    hasMore: data.messages.length >= (data.pageSize ?? 50),
+  };
 }
 
 /**
