@@ -249,7 +249,7 @@ describe('authService.register', () => {
     expect(mockJoinServer).toHaveBeenCalledWith(mockUserId, 'server-001');
   });
 
-  it('still returns tokens when no default server exists in an empty-data environment', async () => {
+  it('returns tokens when no default server exists and skips joinServer', async () => {
     mockPrisma.server.findFirst.mockResolvedValue(null);
 
     const result = await authService.register(
