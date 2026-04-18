@@ -200,7 +200,7 @@ localOnlyDescribe('SSE (local-only)', () => {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${accessToken}`,
             },
-            body: JSON.stringify({ channelId, content: 'SSE integration test message' }),
+            body: JSON.stringify({ serverId, channelId, content: 'SSE integration test message' }),
           },
         );
         void msgInput; // used above just for clarity
