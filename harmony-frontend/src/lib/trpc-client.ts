@@ -119,14 +119,18 @@ export async function trpcQuery<T>(procedure: string, input?: unknown): Promise<
 
   if (!res.ok) {
     const body = await res.text();
-    logger.warn('tRPC query failed', {
-      feature: 'trpc',
-      event: 'http_failure',
-      method: 'GET',
-      procedure,
-      route: `/trpc/${procedure}`,
-      statusCode: res.status,
-    });
+    // 401/403 are expected auth-flow responses (e.g. membership probes in GuestChannelView);
+    // only warn for genuinely unexpected failures.
+    if (res.status !== 401 && res.status !== 403) {
+      logger.warn('tRPC query failed', {
+        feature: 'trpc',
+        event: 'http_failure',
+        method: 'GET',
+        procedure,
+        route: `/trpc/${procedure}`,
+        statusCode: res.status,
+      });
+    }
     throw new TrpcHttpError(procedure, res.status, body);
   }
 

@@ -132,7 +132,7 @@ describe('trpc-client', () => {
       );
     });
 
-    it('throws a typed HTTP error for non-ok tRPC responses', async () => {
+    it('throws a typed HTTP error for non-ok tRPC responses without warning on 403', async () => {
       mockedCookies.mockResolvedValue({
         get: jest.fn(() => undefined),
       } as never);
@@ -145,6 +145,40 @@ describe('trpc-client', () => {
           status: 403,
         }),
       );
+      // 403 is an expected auth-flow response (e.g. membership probe) — should not warn
+      expect(mockLogger.warn).not.toHaveBeenCalled();
+    });
+
+    it('throws a typed HTTP error for 401 without warning', async () => {
+      mockedCookies.mockResolvedValue({
+        get: jest.fn(() => undefined),
+      } as never);
+      mockFetch.mockResolvedValue(createTextResponse('Unauthorized', 401));
+
+      await expect(trpcQuery('channel.getChannels')).rejects.toEqual(
+        expect.objectContaining<Partial<TrpcHttpError>>({
+          name: 'TrpcHttpError',
+          procedure: 'channel.getChannels',
+          status: 401,
+        }),
+      );
+      // 401 is an expected auth-flow response — should not warn
+      expect(mockLogger.warn).not.toHaveBeenCalled();
+    });
+
+    it('logs a warning for unexpected non-auth tRPC failures', async () => {
+      mockedCookies.mockResolvedValue({
+        get: jest.fn(() => undefined),
+      } as never);
+      mockFetch.mockResolvedValue(createTextResponse('Internal Server Error', 500));
+
+      await expect(trpcQuery('channel.getChannels')).rejects.toEqual(
+        expect.objectContaining<Partial<TrpcHttpError>>({
+          name: 'TrpcHttpError',
+          procedure: 'channel.getChannels',
+          status: 500,
+        }),
+      );
       expect(mockLogger.warn).toHaveBeenCalledWith(
         'tRPC query failed',
         expect.objectContaining({
@@ -152,7 +186,7 @@ describe('trpc-client', () => {
           event: 'http_failure',
           procedure: 'channel.getChannels',
           route: '/trpc/channel.getChannels',
-          statusCode: 403,
+          statusCode: 500,
         }),
       );
     });
