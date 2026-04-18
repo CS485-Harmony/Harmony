@@ -1,0 +1,220 @@
+# Integration test workflow — runs the local-target integration suite in CI.
+#
+# Job names are stable so this workflow can be used as a required status check
+# in branch protection rules (Settings → Branches → Require status checks →
+# "Run Integration Tests").
+#
+# ─── Cloud-target usage (outside CI) ────────────────────────────────────────
+# To run read-only smoke tests against the deployed URLs, export the required
+# env vars and run from the repo root:
+#
+#   export TEST_TARGET=cloud
+#   export BACKEND_URL=<railway-backend-url>   # required in cloud mode
+#   export FRONTEND_URL=<vercel-frontend-url>  # required in cloud mode
+#   cd tests/integration && npm test
+#
+# Both BACKEND_URL and FRONTEND_URL must be set in cloud mode (env.ts throws
+# if they are missing or use a localhost default while TEST_TARGET=cloud).
+#
+# Cloud mode skips local-only test cases (those that require seeded data or
+# write operations) and executes only cloud-read-only cases. No local services
+# need to be started for cloud mode. See docs/test-specs/integration-test-spec.md
+# for per-test classification (cloud-read-only vs local-only).
+#
+# Environment contract reference: docs/deployment/deployment-architecture.md
+# Replica-sensitive exclusions: docs/deployment/replica-readiness-audit.md
+
+name: Integration Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  run-integration-tests:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: harmony
+          POSTGRES_PASSWORD: harmony
+          POSTGRES_DB: harmony_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://harmony:harmony@localhost:5432/harmony_dev
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci-integration-access-secret
+      JWT_REFRESH_SECRET: ci-integration-refresh-secret
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_DAYS: "7"
+      # FRONTEND_URL is passed to the backend so its CORS allowlist accepts
+      # requests from the integration test runner and the local Next.js app.
+      FRONTEND_URL: http://localhost:3000
+      BASE_URL: http://localhost:3000
+      # NODE_ENV=e2e raises auth rate-limit maxima to 1000 so the full auth
+      # test suite (~10 login calls from 127.0.0.1) doesn't exhaust the
+      # per-IP limit (normally max=10 for login). See harmony-backend/src/app.ts.
+      NODE_ENV: e2e
+      # PORT is intentionally NOT set here at the job level.
+      # worker.ts uses parsePortEnv(4100) — if PORT is set job-wide to 4000,
+      # the worker races the backend-api to bind port 4000 and wins (fewer
+      # imports → faster startup), causing the backend-api to crash with
+      # EADDRINUSE. PORT is set only on the "Start backend API" step below so
+      # the worker falls back to its default port 4100.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Backend setup ──────────────────────────────────────────────────────
+
+      - name: Set up Node.js (backend)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: harmony-backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: harmony-backend
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: harmony-backend
+        run: npx prisma generate
+
+      - name: Run database migrations
+        working-directory: harmony-backend
+        run: npx prisma migrate deploy
+
+      - name: Seed mock dataset
+        working-directory: harmony-backend
+        run: npm run db:seed:mock
+
+      - name: Start backend API
+        working-directory: harmony-backend
+        env:
+          PORT: "4000"
+        run: npx tsx src/index.ts > /tmp/backend-api.log 2>&1 &
+
+      # backend-worker owns cacheInvalidator (Redis pub/sub). Without it, sitemap
+      # cache is never invalidated after visibility changes (VIS-1 test would fail).
+      # No PORT override: worker.ts defaults to 4100 via parsePortEnv(4100).
+      - name: Start backend worker
+        working-directory: harmony-backend
+        run: npx tsx src/worker.ts > /tmp/backend-worker.log 2>&1 &
+
+      - name: Wait for backend API to be ready
+        run: |
+          echo "Waiting for backend API on port 4000..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/health > /dev/null 2>&1; then
+              echo "Backend API ready after $((i * 2))s"
+              exit 0
+            fi
+            echo "  attempt $i/30 — sleeping 2s"
+            sleep 2
+          done
+          echo "ERROR: backend API did not become healthy within 60s"
+          cat /tmp/backend-api.log
+          exit 1
+
+      # ── Frontend setup ─────────────────────────────────────────────────────
+      # GPC and VIS-4 tests fetch FRONTEND_URL (SSR-rendered pages). The frontend
+      # must be running on port 3000 for those tests to pass.
+
+      - name: Set up Node.js (frontend)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: harmony-frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: harmony-frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: harmony-frontend
+        env:
+          NODE_ENV: production
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_BASE_URL: http://localhost:3000
+        run: npm run build
+
+      - name: Start frontend
+        working-directory: harmony-frontend
+        env:
+          NODE_ENV: production
+          PORT: "3000"
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_BASE_URL: http://localhost:3000
+        run: npm run start > /tmp/frontend.log 2>&1 &
+
+      - name: Wait for frontend to be ready
+        run: |
+          echo "Waiting for Next.js frontend on port 3000..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000 > /dev/null 2>&1; then
+              echo "Frontend ready after $((i * 2))s"
+              exit 0
+            fi
+            echo "  attempt $i/30 — sleeping 2s"
+            sleep 2
+          done
+          echo "ERROR: frontend did not become ready within 60s"
+          cat /tmp/frontend.log
+          exit 1
+
+      # ── Integration test suite ─────────────────────────────────────────────
+
+      - name: Set up Node.js (integration tests)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tests/integration/package-lock.json
+
+      - name: Install integration test dependencies
+        working-directory: tests/integration
+        run: npm ci
+
+      - name: Run integration tests (local target)
+        working-directory: tests/integration
+        env:
+          TEST_TARGET: local
+          BACKEND_URL: http://localhost:4000
+          FRONTEND_URL: http://localhost:3000
+        run: npm test
+
+      - name: Upload service logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-logs
+          path: |
+            /tmp/backend-api.log
+            /tmp/backend-worker.log
+            /tmp/frontend.log
+          retention-days: 3

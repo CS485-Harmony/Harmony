@@ -106,10 +106,16 @@ localOnlyDescribe('Visibility Change Impact (local-only)', () => {
 
   test('VIS-1: changing channel to PRIVATE removes it from the sitemap', async () => {
     await setVisibility('PRIVATE');
-    const sitemap = await getSitemapText();
-    expect(sitemap).not.toContain(
-      `/c/${serverSlug}/${LOCAL_SEEDS.channels.publicIndexable}`,
-    );
+    // Cache invalidation is async (Redis pub/sub → worker → cache delete).
+    // Poll until the channel disappears or 3 seconds elapse.
+    const target = `/c/${serverSlug}/${LOCAL_SEEDS.channels.publicIndexable}`;
+    let sitemap = '';
+    for (let i = 0; i < 6; i++) {
+      sitemap = await getSitemapText();
+      if (!sitemap.includes(target)) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(sitemap).not.toContain(target);
   });
 
   test('VIS-3: PUBLIC_NO_INDEX channel does not appear in the sitemap', async () => {

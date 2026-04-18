@@ -120,9 +120,10 @@ localOnlyDescribe('SSE (local-only)', () => {
   });
 
   test('SSE-3: SSE endpoint rejects access to channel for authenticated non-member with 403', async () => {
-    // Register a fresh user who is not a member of any server.
-    // alice_admin is a member of all three seeded servers, so she cannot exercise
-    // the non-member authorization path. A freshly registered user has no memberships.
+    // Register a fresh user who is not a member of the target server.
+    // Registration auto-joins new users to harmony-hq (the default public server),
+    // so we must test against a channel from a DIFFERENT server (open-source-hub)
+    // where the fresh user has no membership.
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const freshEmail = `sse3-test-${suffix}@integration.test`;
     const freshUsername = `sse3_${suffix}`.slice(0, 32);
@@ -132,16 +133,26 @@ localOnlyDescribe('SSE (local-only)', () => {
       'TestPass123!',
     );
 
+    // Look up a channel from open-source-hub (not auto-joined on registration).
+    const nonDefaultChannelRes = await fetch(
+      `${BACKEND_URL}/api/public/servers/open-source-hub/channels/welcome`,
+    );
+    const nonDefaultChannel = (await nonDefaultChannelRes.json()) as { id?: string };
+    if (!nonDefaultChannel.id) {
+      throw new Error('Could not resolve open-source-hub/welcome channel id for SSE-3');
+    }
+    const nonDefaultChannelId = nonDefaultChannel.id;
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
     try {
       const res = await fetch(
-        `${BACKEND_URL}/api/events/channel/${channelId}?token=${freshToken}`,
+        `${BACKEND_URL}/api/events/channel/${nonDefaultChannelId}?token=${freshToken}`,
         { signal: controller.signal },
       );
       clearTimeout(timeoutId);
-      // Fresh user is not a member of harmony-hq → expect 403 Forbidden
+      // Fresh user is not a member of open-source-hub → expect 403 Forbidden
       expect(res.status).toBe(403);
     } catch (err: unknown) {
       clearTimeout(timeoutId);
@@ -182,14 +193,14 @@ localOnlyDescribe('SSE (local-only)', () => {
         // Post a message to trigger the SSE event
         const msgInput = encodeURIComponent(JSON.stringify({ channelId }));
         const postRes = await fetch(
-          `${BACKEND_URL}/trpc/message.createMessage`,
+          `${BACKEND_URL}/trpc/message.sendMessage`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${accessToken}`,
             },
-            body: JSON.stringify({ channelId, content: 'SSE integration test message' }),
+            body: JSON.stringify({ serverId, channelId, content: 'SSE integration test message' }),
           },
         );
         void msgInput; // used above just for clarity
