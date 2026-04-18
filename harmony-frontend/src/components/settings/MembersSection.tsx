@@ -98,7 +98,14 @@ interface MemberRowProps {
   onRemoved: (userId: string) => void;
 }
 
-function MemberRow({ member, serverSlug, isCurrentUser, canCurrentUserManage, onRoleChanged, onRemoved }: MemberRowProps) {
+function MemberRow({
+  member,
+  serverSlug,
+  isCurrentUser,
+  canCurrentUserManage,
+  onRoleChanged,
+  onRemoved,
+}: MemberRowProps) {
   const [state, setState] = useState<MemberRowState>({
     changingRole: false,
     kickConfirm: false,
@@ -156,9 +163,7 @@ function MemberRow({ member, serverSlug, isCurrentUser, canCurrentUserManage, on
             >
               {ROLE_LABEL[member.role]}
             </span>
-            {isCurrentUser && (
-              <span className='text-xs text-gray-500'>(you)</span>
-            )}
+            {isCurrentUser && <span className='text-xs text-gray-500'>(you)</span>}
           </div>
           <p className='truncate text-xs text-gray-500'>@{member.username}</p>
         </div>
@@ -232,11 +237,10 @@ function MemberRow({ member, serverSlug, isCurrentUser, canCurrentUserManage, on
 // ─── Main component ───────────────────────────────────────────────────────────
 
 interface MembersSectionProps {
-  serverId: string;
   serverSlug: string;
 }
 
-export function MembersSection({ serverId, serverSlug }: MembersSectionProps) {
+export function MembersSection({ serverSlug }: MembersSectionProps) {
   const { user } = useAuth();
   const [members, setMembers] = useState<ServerMemberInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -244,7 +248,7 @@ export function MembersSection({ serverId, serverSlug }: MembersSectionProps) {
 
   useEffect(() => {
     let cancelled = false;
-    getServerMembersAction(serverId)
+    getServerMembersAction(serverSlug)
       .then(data => {
         if (!cancelled) {
           setMembers(data);
@@ -258,11 +262,13 @@ export function MembersSection({ serverId, serverSlug }: MembersSectionProps) {
           setLoading(false);
         }
       });
-    return () => { cancelled = true; };
-  }, [serverId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [serverSlug]);
 
   function handleRoleChanged(userId: string, newRole: ServerMemberInfo['role']) {
-    setMembers(prev => prev.map(m => m.userId === userId ? { ...m, role: newRole } : m));
+    setMembers(prev => prev.map(m => (m.userId === userId ? { ...m, role: newRole } : m)));
   }
 
   function handleRemoved(userId: string) {

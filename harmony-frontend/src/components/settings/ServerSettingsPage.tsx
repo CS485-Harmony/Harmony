@@ -98,10 +98,7 @@ function OverviewSection({
         return;
       setSaveError(getUserErrorMessage(err, 'Failed to save changes.'));
     } finally {
-      if (
-        currentServerIdRef.current === savedForServerId &&
-        saveCounterRef.current === thisToken
-      ) {
+      if (currentServerIdRef.current === savedForServerId && saveCounterRef.current === thisToken) {
         isSavingRef.current = false;
         setSaving(false);
       }
@@ -220,9 +217,7 @@ function DangerZoneSection({ server }: { server: Server }) {
           </button>
         ) : (
           <div className='space-y-3'>
-            <p className='text-sm font-medium text-red-300'>
-              Are you sure? This cannot be undone.
-            </p>
+            <p className='text-sm font-medium text-red-300'>Are you sure? This cannot be undone.</p>
             <div className='flex gap-2'>
               <button
                 type='button'
@@ -343,7 +338,9 @@ export function ServerSettingsPage({ server, serverSlug }: ServerSettingsPagePro
                 activeSection === id
                   ? cn(BG.active, 'font-medium text-white')
                   : 'text-gray-400 hover:bg-[#393c43] hover:text-gray-200',
-                id === 'danger-zone' && activeSection !== 'danger-zone' && 'text-red-400 hover:text-red-300',
+                id === 'danger-zone' &&
+                  activeSection !== 'danger-zone' &&
+                  'text-red-400 hover:text-red-300',
               )}
             >
               {label}
@@ -365,8 +362,18 @@ export function ServerSettingsPage({ server, serverSlug }: ServerSettingsPagePro
             aria-expanded={isSidebarOpen}
             aria-controls='settings-sidebar'
           >
-            <svg className='h-5 w-5' viewBox='0 0 20 20' fill='currentColor' aria-hidden='true' focusable='false'>
-              <path fillRule='evenodd' d='M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z' clipRule='evenodd' />
+            <svg
+              className='h-5 w-5'
+              viewBox='0 0 20 20'
+              fill='currentColor'
+              aria-hidden='true'
+              focusable='false'
+            >
+              <path
+                fillRule='evenodd'
+                d='M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z'
+                clipRule='evenodd'
+              />
             </svg>
           </button>
           <button
@@ -394,13 +401,9 @@ export function ServerSettingsPage({ server, serverSlug }: ServerSettingsPagePro
         {/* Section content */}
         <div className='px-4 py-6 sm:px-10 sm:py-8'>
           {activeSection === 'overview' && (
-            <OverviewSection key={server.id}
-            server={server}
-            onSave={setDisplayName} />
+            <OverviewSection key={server.id} server={server} onSave={setDisplayName} />
           )}
-          {activeSection === 'members' && (
-            <MembersSection serverId={server.id} serverSlug={serverSlug} />
-          )}
+          {activeSection === 'members' && <MembersSection serverSlug={serverSlug} />}
           {activeSection === 'privacy' && (
             <VisibilitySection server={server} serverSlug={serverSlug} />
           )}
