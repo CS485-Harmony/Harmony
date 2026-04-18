@@ -373,4 +373,39 @@ describe('messageService.createReply — event publishing', () => {
 
     expect(mockPublish).not.toHaveBeenCalled();
   });
+
+  it('does NOT publish when parent message is soft-deleted', async () => {
+    mockMessageFindUnique.mockResolvedValue({ ...MOCK_PARENT_MESSAGE, isDeleted: true });
+
+    await expect(
+      messageService.createReply({
+        parentMessageId: MESSAGE_ID,
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: AUTHOR_ID,
+        content: 'reply to deleted',
+      }),
+    ).rejects.toThrow(TRPCError);
+
+    expect(mockPublish).not.toHaveBeenCalled();
+  });
+
+  it('does NOT publish when parent is itself a reply (reply-to-reply attempt)', async () => {
+    mockMessageFindUnique.mockResolvedValue({
+      ...MOCK_PARENT_MESSAGE,
+      parentMessageId: '00000000-0000-0000-0000-000000000099',
+    });
+
+    await expect(
+      messageService.createReply({
+        parentMessageId: MESSAGE_ID,
+        channelId: CHANNEL_ID,
+        serverId: SERVER_ID,
+        authorId: AUTHOR_ID,
+        content: 'nested reply',
+      }),
+    ).rejects.toThrow(TRPCError);
+
+    expect(mockPublish).not.toHaveBeenCalled();
+  });
 });
