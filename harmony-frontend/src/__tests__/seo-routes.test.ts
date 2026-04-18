@@ -69,7 +69,7 @@ describe('frontend SEO route handlers', () => {
     await expect(response.text()).resolves.toContain('Sitemap: https://harmony.chat/sitemap.xml');
   });
 
-  it('proxies the sitemap index from the backend API origin', async () => {
+  it('rewrites the sitemap index to the current frontend host', async () => {
     (global.fetch as jest.Mock).mockResolvedValue(
       new Response(
         '<?xml version="1.0"?><sitemapindex><sitemap><loc>https://harmony.chat/sitemap/harmony-hq</loc></sitemap></sitemapindex>',
