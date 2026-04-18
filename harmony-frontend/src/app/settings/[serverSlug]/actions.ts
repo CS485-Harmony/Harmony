@@ -12,22 +12,18 @@ import { revalidatePath } from 'next/cache';
 import {
   updateServer,
   deleteServer,
-  getServerAuthenticated,
   getServerMembersWithRole,
   changeMemberRole,
   removeMember,
 } from '@/services/serverService';
 import type { Server, ServerMemberInfo } from '@/types';
+import { requireServerSettingsAccess } from './settings-access';
 
 export async function saveServerSettings(
   serverSlug: string,
   patch: Partial<Pick<Server, 'name' | 'description' | 'icon' | 'isPublic'>>,
 ): Promise<void> {
-  // Resolve server by route param (don't trust a raw serverId from the client)
-  const server = await getServerAuthenticated(serverSlug);
-  if (!server) {
-    throw new Error('Server not found');
-  }
+  const server = await requireServerSettingsAccess(serverSlug, 'throw');
 
   // Build an explicit whitelist so callers cannot sneak in extra fields
   const sanitizedPatch: Partial<Pick<Server, 'name' | 'description' | 'icon' | 'isPublic'>> = {};
@@ -61,11 +57,7 @@ export async function saveServerSettings(
 }
 
 export async function deleteServerAction(serverSlug: string): Promise<void> {
-  // Resolve server first to confirm it exists
-  const server = await getServerAuthenticated(serverSlug);
-  if (!server) {
-    throw new Error('Server not found');
-  }
+  const server = await requireServerSettingsAccess(serverSlug, 'throw');
 
   // The backend deleteServer takes the server ID and handles cascade deletion
   await deleteServer(server.id);
@@ -78,8 +70,9 @@ export async function deleteServerAction(serverSlug: string): Promise<void> {
   redirect('/');
 }
 
-export async function getServerMembersAction(serverId: string): Promise<ServerMemberInfo[]> {
-  return getServerMembersWithRole(serverId);
+export async function getServerMembersAction(serverSlug: string): Promise<ServerMemberInfo[]> {
+  const server = await requireServerSettingsAccess(serverSlug, 'throw');
+  return getServerMembersWithRole(server.id);
 }
 
 export async function changeMemberRoleAction(
@@ -87,18 +80,13 @@ export async function changeMemberRoleAction(
   targetUserId: string,
   newRole: 'ADMIN' | 'MODERATOR' | 'MEMBER',
 ): Promise<void> {
-  const server = await getServerAuthenticated(serverSlug);
-  if (!server) throw new Error('Server not found');
+  const server = await requireServerSettingsAccess(serverSlug, 'throw');
   await changeMemberRole(server.id, targetUserId, newRole);
   revalidatePath(`/settings/${serverSlug}`);
 }
 
-export async function removeMemberAction(
-  serverSlug: string,
-  targetUserId: string,
-): Promise<void> {
-  const server = await getServerAuthenticated(serverSlug);
-  if (!server) throw new Error('Server not found');
+export async function removeMemberAction(serverSlug: string, targetUserId: string): Promise<void> {
+  const server = await requireServerSettingsAccess(serverSlug, 'throw');
   await removeMember(server.id, targetUserId);
   revalidatePath(`/settings/${serverSlug}`);
 }
