@@ -6,10 +6,9 @@
 import { BACKEND_URL, FRONTEND_URL, isCloud, LOCAL_SEEDS } from './env';
 import { login } from './helpers/auth';
 
-const PRODUCTION_FRONTEND_ORIGIN = 'https://harmony.chat';
 const localFrontendOrigin = 'http://localhost:3000';
 
-const allowedOrigin = isCloud ? PRODUCTION_FRONTEND_ORIGIN : localFrontendOrigin;
+const allowedOrigin = isCloud ? FRONTEND_URL : localFrontendOrigin;
 
 describe('CORS Header Verification', () => {
   test('CORS-1: OPTIONS preflight returns correct CORS headers for allowed origin', async () => {
@@ -41,10 +40,7 @@ describe('CORS Header Verification', () => {
     const acao = res.headers.get('access-control-allow-origin');
     // Either 403 with error body, or no ACAO header (browser would block)
     const isBlocked =
-      res.status === 403 ||
-      acao === null ||
-      acao === '' ||
-      acao === 'null';
+      res.status === 403 || acao === null || acao === '' || acao === 'null';
     expect(isBlocked).toBe(true);
   });
 
@@ -63,7 +59,10 @@ describe('CORS Header Verification', () => {
     }
 
     // Local mode: login with alice_admin and call an authenticated endpoint
-    const { accessToken } = await login(LOCAL_SEEDS.alice.email, LOCAL_SEEDS.alice.password);
+    const { accessToken } = await login(
+      LOCAL_SEEDS.alice.email,
+      LOCAL_SEEDS.alice.password,
+    );
     const res = await fetch(`${BACKEND_URL}/trpc/user.getCurrentUser`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
