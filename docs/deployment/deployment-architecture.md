@@ -430,6 +430,6 @@ The `generated_meta_tags` table (managed by Prisma) persists SEO meta tags gener
 | `created_at`         | `TIMESTAMPTZ`  | NO       | Record creation timestamp                            |
 | `updated_at`         | `TIMESTAMPTZ`  | NO       | Last modification timestamp (auto-updated)           |
 
-**AC-7 invariant:** Background regeneration writes via `metaTagRepository.saveGeneratedFields` are gated by a SQL `WHERE custom_title IS NULL AND custom_description IS NULL` predicate. A row with any non-null admin override is skipped entirely, so generated content can never silently replace admin-curated text.
+**AC-7 invariant:** Background regeneration writes via `metaTagRepository.saveGeneratedFields` are gated by `WHERE custom_title IS NULL AND custom_description IS NULL`. Rows with a non-null `custom_title` or `custom_description` are skipped, so generated title/description content cannot silently replace admin-curated text.
 
 Full schema definition: `docs/dev-spec-seo-meta-tag-generation.md §11.1 D6.3`.

@@ -263,7 +263,7 @@ model GeneratedMetaTags {
   channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
   // idx_meta_tags_channel is pinned via map: on the @unique above.
-  // idx_meta_tags_needs_regen (partial WHERE needs_regeneration = TRUE)
-  // idx_meta_tags_generated (generated_at) are added as raw SQL in the migration.
+  // idx_meta_tags_needs_regen (partial WHERE needs_regeneration = TRUE) exists in the init SQL migration.
+  // idx_meta_tags_generated (generated_at) is added as raw SQL in 20260418000000_add_meta_tag_overrides.
   @@map("generated_meta_tags")
 }

@@ -30,6 +30,11 @@ const BASE_TAGS = {
   generatedAt: new Date(),
 };
 
+async function seedGeneratedMetaTags() {
+  await prisma.generatedMetaTags.deleteMany({ where: { channelId } });
+  return metaTagRepository.create({ channelId, ...BASE_TAGS });
+}
+
 beforeAll(async () => {
   const user = await prisma.user.create({
     data: {
@@ -62,10 +67,19 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.generatedMetaTags.deleteMany({ where: { channelId } });
-  await prisma.channel.delete({ where: { id: channelId } });
-  await prisma.server.delete({ where: { id: serverId } });
-  await prisma.user.delete({ where: { id: userId } });
+  if (channelId) {
+    await prisma.generatedMetaTags.deleteMany({ where: { channelId } }).catch(() => {});
+    await prisma.channel.delete({ where: { id: channelId } }).catch(() => {});
+  }
+
+  if (serverId) {
+    await prisma.server.delete({ where: { id: serverId } }).catch(() => {});
+  }
+
+  if (userId) {
+    await prisma.user.delete({ where: { id: userId } }).catch(() => {});
+  }
+
   await prisma.$disconnect();
 });
 
@@ -81,6 +95,10 @@ describe('metaTagRepository.findByChannelId', () => {
 // ─── create & findByChannelId ───────────────────────────────────────────────
 
 describe('metaTagRepository.create', () => {
+  beforeEach(async () => {
+    await prisma.generatedMetaTags.deleteMany({ where: { channelId } });
+  });
+
   it('creates a meta tag record with no custom overrides', async () => {
     const created = await metaTagRepository.create({ channelId, ...BASE_TAGS });
     expect(created.channelId).toBe(channelId);
@@ -104,19 +122,24 @@ describe('metaTagRepository.saveGeneratedFields — AC-7', () => {
     ogDescription: 'OG Regenerated desc',
     twitterCard: 'summary',
     keywords: 'regen,test',
-    structuredData: { '@type': 'WebPage', name: 'Regen' } as Record<string, unknown>,
+    structuredData: { '@type': 'WebPage', name: 'Regen' },
     contentHash: 'regen_hash_789',
     needsRegeneration: false,
     generatedAt: new Date(),
   };
+
+  beforeEach(async () => {
+    await seedGeneratedMetaTags();
+  });
 
   it('AC-7: does not overwrite non-null customTitle set by admin', async () => {
     await metaTagRepository.updateCustomOverrides(channelId, {
       customTitle: 'Admin Custom Title',
     });
 
-    await metaTagRepository.saveGeneratedFields(channelId, REGEN_FIELDS);
+    const rowsUpdated = await metaTagRepository.saveGeneratedFields(channelId, REGEN_FIELDS);
 
+    expect(rowsUpdated).toBe(0);
     const record = await metaTagRepository.findByChannelId(channelId);
     expect(record!.customTitle).toBe('Admin Custom Title');
     // Generated title field should NOT have been updated due to AC-7 guard
@@ -128,8 +151,9 @@ describe('metaTagRepository.saveGeneratedFields — AC-7', () => {
       customDescription: 'Admin Custom Description',
     });
 
-    await metaTagRepository.saveGeneratedFields(channelId, REGEN_FIELDS);
+    const rowsUpdated = await metaTagRepository.saveGeneratedFields(channelId, REGEN_FIELDS);
 
+    expect(rowsUpdated).toBe(0);
     const record = await metaTagRepository.findByChannelId(channelId);
     expect(record!.customDescription).toBe('Admin Custom Description');
     expect(record!.title).toBe('Generated Title');
@@ -169,6 +193,10 @@ describe('metaTagRepository.saveGeneratedFields — AC-7', () => {
 // ─── updateCustomOverrides ──────────────────────────────────────────────────
 
 describe('metaTagRepository.updateCustomOverrides', () => {
+  beforeEach(async () => {
+    await seedGeneratedMetaTags();
+  });
+
   it('can set and clear customOgImage', async () => {
     await metaTagRepository.updateCustomOverrides(channelId, {
       customOgImage: 'https://cdn.example.com/custom.png',

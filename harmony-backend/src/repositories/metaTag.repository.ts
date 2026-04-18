@@ -13,7 +13,7 @@ export type GeneratedFieldsUpdate = {
   ogImage?: string | null;
   twitterCard: string;
   keywords: string;
-  structuredData: Record<string, unknown>;
+  structuredData: Prisma.InputJsonValue;
   contentHash: string;
   needsRegeneration: boolean;
   generatedAt: Date;
@@ -47,38 +47,41 @@ export const metaTagRepository = {
   /**
    * Persist background-generated tag fields.
    * AC-7: Never overwrites non-null customTitle or customDescription.
-   * Uses a conditional UPDATE so the constraint is enforced at the DB level.
+   * Uses a conditional UPDATE where-clause so the constraint is enforced at the DB level.
    */
   saveGeneratedFields(channelId: string, fields: GeneratedFieldsUpdate, client: Client = prisma) {
-    return (client as typeof prisma).$executeRaw`
-      UPDATE "generated_meta_tags"
-      SET
-        title               = ${fields.title},
-        description         = ${fields.description},
-        og_title            = ${fields.ogTitle},
-        og_description      = ${fields.ogDescription},
-        og_image            = ${fields.ogImage ?? null},
-        twitter_card        = ${fields.twitterCard},
-        keywords            = ${fields.keywords},
-        structured_data     = ${fields.structuredData}::jsonb,
-        content_hash        = ${fields.contentHash},
-        needs_regeneration  = ${fields.needsRegeneration},
-        generated_at        = ${fields.generatedAt},
-        schema_version      = COALESCE(${fields.schemaVersion ?? null}, schema_version),
-        updated_at          = NOW()
-      WHERE channel_id = ${channelId}::uuid
-        AND custom_title IS NULL
-        AND custom_description IS NULL
-    `;
+    return client.generatedMetaTags
+      .updateMany({
+        where: {
+          channelId,
+          customTitle: null,
+          customDescription: null,
+        },
+        data: {
+          title: fields.title,
+          description: fields.description,
+          ogTitle: fields.ogTitle,
+          ogDescription: fields.ogDescription,
+          twitterCard: fields.twitterCard,
+          keywords: fields.keywords,
+          structuredData: fields.structuredData,
+          contentHash: fields.contentHash,
+          needsRegeneration: fields.needsRegeneration,
+          generatedAt: fields.generatedAt,
+          ...(fields.ogImage !== undefined ? { ogImage: fields.ogImage } : {}),
+          ...(fields.schemaVersion !== undefined ? { schemaVersion: fields.schemaVersion } : {}),
+        },
+      })
+      .then(({ count }) => count);
   },
 
-  upsert(data: MetaTagCreateData, client: Client = prisma) {
-    const { channelId, ...rest } = data;
-    return client.generatedMetaTags.upsert({
-      where: { channelId },
-      create: data,
-      update: rest,
-    });
+  upsert(
+    where: Prisma.GeneratedMetaTagsWhereUniqueInput,
+    update: Prisma.GeneratedMetaTagsUpdateInput,
+    create: MetaTagCreateData,
+    client: Client = prisma,
+  ) {
+    return client.generatedMetaTags.upsert({ where, update, create });
   },
 
   deleteByChannelId(channelId: string, client: Client = prisma) {
