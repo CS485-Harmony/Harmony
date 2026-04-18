@@ -5,6 +5,9 @@
 -- migration is safe to apply while old backend-api replicas are still running.
 
 -- Admin override fields (AC-7: never overwritten by background regeneration)
+-- VARCHAR(70)/VARCHAR(200) are intentionally narrower than the generated title/description
+-- columns (120/320) — they reflect the stricter SEO spec limits for admin-supplied overrides
+-- (spec §11.1 D6.3: custom_title ≤70, custom_description ≤200).
 ALTER TABLE "generated_meta_tags"
   ADD COLUMN IF NOT EXISTS "custom_title"       VARCHAR(70),
   ADD COLUMN IF NOT EXISTS "custom_description" VARCHAR(200),

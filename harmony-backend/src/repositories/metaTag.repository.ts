@@ -13,7 +13,7 @@ export type GeneratedFieldsUpdate = {
   ogImage?: string | null;
   twitterCard: string;
   keywords: string;
-  structuredData: Prisma.InputJsonValue;
+  structuredData: Record<string, unknown>;
   contentHash: string;
   needsRegeneration: boolean;
   generatedAt: Date;
@@ -49,11 +49,7 @@ export const metaTagRepository = {
    * AC-7: Never overwrites non-null customTitle or customDescription.
    * Uses a conditional UPDATE so the constraint is enforced at the DB level.
    */
-  saveGeneratedFields(
-    channelId: string,
-    fields: GeneratedFieldsUpdate,
-    client: Client = prisma,
-  ) {
+  saveGeneratedFields(channelId: string, fields: GeneratedFieldsUpdate, client: Client = prisma) {
     return (client as typeof prisma).$executeRaw`
       UPDATE "generated_meta_tags"
       SET
@@ -68,7 +64,8 @@ export const metaTagRepository = {
         content_hash        = ${fields.contentHash},
         needs_regeneration  = ${fields.needsRegeneration},
         generated_at        = ${fields.generatedAt},
-        schema_version      = COALESCE(${fields.schemaVersion ?? null}, schema_version)
+        schema_version      = COALESCE(${fields.schemaVersion ?? null}, schema_version),
+        updated_at          = NOW()
       WHERE channel_id = ${channelId}::uuid
         AND custom_title IS NULL
         AND custom_description IS NULL

@@ -149,6 +149,21 @@ describe('metaTagRepository.saveGeneratedFields — AC-7', () => {
     expect(record!.title).toBe('Regenerated Title');
     expect(record!.description).toBe('Regenerated description');
   });
+
+  it('bumps updatedAt on every successful saveGeneratedFields call', async () => {
+    const before = await metaTagRepository.findByChannelId(channelId);
+    const beforeUpdatedAt = before!.updatedAt.getTime();
+
+    // Small delay so NOW() is guaranteed to differ
+    await new Promise((r) => setTimeout(r, 10));
+    await metaTagRepository.saveGeneratedFields(channelId, {
+      ...REGEN_FIELDS,
+      title: 'Updated Again',
+    });
+
+    const after = await metaTagRepository.findByChannelId(channelId);
+    expect(after!.updatedAt.getTime()).toBeGreaterThan(beforeUpdatedAt);
+  });
 });
 
 // ─── updateCustomOverrides ──────────────────────────────────────────────────
