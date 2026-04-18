@@ -417,3 +417,19 @@ The following decisions are now explicit:
 | `#322` | Provision Railway services and env vars to match this topology, including the worker health check / restart strategy before go-live |
 | `#323` | Write deployment-aware integration test specs using this topology                                                                   |
 | `#329` | Configure Vercel preview/production domains and env vars to match this contract                                                     |
+
+## 11. Meta Tag Override Schema
+
+The `generated_meta_tags` table (managed by Prisma) persists SEO meta tags generated per `PUBLIC_INDEXABLE` channel. Issue #352 added the following columns for admin override support:
+
+| Column               | Type           | Nullable | Description                                          |
+| -------------------- | -------------- | -------- | ---------------------------------------------------- |
+| `custom_title`       | `VARCHAR(70)`  | YES      | Admin override title; takes precedence when non-null |
+| `custom_description` | `VARCHAR(200)` | YES      | Admin override description; takes precedence when non-null |
+| `custom_og_image`    | `VARCHAR(500)` | YES      | Admin override OG image URL                          |
+| `created_at`         | `TIMESTAMPTZ`  | NO       | Record creation timestamp                            |
+| `updated_at`         | `TIMESTAMPTZ`  | NO       | Last modification timestamp (auto-updated)           |
+
+**AC-7 invariant:** Background regeneration writes via `metaTagRepository.saveGeneratedFields` are gated by a SQL `WHERE custom_title IS NULL AND custom_description IS NULL` predicate. A row with any non-null admin override is skipped entirely, so generated content can never silently replace admin-curated text.
+
+Full schema definition: `docs/dev-spec-seo-meta-tag-generation.md §11.1 D6.3`.

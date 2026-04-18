@@ -237,25 +237,33 @@ model VisibilityAuditLog {
 }
 
 model GeneratedMetaTags {
-  id                String   @id @default(uuid()) @db.Uuid
-  channelId         String   @unique(map: "idx_meta_tags_channel") @map("channel_id") @db.Uuid
-  title             String   @db.VarChar(120)
-  description       String   @db.VarChar(320)
-  ogTitle           String   @map("og_title") @db.VarChar(120)
-  ogDescription     String   @map("og_description") @db.VarChar(320)
-  ogImage           String?  @map("og_image") @db.VarChar(500)
-  twitterCard       String   @map("twitter_card") @db.VarChar(20)
-  keywords          String   @db.Text
-  structuredData    Json     @map("structured_data")
-  contentHash       String   @map("content_hash") @db.VarChar(64)
-  needsRegeneration Boolean  @default(false) @map("needs_regeneration")
-  generatedAt       DateTime @default(now()) @map("generated_at") @db.Timestamptz
-  schemaVersion     Int      @default(1) @map("schema_version")
+  id                  String   @id @default(uuid()) @db.Uuid
+  channelId           String   @unique(map: "idx_meta_tags_channel") @map("channel_id") @db.Uuid
+  title               String   @db.VarChar(120)
+  description         String   @db.VarChar(320)
+  ogTitle             String   @map("og_title") @db.VarChar(120)
+  ogDescription       String   @map("og_description") @db.VarChar(320)
+  ogImage             String?  @map("og_image") @db.VarChar(500)
+  twitterCard         String   @map("twitter_card") @db.VarChar(20)
+  keywords            String   @db.Text
+  structuredData      Json     @map("structured_data")
+  contentHash         String   @map("content_hash") @db.VarChar(64)
+  needsRegeneration   Boolean  @default(false) @map("needs_regeneration")
+  generatedAt         DateTime @default(now()) @map("generated_at") @db.Timestamptz
+  schemaVersion       Int      @default(1) @map("schema_version")
+  /// Admin override title — takes precedence over generated title when present.
+  customTitle         String?  @map("custom_title") @db.VarChar(70)
+  /// Admin override description — takes precedence over generated description when present.
+  customDescription   String?  @map("custom_description") @db.VarChar(200)
+  /// Admin override OG image URL — takes precedence over generated og_image when present.
+  customOgImage       String?  @map("custom_og_image") @db.VarChar(500)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
   // idx_meta_tags_channel is pinned via map: on the @unique above.
   // idx_meta_tags_needs_regen (partial WHERE needs_regeneration = TRUE)
-  // is added as raw SQL in the migration.
+  // idx_meta_tags_generated (generated_at) are added as raw SQL in the migration.
   @@map("generated_meta_tags")
 }
