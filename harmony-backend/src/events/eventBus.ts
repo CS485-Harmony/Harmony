@@ -30,10 +30,12 @@ export type {
 let subscriberClient: Redis | null = null;
 const logger = createLogger({ component: 'event-bus' });
 
-// Per-channel handler count — tracks how many JS handlers are registered for
-// each Redis channel so we can unsubscribe at the Redis level precisely when
-// the last handler for a given channel is removed.
-const channelHandlerCounts = new Map<string, number>();
+// Central handler registry — maps each Redis channel to its active JS handlers.
+// A single 'message' listener on the ioredis client dispatches to these sets,
+// avoiding per-subscription client.on() calls that accumulate and trigger
+// MaxListenersExceededWarning under concurrent SSE connections.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const channelHandlers = new Map<string, Set<(payload: any) => void>>();
 
 // Per-channel ready promise — resolves when Redis confirms the subscription.
 // All subscribers on the same channel share this promise so latecomers don't
@@ -45,6 +47,28 @@ function getSubscriberClient(): Redis {
     subscriberClient = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
       maxRetriesPerRequest: null, // subscriber clients must not timeout on blocked commands
       lazyConnect: true,
+    });
+
+    // Single dispatcher — routes all incoming Redis messages to registered JS handlers.
+    // This replaces per-subscription client.on('message', ...) calls, keeping the
+    // ioredis emitter's listener count at 1 regardless of how many SSE connections exist.
+    subscriberClient.on('message', (ch: string, rawMessage: string) => {
+      const handlers = channelHandlers.get(ch);
+      if (!handlers) return;
+      let payload: unknown;
+      try {
+        payload = JSON.parse(rawMessage);
+      } catch (err) {
+        logger.error({ err, channel: ch }, 'Failed to parse event payload');
+        return;
+      }
+      for (const handler of handlers) {
+        try {
+          handler(payload);
+        } catch (err) {
+          logger.error({ err, channel: ch }, 'Event handler threw synchronously');
+        }
+      }
     });
   }
   return subscriberClient;
@@ -81,31 +105,21 @@ export const eventBus = {
   ): { unsubscribe: () => void; ready: Promise<void> } {
     const client = getSubscriberClient();
 
-    const messageListener = (ch: string, message: string) => {
-      if (ch !== channel) return;
-      let payload: EventPayloadMap[C];
-      try {
-        payload = JSON.parse(message) as EventPayloadMap[C];
-      } catch (err) {
-        logger.error({ err, channel: ch }, 'Failed to parse event payload');
-        return;
-      }
-      try {
-        handler(payload);
-      } catch (err) {
-        logger.error({ err, channel: ch }, 'Event handler threw synchronously');
-      }
-    };
-
-    const prevCount = channelHandlerCounts.get(channel) ?? 0;
-    channelHandlerCounts.set(channel, prevCount + 1);
+    // Register the typed handler in the central registry.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let handlers = channelHandlers.get(channel) as Set<(p: any) => void> | undefined;
+    const isFirstSubscriber = !handlers || handlers.size === 0;
+    if (!handlers) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      handlers = new Set<(p: any) => void>();
+      channelHandlers.set(channel, handlers);
+    }
+    handlers.add(handler);
 
     let ready: Promise<void>;
-    if (prevCount === 0) {
+    if (isFirstSubscriber) {
       // First subscriber — issue SUBSCRIBE and store the in-flight handshake promise
       // so subsequent subscribers on the same channel wait for the same confirmation.
-      // ioredis queues the SUBSCRIBE command and fires the callback once Redis
-      // confirms — this resolves even on error so callers never hang.
       const handshake = new Promise<void>((resolve, reject) => {
         client.subscribe(channel, (err) => {
           if (err) {
@@ -123,23 +137,21 @@ export const eventBus = {
       // Redis actually confirms the subscription rather than resolving immediately.
       ready = channelReadyPromises.get(channel) ?? Promise.resolve();
     }
-    client.on('message', messageListener);
 
     return {
       unsubscribe: () => {
-        client.removeListener('message', messageListener);
-
-        const count = (channelHandlerCounts.get(channel) ?? 1) - 1;
-        if (count <= 0) {
-          channelHandlerCounts.delete(channel);
-          channelReadyPromises.delete(channel);
-          client
-            .unsubscribe(channel)
-            .catch((err) =>
-              logger.warn({ err, channel }, 'Failed to unsubscribe from event channel'),
-            );
-        } else {
-          channelHandlerCounts.set(channel, count);
+        const set = channelHandlers.get(channel);
+        if (set) {
+          set.delete(handler);
+          if (set.size === 0) {
+            channelHandlers.delete(channel);
+            channelReadyPromises.delete(channel);
+            client
+              .unsubscribe(channel)
+              .catch((err) =>
+                logger.warn({ err, channel }, 'Failed to unsubscribe from event channel'),
+              );
+          }
         }
       },
       ready,
@@ -153,7 +165,7 @@ export const eventBus = {
         .quit()
         .catch((err) => logger.warn({ err }, 'Failed to close event subscriber client cleanly'));
       subscriberClient = null;
-      channelHandlerCounts.clear();
+      channelHandlers.clear();
       channelReadyPromises.clear();
     }
   },
