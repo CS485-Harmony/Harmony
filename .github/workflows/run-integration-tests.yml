@@ -150,6 +150,7 @@ jobs:
       - name: Build frontend
         working-directory: harmony-frontend
         env:
+          NODE_ENV: production
           NEXT_PUBLIC_API_URL: http://localhost:4000
           NEXT_PUBLIC_BASE_URL: http://localhost:3000
         run: npm run build
@@ -157,6 +158,10 @@ jobs:
       - name: Start frontend
         working-directory: harmony-frontend
         env:
+          NODE_ENV: production
+          # Override the job-level PORT (4000) so Next.js binds to 3000, not
+          # the backend's port.
+          PORT: "3000"
           NEXT_PUBLIC_API_URL: http://localhost:4000
           NEXT_PUBLIC_BASE_URL: http://localhost:3000
         run: npm run start > /tmp/frontend.log 2>&1 &
