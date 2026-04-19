@@ -106,6 +106,34 @@ function sseGet(
   });
 }
 
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+function waitFor(condition: () => boolean, timeoutMs = 1000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+
+    const poll = () => {
+      if (condition()) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(new Error('Timed out waiting for condition'));
+        return;
+      }
+      setTimeout(poll, 10);
+    };
+
+    poll();
+  });
+}
+
 // ─── Test setup ───────────────────────────────────────────────────────────────
 
 const mockSubscribe = eventBus.subscribe as jest.Mock;
@@ -165,6 +193,36 @@ describe('GET /api/events/server/:serverId — SSE headers', () => {
   });
 });
 
+describe('GET /api/events/server/:serverId — subscription readiness', () => {
+  const sseUrl = `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}`;
+
+  it('waits for all server-scoped subscriptions before flushing SSE headers', async () => {
+    const ready = createDeferred<void>();
+    mockSubscribe.mockImplementation(() => ({
+      unsubscribe: jest.fn(),
+      ready: ready.promise,
+    }));
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    let headersReceived = false;
+    const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+      headersReceived = true;
+      res.resume();
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(headersReceived).toBe(false);
+
+    ready.resolve();
+    await waitFor(() => headersReceived);
+
+    req.destroy();
+  });
+});
+
 // ─── Input validation ──────────────────────────────────────────────────────────
 
 describe('GET /api/events/server/:serverId — input validation', () => {
@@ -201,9 +259,7 @@ describe('GET /api/events/server/:serverId — auth', () => {
       throw new Error('invalid token');
     });
 
-    const res = await request(app).get(
-      `/api/events/server/${VALID_SERVER_ID}?token=bad-token`,
-    );
+    const res = await request(app).get(`/api/events/server/${VALID_SERVER_ID}?token=bad-token`);
     expect(res.status).toBe(401);
   });
 });

@@ -15,6 +15,7 @@ import { createApp } from '../src/app';
 import { eventBus } from '../src/events/eventBus';
 import { prisma } from '../src/db/prisma';
 import type { Express } from 'express';
+import type { MessageCreatedPayload } from '../src/events/eventTypes';
 
 const VALID_TOKEN = 'valid-token';
 
@@ -111,6 +112,34 @@ function sseGet(
   });
 }
 
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+function waitFor(condition: () => boolean, timeoutMs = 1000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+
+    const poll = () => {
+      if (condition()) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(new Error('Timed out waiting for condition'));
+        return;
+      }
+      setTimeout(poll, 10);
+    };
+
+    poll();
+  });
+}
+
 // ─── Test setup ───────────────────────────────────────────────────────────────
 
 const mockSubscribe = eventBus.subscribe as jest.Mock;
@@ -169,6 +198,116 @@ describe('GET /api/events/channel/:channelId — SSE headers', () => {
     expect(subscribedChannels).toContain('harmony:MESSAGE_CREATED');
     expect(subscribedChannels).toContain('harmony:MESSAGE_EDITED');
     expect(subscribedChannels).toContain('harmony:MESSAGE_DELETED');
+  });
+});
+
+describe('GET /api/events/channel/:channelId — subscription readiness', () => {
+  const VALID_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440001';
+  const sseUrl = `/api/events/channel/${VALID_CHANNEL_ID}?token=${VALID_TOKEN}`;
+
+  it('waits for all subscription handshakes before flushing SSE headers', async () => {
+    const ready = createDeferred<void>();
+    mockSubscribe.mockImplementation(() => ({
+      unsubscribe: jest.fn(),
+      ready: ready.promise,
+    }));
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    let headersReceived = false;
+    const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+      headersReceived = true;
+      res.resume();
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(headersReceived).toBe(false);
+
+    ready.resolve();
+    await waitFor(() => headersReceived);
+
+    req.destroy();
+  });
+
+  it('buffers message events that arrive before the stream becomes live', async () => {
+    const ready = createDeferred<void>();
+    const responseStarted = createDeferred<void>();
+    let createdHandler: ((payload: MessageCreatedPayload) => Promise<void>) | null = null;
+
+    mockSubscribe.mockImplementation(
+      (channel: string, handler: (payload: MessageCreatedPayload) => Promise<void>) => {
+        if (channel === 'harmony:MESSAGE_CREATED') {
+          createdHandler = handler;
+        }
+        return {
+          unsubscribe: jest.fn(),
+          ready: ready.promise,
+        };
+      },
+    );
+
+    (prisma.message.findUnique as jest.Mock).mockResolvedValue({
+      id: 'message-1',
+      channelId: VALID_CHANNEL_ID,
+      authorId: 'author-1',
+      author: {
+        id: 'author-1',
+        username: 'alice',
+        displayName: 'Alice',
+        avatarUrl: null,
+      },
+      content: 'hello from the setup window',
+      createdAt: new Date('2026-04-19T10:00:00.000Z'),
+      editedAt: null,
+      attachments: [],
+      isDeleted: false,
+    });
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    const chunks: string[] = [];
+    let response: http.IncomingMessage | null = null;
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+        response = res;
+        responseStarted.resolve();
+        res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+        res.on('error', reject);
+      });
+
+      req.on('error', reject);
+
+      setTimeout(async () => {
+        if (!createdHandler) {
+          reject(new Error('MESSAGE_CREATED handler was not registered'));
+          return;
+        }
+
+        await createdHandler({
+          messageId: 'message-1',
+          channelId: VALID_CHANNEL_ID,
+          authorId: 'author-1',
+          timestamp: new Date('2026-04-19T10:00:00.000Z').toISOString(),
+        });
+
+        ready.resolve();
+        await responseStarted.promise;
+
+        setTimeout(() => {
+          response?.destroy();
+          req.destroy();
+          resolve();
+        }, 75);
+      }, 50);
+    });
+
+    const body = chunks.join('');
+    expect(body).toContain('event: message:created');
+    expect(body).toContain('hello from the setup window');
   });
 });
 
