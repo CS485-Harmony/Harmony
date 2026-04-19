@@ -38,7 +38,7 @@ Install each package that has its own lockfile:
 cd harmony-frontend && npm install
 cd ../harmony-backend && npm install
 cd ../tests/integration && npm install
-cd ..
+cd ../..
 ```
 
 ### 2. Configure and start the backend data plane

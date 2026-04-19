@@ -98,3 +98,9 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 **Related Issue:** #331  
 **Mistake / Situation:** I documented `npm run dev` and `npm run dev:worker` as if the worker would naturally stay on `4100`, but the backend `.env.example` sets `PORT=4000`, so both processes collide unless the worker port is overridden explicitly.  
 **Rule / Fix:** When documenting split-process local startup in Harmony, verify how `.env` values interact with entrypoint defaults; if a shared `PORT` variable exists, either force the worker dev script to `4100` or document an explicit `PORT=4100` override instead of relying on fallback defaults.
+
+**Date:** 2026-04-19  
+**Caught by:** [Human: user]  
+**Related Issue:** #331  
+**Mistake / Situation:** I wrote a chained `cd` sequence in the README that ended with `cd ..` after entering `tests/integration`, which only returns to `tests/` rather than the repository root.  
+**Rule / Fix:** When documenting multi-step shell navigation in Harmony, trace the working directory after each `cd` and prefer exact return paths like `cd ../..` when the instructions are meant to end back at the repo root.
