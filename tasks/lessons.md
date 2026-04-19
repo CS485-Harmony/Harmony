@@ -104,3 +104,8 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 **Related Issue:** #331  
 **Mistake / Situation:** I wrote a chained `cd` sequence in the README that ended with `cd ..` after entering `tests/integration`, which only returns to `tests/` rather than the repository root.  
 **Rule / Fix:** When documenting multi-step shell navigation in Harmony, trace the working directory after each `cd` and prefer exact return paths like `cd ../..` when the instructions are meant to end back at the repo root.
+
+**Date:** 2026-04-19  
+**Caught by:** [Human: user]  
+**Mistake / Situation:** I documented `npm run test:integration` from the repo root without verifying the actual root script invocation. The root script was forwarding an extra `--config jest.config.js` even though the integration package already sets its own config, which breaks Jest argument parsing.  
+**Rule / Fix:** For Harmony root wrapper scripts, always execute the command once from the repo root before documenting it. If the delegated package already owns its config flags, the root wrapper should forward cleanly instead of duplicating CLI options.
