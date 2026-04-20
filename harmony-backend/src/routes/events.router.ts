@@ -62,8 +62,98 @@ const MESSAGE_SSE_INCLUDE = {
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
-function sendEvent(res: Response, eventType: string, data: unknown): void {
-  res.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
+type EventSubscription = { unsubscribe: () => void; ready: Promise<void> };
+
+type BufferedSseState = {
+  closed: boolean;
+  ready: boolean;
+  pendingFrames: string[];
+  heartbeat: ReturnType<typeof setInterval> | null;
+};
+
+function formatEvent(eventType: string, data: unknown): string {
+  return `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+function createBufferedSseState(): BufferedSseState {
+  return {
+    closed: false,
+    ready: false,
+    pendingFrames: [],
+    heartbeat: null,
+  };
+}
+
+function cleanupSseConnection(state: BufferedSseState, subscriptions: EventSubscription[]): void {
+  if (state.closed) return;
+  state.closed = true;
+  if (state.heartbeat) {
+    clearInterval(state.heartbeat);
+    state.heartbeat = null;
+  }
+  state.pendingFrames.length = 0;
+  for (const subscription of subscriptions) {
+    subscription.unsubscribe();
+  }
+}
+
+function createBufferedEventWriter(
+  res: Response,
+  state: BufferedSseState,
+): (eventType: string, data: unknown) => void {
+  return (eventType: string, data: unknown) => {
+    if (state.closed) return;
+    const frame = formatEvent(eventType, data);
+    if (!state.ready) {
+      state.pendingFrames.push(frame);
+      return;
+    }
+    res.write(frame);
+  };
+}
+
+async function finalizeSseSetup(
+  req: Request,
+  res: Response,
+  state: BufferedSseState,
+  subscriptions: EventSubscription[],
+  logContext: Record<string, string>,
+): Promise<boolean> {
+  const cleanup = () => cleanupSseConnection(state, subscriptions);
+  req.on('close', cleanup);
+
+  try {
+    await Promise.all(subscriptions.map((subscription) => subscription.ready));
+  } catch (err) {
+    cleanup();
+    logger.error({ err, ...logContext }, 'Failed to establish SSE subscriptions');
+    if (!res.headersSent) {
+      res.status(503).json({ error: 'Failed to establish event stream' });
+    }
+    return false;
+  }
+
+  if (state.closed) {
+    return false;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  state.ready = true;
+  for (const frame of state.pendingFrames.splice(0)) {
+    res.write(frame);
+  }
+
+  state.heartbeat = setInterval(() => {
+    if (state.closed) return;
+    res.write(':\n\n');
+  }, 30_000);
+
+  return true;
 }
 
 // ─── Route ────────────────────────────────────────────────────────────────────
@@ -111,16 +201,12 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     return;
   }
 
-  // ── SSE headers ──────────────────────────────────────────────────────────
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+  const sseState = createBufferedSseState();
+  const writeEvent = createBufferedEventWriter(res, sseState);
 
   // ── Subscribe to message events ──────────────────────────────────────────
 
-  const { unsubscribe: unsubCreated } = eventBus.subscribe(
+  const createdSubscription = eventBus.subscribe(
     EventChannels.MESSAGE_CREATED,
     async (payload: MessageCreatedPayload) => {
       if (payload.channelId !== channelId) return;
@@ -132,7 +218,7 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
         });
         if (!message || message.isDeleted) return;
 
-        sendEvent(res, 'message:created', {
+        writeEvent('message:created', {
           id: message.id,
           channelId: message.channelId,
           authorId: message.authorId,
@@ -151,7 +237,7 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     },
   );
 
-  const { unsubscribe: unsubEdited } = eventBus.subscribe(
+  const editedSubscription = eventBus.subscribe(
     EventChannels.MESSAGE_EDITED,
     async (payload: MessageEditedPayload) => {
       if (payload.channelId !== channelId) return;
@@ -163,7 +249,7 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
         });
         if (!message || message.isDeleted) return;
 
-        sendEvent(res, 'message:edited', {
+        writeEvent('message:edited', {
           id: message.id,
           channelId: message.channelId,
           authorId: message.authorId,
@@ -182,26 +268,24 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     },
   );
 
-  const { unsubscribe: unsubDeleted } = eventBus.subscribe(
+  const deletedSubscription = eventBus.subscribe(
     EventChannels.MESSAGE_DELETED,
     (payload: MessageDeletedPayload) => {
       if (payload.channelId !== channelId) return;
-      // Include channelId so the payload shape is consistent with the server endpoint.
-      sendEvent(res, 'message:deleted', {
+      writeEvent('message:deleted', {
         messageId: payload.messageId,
         channelId: payload.channelId,
       });
     },
   );
 
-  const { unsubscribe: unsubServerUpdated } = eventBus.subscribe(
+  const serverUpdatedSubscription = eventBus.subscribe(
     EventChannels.SERVER_UPDATED,
     (payload: ServerUpdatedPayload) => {
       if (payload.serverId !== channel.serverId) return;
-      sendEvent(res, 'server:updated', {
+      writeEvent('server:updated', {
         id: payload.serverId,
         name: payload.name,
-        // Use 'icon' to match the frontend Server type (Server.icon, not iconUrl)
         icon: payload.iconUrl ?? undefined,
         description: payload.description,
         updatedAt: payload.timestamp,
@@ -209,18 +293,17 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     },
   );
 
-  // ── Heartbeat — keeps the connection alive through proxies ───────────────
-  const heartbeat = setInterval(() => {
-    res.write(':\n\n');
-  }, 30_000);
+  const channelSubscriptions = [
+    createdSubscription,
+    editedSubscription,
+    deletedSubscription,
+    serverUpdatedSubscription,
+  ];
 
-  // ── Cleanup on client disconnect ─────────────────────────────────────────
-  req.on('close', () => {
-    clearInterval(heartbeat);
-    unsubCreated();
-    unsubEdited();
-    unsubDeleted();
-    unsubServerUpdated();
+  await finalizeSseSetup(req, res, sseState, channelSubscriptions, {
+    route: 'channel-events',
+    channelId,
+    serverId: channel.serverId,
   });
 });
 
@@ -244,9 +327,9 @@ const CHANNEL_SSE_SELECT = {
 /**
  * GET /api/events/server/:serverId?token=<accessToken>
  *
- * Streams real-time channel events (created, updated, deleted) to authenticated,
- * authorised clients using Server-Sent Events. Scoped to a server so all members
- * see the same sidebar updates regardless of which channel they're currently viewing.
+ * Streams real-time server events to authenticated, authorised clients using
+ * Server-Sent Events. Scoped to a server so all members see the same sidebar,
+ * member, message, and server updates regardless of which channel they are viewing.
  *
  * Auth: same token-via-query-param pattern as /channel/:channelId (EventSource cannot
  * send custom headers).
@@ -296,43 +379,35 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     return;
   }
 
-  // ── Initialize channel ID set — registered before findMany so any CHANNEL_CREATED
-  //    events that fire during the preload query are captured by the handler below.
-  //    Message events carry channelId but not serverId; this set is the filter.
+  const sseState = createBufferedSseState();
+  const writeEvent = createBufferedEventWriter(res, sseState);
   const serverChannelIds = new Set<string>();
-
-  // ── Idempotent cleanup — registered before any subscription so that a client
-  //    disconnect or preload failure during setup always releases all handlers.
-  const cleanupFns: Array<() => void> = [];
+  const subscriptions: EventSubscription[] = [];
   let cleanedUp = false;
+
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
-    for (const fn of cleanupFns) fn();
+    cleanupSseConnection(sseState, subscriptions);
   };
   req.on('close', cleanup);
 
-  // ── Subscribe CHANNEL_CREATED / CHANNEL_DELETED before findMany ───────────
-  // Registering these two handlers before the preload query closes the race window:
-  // if a channel is created (or deleted) while findMany is awaiting, the handler
-  // mutates serverChannelIds synchronously so subsequent message events for that
-  // channel are correctly forwarded (or suppressed). Handlers skip res.write()
-  // until headers are flushed, using res.headersSent as the gate.
-  // Teardown is registered (above) before these subscriptions so a disconnect or
-  // preload failure during setup always releases them.
-  const { unsubscribe: unsubChannelCreated } = eventBus.subscribe(
+  // Register create/delete subscriptions before the preload query so channel-ID
+  // tracking stays correct if channels change while the initial lookup is in flight.
+  const channelCreatedSubscription = eventBus.subscribe(
     EventChannels.CHANNEL_CREATED,
     async (payload: ChannelCreatedPayload) => {
       if (payload.serverId !== serverId) return;
       serverChannelIds.add(payload.channelId);
-      if (!res.headersSent) return; // headers not flushed yet — skip SSE write
+
       try {
         const channel = await prisma.channel.findUnique({
           where: { id: payload.channelId },
           select: CHANNEL_SSE_SELECT,
         });
         if (!channel) return;
-        sendEvent(res, 'channel:created', channel);
+
+        writeEvent('channel:created', channel);
       } catch (err) {
         logger.warn(
           { err, serverId, channelId: payload.channelId },
@@ -341,21 +416,18 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
-  cleanupFns.push(unsubChannelCreated);
+  subscriptions.push(channelCreatedSubscription);
 
-  const { unsubscribe: unsubChannelDeleted } = eventBus.subscribe(
+  const channelDeletedSubscription = eventBus.subscribe(
     EventChannels.CHANNEL_DELETED,
     (payload: ChannelDeletedPayload) => {
       if (payload.serverId !== serverId) return;
       serverChannelIds.delete(payload.channelId);
-      if (!res.headersSent) return;
-      sendEvent(res, 'channel:deleted', { channelId: payload.channelId });
+      writeEvent('channel:deleted', { channelId: payload.channelId });
     },
   );
-  cleanupFns.push(unsubChannelDeleted);
+  subscriptions.push(channelDeletedSubscription);
 
-  // ── Preload existing channel IDs — handlers above capture creations/deletions
-  //    that race with this await.
   let serverChannels: { id: string }[];
   try {
     serverChannels = await prisma.channel.findMany({
@@ -368,23 +440,13 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
     return;
   }
-  for (const c of serverChannels) serverChannelIds.add(c.id);
+  for (const currentChannel of serverChannels) {
+    serverChannelIds.add(currentChannel.id);
+  }
 
-  // Guard: if the client disconnected while findMany was in flight, cleanup()
-  // has already fired (cleanedUp === true) and the early subscriptions are
-  // released. Stop here so no further handlers are registered under a dead conn.
   if (cleanedUp) return;
 
-  // ── SSE headers ──────────────────────────────────────────────────────────
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
-
-  // ── Subscribe to message events ──────────────────────────────────────────
-
-  const { unsubscribe: unsubMessageCreated } = eventBus.subscribe(
+  const messageCreatedSubscription = eventBus.subscribe(
     EventChannels.MESSAGE_CREATED,
     async (payload: MessageCreatedPayload) => {
       if (!serverChannelIds.has(payload.channelId)) return;
@@ -396,7 +458,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
         });
         if (!message || message.isDeleted) return;
 
-        sendEvent(res, 'message:created', {
+        writeEvent('message:created', {
           id: message.id,
           channelId: message.channelId,
           authorId: message.authorId,
@@ -414,9 +476,9 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
-  cleanupFns.push(unsubMessageCreated);
+  subscriptions.push(messageCreatedSubscription);
 
-  const { unsubscribe: unsubMessageEdited } = eventBus.subscribe(
+  const messageEditedSubscription = eventBus.subscribe(
     EventChannels.MESSAGE_EDITED,
     async (payload: MessageEditedPayload) => {
       if (!serverChannelIds.has(payload.channelId)) return;
@@ -428,7 +490,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
         });
         if (!message || message.isDeleted) return;
 
-        sendEvent(res, 'message:edited', {
+        writeEvent('message:edited', {
           id: message.id,
           channelId: message.channelId,
           authorId: message.authorId,
@@ -446,41 +508,36 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
-  cleanupFns.push(unsubMessageEdited);
+  subscriptions.push(messageEditedSubscription);
 
-  const { unsubscribe: unsubMessageDeleted } = eventBus.subscribe(
+  const messageDeletedSubscription = eventBus.subscribe(
     EventChannels.MESSAGE_DELETED,
     (payload: MessageDeletedPayload) => {
       if (!serverChannelIds.has(payload.channelId)) return;
-      sendEvent(res, 'message:deleted', {
+      writeEvent('message:deleted', {
         messageId: payload.messageId,
         channelId: payload.channelId,
       });
     },
   );
-  cleanupFns.push(unsubMessageDeleted);
+  subscriptions.push(messageDeletedSubscription);
 
-  // ── Subscribe to server:updated events ───────────────────────────────────
-
-  const { unsubscribe: unsubServerUpdated } = eventBus.subscribe(
+  const serverUpdatedSubscription = eventBus.subscribe(
     EventChannels.SERVER_UPDATED,
     (payload: ServerUpdatedPayload) => {
       if (payload.serverId !== serverId) return;
-      sendEvent(res, 'server:updated', {
+      writeEvent('server:updated', {
         id: payload.serverId,
         name: payload.name,
-        // Use 'icon' to match the frontend Server type (Server.icon, not iconUrl)
         icon: payload.iconUrl ?? undefined,
         description: payload.description,
         updatedAt: payload.timestamp,
       });
     },
   );
-  cleanupFns.push(unsubServerUpdated);
+  subscriptions.push(serverUpdatedSubscription);
 
-  // ── Subscribe to remaining channel events ────────────────────────────────
-
-  const { unsubscribe: unsubChannelUpdated } = eventBus.subscribe(
+  const channelUpdatedSubscription = eventBus.subscribe(
     EventChannels.CHANNEL_UPDATED,
     async (payload: ChannelUpdatedPayload) => {
       if (payload.serverId !== serverId) return;
@@ -492,7 +549,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
         });
         if (!channel) return;
 
-        sendEvent(res, 'channel:updated', channel);
+        writeEvent('channel:updated', channel);
       } catch (err) {
         logger.warn(
           { err, serverId, channelId: payload.channelId },
@@ -501,30 +558,24 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
-  cleanupFns.push(unsubChannelUpdated);
+  subscriptions.push(channelUpdatedSubscription);
 
-  // ── Subscribe to member status change events ──────────────────────────────
   // Status reflects presence (ONLINE/IDLE/OFFLINE) not identity, so it is emitted
   // regardless of the user's publicProfile setting — consistent with the rationale
   // documented in PR #202 for member join/leave events.
-  const { unsubscribe: unsubStatusChanged } = eventBus.subscribe(
+  const statusChangedSubscription = eventBus.subscribe(
     EventChannels.USER_STATUS_CHANGED,
     (payload: UserStatusChangedPayload) => {
       if (payload.serverId !== serverId) return;
-      // Normalize Prisma enum ('IDLE') to the lowercase format the frontend expects ('idle').
-      sendEvent(res, 'member:statusChanged', {
+      writeEvent('member:statusChanged', {
         id: payload.userId,
         status: payload.status.toLowerCase(),
       });
     },
   );
-  cleanupFns.push(unsubStatusChanged);
+  subscriptions.push(statusChangedSubscription);
 
-  // ── Subscribe to member join/leave events ─────────────────────────────────
-  // When a member joins, look up their profile and push the full user object so
-  // clients can add the new member to the sidebar without a page reload.
-
-  const { unsubscribe: unsubMemberJoined } = eventBus.subscribe(
+  const memberJoinedSubscription = eventBus.subscribe(
     EventChannels.MEMBER_JOINED,
     async (payload: MemberJoinedPayload) => {
       if (payload.serverId !== serverId) return;
@@ -543,19 +594,13 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
         });
         if (!user) return;
 
-        // Respect the publicProfile privacy flag — consistent with userService.getUser().
-        // Users who have opted out of public profile display appear as Anonymous with no avatar.
-        // status reflects server presence (ONLINE/IDLE/OFFLINE), not identity — intentionally
-        // emitted even for private-profile users since it reveals no personally identifying information.
         const isPublic = user.publicProfile;
-        sendEvent(res, 'member:joined', {
+        writeEvent('member:joined', {
           id: user.id,
           username: isPublic ? user.username : 'Anonymous',
           displayName: isPublic ? user.displayName : undefined,
           avatar: isPublic ? (user.avatarUrl ?? undefined) : undefined,
-          // Cast backend RoleTypeValue (e.g. 'MEMBER') to frontend UserRole (e.g. 'member')
           role: payload.role.toLowerCase(),
-          // Cast DB UserStatus (e.g. 'ONLINE') to frontend UserStatus (e.g. 'online')
           status: user.status.toLowerCase(),
         });
       } catch (err) {
@@ -566,23 +611,18 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
-  cleanupFns.push(unsubMemberJoined);
+  subscriptions.push(memberJoinedSubscription);
 
-  const { unsubscribe: unsubMemberLeft } = eventBus.subscribe(
+  const memberLeftSubscription = eventBus.subscribe(
     EventChannels.MEMBER_LEFT,
     (payload: MemberLeftPayload) => {
       if (payload.serverId !== serverId) return;
-      sendEvent(res, 'member:left', { userId: payload.userId });
+      writeEvent('member:left', { userId: payload.userId });
     },
   );
-  cleanupFns.push(unsubMemberLeft);
+  subscriptions.push(memberLeftSubscription);
 
-  // ── Subscribe to visibility change events ─────────────────────────────────
-  // When a channel's visibility changes, push the updated channel object so
-  // connected clients can update the sidebar badge and handle access revocation
-  // (PRIVATE channels become inaccessible to non-members) without a page reload.
-
-  const { unsubscribe: unsubVisibilityChanged } = eventBus.subscribe(
+  const visibilityChangedSubscription = eventBus.subscribe(
     EventChannels.VISIBILITY_CHANGED,
     async (payload: VisibilityChangedPayload) => {
       if (payload.serverId !== serverId) return;
@@ -594,10 +634,8 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
         });
         if (!channel) return;
 
-        sendEvent(res, 'channel:visibility-changed', {
+        writeEvent('channel:visibility-changed', {
           ...channel,
-          // Include old visibility so clients can detect access revocation
-          // (e.g. current user is viewing a channel that just became PRIVATE).
           oldVisibility: payload.oldVisibility,
         });
       } catch (err) {
@@ -608,11 +646,10 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
-  cleanupFns.push(unsubVisibilityChanged);
+  subscriptions.push(visibilityChangedSubscription);
 
-  // ── Heartbeat ────────────────────────────────────────────────────────────
-  const heartbeat = setInterval(() => {
-    res.write(':\n\n');
-  }, 30_000);
-  cleanupFns.push(() => clearInterval(heartbeat));
+  await finalizeSseSetup(req, res, sseState, subscriptions, {
+    route: 'server-events',
+    serverId,
+  });
 });

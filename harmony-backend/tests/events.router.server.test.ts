@@ -10,10 +10,13 @@ import request from 'supertest';
 import { createApp } from '../src/app';
 import { eventBus } from '../src/events/eventBus';
 import { prisma } from '../src/db/prisma';
+import { createDeferred, waitFor } from './helpers/async';
 import type { Express } from 'express';
+import type { ChannelCreatedPayload } from '../src/events/eventTypes';
 
 const VALID_TOKEN = 'valid-token';
 const VALID_SERVER_ID = '550e8400-e29b-41d4-a716-446655440001';
+const CREATED_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440009';
 
 // ─── Mock eventBus ─────────────────────────────────────────────────────────────
 
@@ -129,6 +132,18 @@ beforeEach(() => {
   (prisma.server.findUnique as jest.Mock).mockResolvedValue({ id: VALID_SERVER_ID });
   (prisma.serverMember.findFirst as jest.Mock).mockResolvedValue({ userId: 'test-user-id' });
   (prisma.channel.findMany as jest.Mock).mockResolvedValue([]);
+  (prisma.channel.findUnique as jest.Mock).mockResolvedValue({
+    id: CREATED_CHANNEL_ID,
+    serverId: VALID_SERVER_ID,
+    name: 'general',
+    slug: 'general',
+    type: 'TEXT',
+    visibility: 'PUBLIC_INDEXABLE',
+    topic: null,
+    position: 0,
+    createdAt: new Date('2026-04-19T10:00:00.000Z'),
+    updatedAt: new Date('2026-04-19T10:00:00.000Z'),
+  });
 });
 
 // ─── SSE headers ──────────────────────────────────────────────────────────────
@@ -163,6 +178,98 @@ describe('GET /api/events/server/:serverId — SSE headers', () => {
     expect(subscribedChannels).toContain('harmony:CHANNEL_CREATED');
     expect(subscribedChannels).toContain('harmony:CHANNEL_UPDATED');
     expect(subscribedChannels).toContain('harmony:CHANNEL_DELETED');
+  });
+});
+
+describe('GET /api/events/server/:serverId — subscription readiness', () => {
+  const sseUrl = `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}`;
+
+  it('waits for all server-scoped subscriptions before flushing SSE headers', async () => {
+    const ready = createDeferred<void>();
+    mockSubscribe.mockImplementation(() => ({
+      unsubscribe: jest.fn(),
+      ready: ready.promise,
+    }));
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    let headersReceived = false;
+    const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+      headersReceived = true;
+      res.resume();
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(headersReceived).toBe(false);
+
+    ready.resolve();
+    await waitFor(() => headersReceived);
+
+    req.destroy();
+  });
+
+  it('buffers server events that arrive before the stream becomes live', async () => {
+    const ready = createDeferred<void>();
+    const responseStarted = createDeferred<void>();
+    let channelCreatedHandler: ((payload: ChannelCreatedPayload) => Promise<void>) | null = null;
+
+    mockSubscribe.mockImplementation(
+      (channel: string, handler: (payload: ChannelCreatedPayload) => Promise<void>) => {
+        if (channel === 'harmony:CHANNEL_CREATED') {
+          channelCreatedHandler = handler;
+        }
+        return {
+          unsubscribe: jest.fn(),
+          ready: ready.promise,
+        };
+      },
+    );
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    const chunks: string[] = [];
+    let response: http.IncomingMessage | null = null;
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+        response = res;
+        responseStarted.resolve();
+        res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+        res.on('error', reject);
+      });
+
+      req.on('error', reject);
+
+      setTimeout(async () => {
+        if (!channelCreatedHandler) {
+          reject(new Error('CHANNEL_CREATED handler was not registered'));
+          return;
+        }
+
+        await channelCreatedHandler({
+          channelId: CREATED_CHANNEL_ID,
+          serverId: VALID_SERVER_ID,
+          timestamp: new Date('2026-04-19T10:00:00.000Z').toISOString(),
+        });
+
+        ready.resolve();
+        await responseStarted.promise;
+
+        setTimeout(() => {
+          response?.destroy();
+          req.destroy();
+          resolve();
+        }, 75);
+      }, 50);
+    });
+
+    const body = chunks.join('');
+    expect(body).toContain('event: channel:created');
+    expect(body).toContain(CREATED_CHANNEL_ID);
+    expect(body).toContain('"name":"general"');
   });
 });
 
@@ -202,9 +309,7 @@ describe('GET /api/events/server/:serverId — auth', () => {
       throw new Error('invalid token');
     });
 
-    const res = await request(app).get(
-      `/api/events/server/${VALID_SERVER_ID}?token=bad-token`,
-    );
+    const res = await request(app).get(`/api/events/server/${VALID_SERVER_ID}?token=bad-token`);
     expect(res.status).toBe(401);
   });
 });
