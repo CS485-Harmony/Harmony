@@ -66,6 +66,20 @@ function sendEvent(res: Response, eventType: string, data: unknown): void {
   res.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
+async function awaitSubscriptionReadiness(
+  readyPromises: Promise<void>[],
+  onFailure: () => void,
+): Promise<boolean> {
+  try {
+    await Promise.all(readyPromises);
+    return true;
+  } catch (err) {
+    onFailure();
+    logger.error({ err }, 'SSE subscription readiness failed');
+    return false;
+  }
+}
+
 // ─── Route ────────────────────────────────────────────────────────────────────
 
 eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
@@ -111,16 +125,9 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     return;
   }
 
-  // ── SSE headers ──────────────────────────────────────────────────────────
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
-
   // ── Subscribe to message events ──────────────────────────────────────────
 
-  const { unsubscribe: unsubCreated } = eventBus.subscribe(
+  const createdSub = eventBus.subscribe(
     EventChannels.MESSAGE_CREATED,
     async (payload: MessageCreatedPayload) => {
       if (payload.channelId !== channelId) return;
@@ -150,8 +157,9 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
       }
     },
   );
+  const unsubCreated = createdSub.unsubscribe;
 
-  const { unsubscribe: unsubEdited } = eventBus.subscribe(
+  const editedSub = eventBus.subscribe(
     EventChannels.MESSAGE_EDITED,
     async (payload: MessageEditedPayload) => {
       if (payload.channelId !== channelId) return;
@@ -181,8 +189,9 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
       }
     },
   );
+  const unsubEdited = editedSub.unsubscribe;
 
-  const { unsubscribe: unsubDeleted } = eventBus.subscribe(
+  const deletedSub = eventBus.subscribe(
     EventChannels.MESSAGE_DELETED,
     (payload: MessageDeletedPayload) => {
       if (payload.channelId !== channelId) return;
@@ -193,8 +202,9 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
       });
     },
   );
+  const unsubDeleted = deletedSub.unsubscribe;
 
-  const { unsubscribe: unsubServerUpdated } = eventBus.subscribe(
+  const serverUpdatedSub = eventBus.subscribe(
     EventChannels.SERVER_UPDATED,
     (payload: ServerUpdatedPayload) => {
       if (payload.serverId !== channel.serverId) return;
@@ -208,6 +218,28 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
       });
     },
   );
+  const unsubServerUpdated = serverUpdatedSub.unsubscribe;
+
+  const channelReady = await awaitSubscriptionReadiness(
+    [createdSub.ready, editedSub.ready, deletedSub.ready, serverUpdatedSub.ready],
+    () => {
+      unsubCreated();
+      unsubEdited();
+      unsubDeleted();
+      unsubServerUpdated();
+    },
+  );
+  if (!channelReady) {
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to initialize event stream' });
+    return;
+  }
+
+  // ── SSE headers ──────────────────────────────────────────────────────────
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
 
   // ── Heartbeat — keeps the connection alive through proxies ───────────────
   const heartbeat = setInterval(() => {
@@ -320,7 +352,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
   // until headers are flushed, using res.headersSent as the gate.
   // Teardown is registered (above) before these subscriptions so a disconnect or
   // preload failure during setup always releases them.
-  const { unsubscribe: unsubChannelCreated } = eventBus.subscribe(
+  const channelCreatedSub = eventBus.subscribe(
     EventChannels.CHANNEL_CREATED,
     async (payload: ChannelCreatedPayload) => {
       if (payload.serverId !== serverId) return;
@@ -341,9 +373,10 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  const unsubChannelCreated = channelCreatedSub.unsubscribe;
   cleanupFns.push(unsubChannelCreated);
 
-  const { unsubscribe: unsubChannelDeleted } = eventBus.subscribe(
+  const channelDeletedSub = eventBus.subscribe(
     EventChannels.CHANNEL_DELETED,
     (payload: ChannelDeletedPayload) => {
       if (payload.serverId !== serverId) return;
@@ -352,7 +385,17 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       sendEvent(res, 'channel:deleted', { channelId: payload.channelId });
     },
   );
+  const unsubChannelDeleted = channelDeletedSub.unsubscribe;
   cleanupFns.push(unsubChannelDeleted);
+
+  const preloadedChannelsReady = await awaitSubscriptionReadiness(
+    [channelCreatedSub.ready, channelDeletedSub.ready],
+    cleanup,
+  );
+  if (!preloadedChannelsReady) {
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to initialize event stream' });
+    return;
+  }
 
   // ── Preload existing channel IDs — handlers above capture creations/deletions
   //    that race with this await.
@@ -384,7 +427,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
 
   // ── Subscribe to message events ──────────────────────────────────────────
 
-  const { unsubscribe: unsubMessageCreated } = eventBus.subscribe(
+  const messageCreatedSub = eventBus.subscribe(
     EventChannels.MESSAGE_CREATED,
     async (payload: MessageCreatedPayload) => {
       if (!serverChannelIds.has(payload.channelId)) return;
@@ -414,9 +457,10 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  const unsubMessageCreated = messageCreatedSub.unsubscribe;
   cleanupFns.push(unsubMessageCreated);
 
-  const { unsubscribe: unsubMessageEdited } = eventBus.subscribe(
+  const messageEditedSub = eventBus.subscribe(
     EventChannels.MESSAGE_EDITED,
     async (payload: MessageEditedPayload) => {
       if (!serverChannelIds.has(payload.channelId)) return;
@@ -446,9 +490,10 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  const unsubMessageEdited = messageEditedSub.unsubscribe;
   cleanupFns.push(unsubMessageEdited);
 
-  const { unsubscribe: unsubMessageDeleted } = eventBus.subscribe(
+  const messageDeletedSub = eventBus.subscribe(
     EventChannels.MESSAGE_DELETED,
     (payload: MessageDeletedPayload) => {
       if (!serverChannelIds.has(payload.channelId)) return;
@@ -458,11 +503,12 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       });
     },
   );
+  const unsubMessageDeleted = messageDeletedSub.unsubscribe;
   cleanupFns.push(unsubMessageDeleted);
 
   // ── Subscribe to server:updated events ───────────────────────────────────
 
-  const { unsubscribe: unsubServerUpdated } = eventBus.subscribe(
+  const serverUpdatedSub = eventBus.subscribe(
     EventChannels.SERVER_UPDATED,
     (payload: ServerUpdatedPayload) => {
       if (payload.serverId !== serverId) return;
@@ -476,11 +522,12 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       });
     },
   );
+  const unsubServerUpdated = serverUpdatedSub.unsubscribe;
   cleanupFns.push(unsubServerUpdated);
 
   // ── Subscribe to remaining channel events ────────────────────────────────
 
-  const { unsubscribe: unsubChannelUpdated } = eventBus.subscribe(
+  const channelUpdatedSub = eventBus.subscribe(
     EventChannels.CHANNEL_UPDATED,
     async (payload: ChannelUpdatedPayload) => {
       if (payload.serverId !== serverId) return;
@@ -501,13 +548,14 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  const unsubChannelUpdated = channelUpdatedSub.unsubscribe;
   cleanupFns.push(unsubChannelUpdated);
 
   // ── Subscribe to member status change events ──────────────────────────────
   // Status reflects presence (ONLINE/IDLE/OFFLINE) not identity, so it is emitted
   // regardless of the user's publicProfile setting — consistent with the rationale
   // documented in PR #202 for member join/leave events.
-  const { unsubscribe: unsubStatusChanged } = eventBus.subscribe(
+  const statusChangedSub = eventBus.subscribe(
     EventChannels.USER_STATUS_CHANGED,
     (payload: UserStatusChangedPayload) => {
       if (payload.serverId !== serverId) return;
@@ -518,13 +566,14 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       });
     },
   );
+  const unsubStatusChanged = statusChangedSub.unsubscribe;
   cleanupFns.push(unsubStatusChanged);
 
   // ── Subscribe to member join/leave events ─────────────────────────────────
   // When a member joins, look up their profile and push the full user object so
   // clients can add the new member to the sidebar without a page reload.
 
-  const { unsubscribe: unsubMemberJoined } = eventBus.subscribe(
+  const memberJoinedSub = eventBus.subscribe(
     EventChannels.MEMBER_JOINED,
     async (payload: MemberJoinedPayload) => {
       if (payload.serverId !== serverId) return;
@@ -566,15 +615,17 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  const unsubMemberJoined = memberJoinedSub.unsubscribe;
   cleanupFns.push(unsubMemberJoined);
 
-  const { unsubscribe: unsubMemberLeft } = eventBus.subscribe(
+  const memberLeftSub = eventBus.subscribe(
     EventChannels.MEMBER_LEFT,
     (payload: MemberLeftPayload) => {
       if (payload.serverId !== serverId) return;
       sendEvent(res, 'member:left', { userId: payload.userId });
     },
   );
+  const unsubMemberLeft = memberLeftSub.unsubscribe;
   cleanupFns.push(unsubMemberLeft);
 
   // ── Subscribe to visibility change events ─────────────────────────────────
@@ -582,7 +633,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
   // connected clients can update the sidebar badge and handle access revocation
   // (PRIVATE channels become inaccessible to non-members) without a page reload.
 
-  const { unsubscribe: unsubVisibilityChanged } = eventBus.subscribe(
+  const visibilityChangedSub = eventBus.subscribe(
     EventChannels.VISIBILITY_CHANGED,
     async (payload: VisibilityChangedPayload) => {
       if (payload.serverId !== serverId) return;
@@ -608,7 +659,27 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  const unsubVisibilityChanged = visibilityChangedSub.unsubscribe;
   cleanupFns.push(unsubVisibilityChanged);
+
+  const serverReady = await awaitSubscriptionReadiness(
+    [
+      messageCreatedSub.ready,
+      messageEditedSub.ready,
+      messageDeletedSub.ready,
+      serverUpdatedSub.ready,
+      channelUpdatedSub.ready,
+      statusChangedSub.ready,
+      memberJoinedSub.ready,
+      memberLeftSub.ready,
+      visibilityChangedSub.ready,
+    ],
+    cleanup,
+  );
+  if (!serverReady) {
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to initialize event stream' });
+    return;
+  }
 
   // ── Heartbeat ────────────────────────────────────────────────────────────
   const heartbeat = setInterval(() => {
