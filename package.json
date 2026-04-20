@@ -6,7 +6,7 @@
     "jest": "node ./scripts/run-root-jest.cjs",
     "test:backend": "npm --prefix harmony-backend test --",
     "test:frontend": "npm --prefix harmony-frontend test --",
-    "test:integration": "npm --prefix tests/integration test -- --config jest.config.js",
+    "test:integration": "npm --prefix tests/integration test",
     "test:integration:cloud": "npm --prefix tests/integration run test:cloud"
   }
 }

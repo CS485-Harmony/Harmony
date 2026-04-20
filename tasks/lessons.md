@@ -86,3 +86,26 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 **Caught by:** [Human: user]  
 **Mistake / Situation:** I renamed the branch and PR for a log export when the user meant to rename the exported log file itself.  
 **Rule / Fix:** When a user asks to "rename it" during log-export/PR work, confirm whether the target is the file, branch, PR, or commit before changing GitHub metadata; if context strongly points to the artifact path, rename the file first.
+
+**Date:** 2026-04-19  
+**Caught by:** [Human: user]  
+**Related Issue:** #331  
+**Mistake / Situation:** I described the preferred custom-domain deployment contract too prominently in the root README when the user wanted the current live Vercel and Railway hostnames treated as the actual deployment URLs.  
+**Rule / Fix:** In Harmony deployment docs, present the currently serving hostnames as the source of truth unless the task is explicitly about future domain setup; mention custom domains only as preferred future state when they are not actually configured.
+
+**Date:** 2026-04-19  
+**Caught by:** [Human: user]  
+**Related Issue:** #331  
+**Mistake / Situation:** I documented `npm run dev` and `npm run dev:worker` as if the worker would naturally stay on `4100`, but the backend `.env.example` sets `PORT=4000`, so both processes collide unless the worker port is overridden explicitly.  
+**Rule / Fix:** When documenting split-process local startup in Harmony, verify how `.env` values interact with entrypoint defaults; if a shared `PORT` variable exists, either force the worker dev script to `4100` or document an explicit `PORT=4100` override instead of relying on fallback defaults.
+
+**Date:** 2026-04-19  
+**Caught by:** [Human: user]  
+**Related Issue:** #331  
+**Mistake / Situation:** I wrote a chained `cd` sequence in the README that ended with `cd ..` after entering `tests/integration`, which only returns to `tests/` rather than the repository root.  
+**Rule / Fix:** When documenting multi-step shell navigation in Harmony, trace the working directory after each `cd` and prefer exact return paths like `cd ../..` when the instructions are meant to end back at the repo root.
+
+**Date:** 2026-04-19  
+**Caught by:** [Human: user]  
+**Mistake / Situation:** I documented `npm run test:integration` from the repo root without verifying the actual root script invocation. The root script was forwarding an extra `--config jest.config.js` even though the integration package already sets its own config, which breaks Jest argument parsing.  
+**Rule / Fix:** For Harmony root wrapper scripts, always execute the command once from the repo root before documenting it. If the delegated package already owns its config flags, the root wrapper should forward cleanly instead of duplicating CLI options.

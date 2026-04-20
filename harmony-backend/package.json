@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "dev:worker": "tsx watch src/worker.ts",
+    "dev:worker": "PORT=4100 tsx watch src/worker.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "start:api": "node dist/index.js",
