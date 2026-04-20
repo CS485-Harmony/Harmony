@@ -6,7 +6,8 @@ import { eventBus, EventChannels } from '../events/eventBus';
 import { serverRepository } from '../repositories/server.repository';
 import { serverMemberRepository } from '../repositories/serverMember.repository';
 
-export const JOIN_RATE_MAX = parseInt(process.env.JOIN_RATE_LIMIT ?? '10', 10);
+const _parsedLimit = parseInt(process.env.JOIN_RATE_LIMIT ?? '', 10);
+export const JOIN_RATE_MAX = Number.isFinite(_parsedLimit) && _parsedLimit > 0 ? _parsedLimit : 10;
 export const JOIN_RATE_WINDOW_SECS = 60;
 
 /** Lua: INCR key and set expiry atomically on first increment. Returns new count. */
