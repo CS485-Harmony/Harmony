@@ -6,9 +6,7 @@
 import { BACKEND_URL, FRONTEND_URL, isCloud, LOCAL_SEEDS } from './env';
 import { login } from './helpers/auth';
 
-const localFrontendOrigin = 'http://localhost:3000';
-
-const allowedOrigin = isCloud ? FRONTEND_URL : localFrontendOrigin;
+const allowedOrigin = FRONTEND_URL;
 
 describe('CORS Header Verification', () => {
   test('CORS-1: OPTIONS preflight returns correct CORS headers for allowed origin', async () => {
