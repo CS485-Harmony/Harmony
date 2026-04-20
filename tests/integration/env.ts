@@ -20,13 +20,11 @@ export const isLocal = TARGET === 'local';
 export const isCloud = TARGET === 'cloud';
 
 export const BACKEND_URL = (
-  process.env.BACKEND_URL ??
-  (isCloud ? 'https://api.harmony.chat' : 'http://localhost:4000')
+  process.env.BACKEND_URL ?? (isCloud ? 'https://api.harmony.chat' : 'http://localhost:4000')
 ).replace(/\/$/, '');
 
 export const FRONTEND_URL = (
-  process.env.FRONTEND_URL ??
-  (isCloud ? 'https://harmony.chat' : 'http://localhost:3000')
+  process.env.FRONTEND_URL ?? (isCloud ? 'https://harmony.chat' : 'http://localhost:3000')
 ).replace(/\/$/, '');
 
 /**
@@ -47,11 +45,7 @@ export const localOnlyDescribe = (label: string, fn: () => void): void => {
 /**
  * Convenience wrapper: wraps a test so it skips in cloud mode.
  */
-export const localOnlyTest = (
-  name: string,
-  fn: jest.ProvidesCallback,
-  timeout?: number,
-): void => {
+export const localOnlyTest = (name: string, fn: jest.ProvidesCallback, timeout?: number): void => {
   const wrapper = isCloud ? test.skip : test;
   wrapper(name, fn, timeout);
 };
@@ -63,9 +57,9 @@ export const LOCAL_SEEDS = {
     slug: 'harmony-hq',
   },
   channels: {
-    publicIndexable: 'general',        // visibility=PUBLIC_INDEXABLE
-    publicNoIndex: 'introductions',    // visibility=PUBLIC_NO_INDEX
-    private: 'staff-only',             // visibility=PRIVATE
+    publicIndexable: 'general', // visibility=PUBLIC_INDEXABLE
+    publicNoIndex: 'introductions', // visibility=PUBLIC_NO_INDEX
+    private: 'staff-only', // visibility=PRIVATE
   },
   alice: {
     email: 'alice_admin@mock.harmony.test',
@@ -73,8 +67,78 @@ export const LOCAL_SEEDS = {
   },
 } as const;
 
-// Known cloud URLs used by cloud smoke tests.
+// Known cloud URLs used by cloud smoke tests. Explicit env vars still win, but
+// automated CI should not depend on a hard-coded production slug pair that can
+// drift as deployed data changes.
 export const CLOUD_KNOWN = {
   serverSlug: process.env.CLOUD_TEST_SERVER_SLUG ?? 'harmony-hq',
   publicChannel: process.env.CLOUD_TEST_PUBLIC_CHANNEL ?? 'general',
 } as const;
+
+export type CloudFixture = {
+  serverId?: string;
+  serverSlug: string;
+  publicChannel: string;
+};
+
+let cloudFixturePromise: Promise<CloudFixture> | null = null;
+
+async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
+  const serversRes = await fetch(`${BACKEND_URL}/api/public/servers`);
+  if (!serversRes.ok) {
+    throw new Error(
+      `Cloud fixture discovery failed: GET /api/public/servers returned ${serversRes.status}`,
+    );
+  }
+
+  const servers = (await serversRes.json()) as Array<{
+    id?: string;
+    slug?: string;
+  }>;
+  for (const server of servers) {
+    if (!server.slug) continue;
+
+    const channelsRes = await fetch(`${BACKEND_URL}/api/public/servers/${server.slug}/channels`);
+    if (!channelsRes.ok) continue;
+
+    const channelsBody = (await channelsRes.json()) as {
+      channels?: Array<{ slug?: string }>;
+    };
+    const publicChannel = channelsBody.channels?.find((channel) => channel.slug)?.slug;
+    if (!publicChannel) continue;
+
+    return {
+      serverId: server.id,
+      serverSlug: server.slug,
+      publicChannel,
+    };
+  }
+
+  throw new Error(
+    'Cloud fixture discovery failed: no public server/channel pair is available at the configured BACKEND_URL',
+  );
+}
+
+export async function getCloudFixture(): Promise<CloudFixture> {
+  if (!isCloud) {
+    return {
+      serverSlug: LOCAL_SEEDS.server.slug,
+      publicChannel: LOCAL_SEEDS.channels.publicIndexable,
+    };
+  }
+
+  const envServerSlug = process.env.CLOUD_TEST_SERVER_SLUG;
+  const envPublicChannel = process.env.CLOUD_TEST_PUBLIC_CHANNEL;
+  if (envServerSlug && envPublicChannel) {
+    return {
+      serverSlug: envServerSlug,
+      publicChannel: envPublicChannel,
+      serverId: process.env.CLOUD_TEST_SERVER_ID,
+    };
+  }
+
+  if (!cloudFixturePromise) {
+    cloudFixturePromise = resolveCloudFixtureFromPublicApi();
+  }
+  return cloudFixturePromise;
+}

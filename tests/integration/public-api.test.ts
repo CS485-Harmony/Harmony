@@ -5,18 +5,19 @@
  * SSRAPI-7: local-only (burst traffic test)
  */
 
-import {
-  BACKEND_URL,
-  LOCAL_SEEDS,
-  CLOUD_KNOWN,
-  isCloud,
-  localOnlyDescribe,
-} from './env';
-
-const serverSlug = isCloud ? CLOUD_KNOWN.serverSlug : LOCAL_SEEDS.server.slug;
-const publicChannel = isCloud ? CLOUD_KNOWN.publicChannel : LOCAL_SEEDS.channels.publicIndexable;
+import { BACKEND_URL, LOCAL_SEEDS, isCloud, localOnlyDescribe, getCloudFixture } from './env';
 
 describe('Public API — SSR (cloud-read-only)', () => {
+  let serverSlug: string = LOCAL_SEEDS.server.slug;
+  let publicChannel: string = LOCAL_SEEDS.channels.publicIndexable;
+
+  beforeAll(async () => {
+    if (!isCloud) return;
+    const fixture = await getCloudFixture();
+    serverSlug = fixture.serverSlug;
+    publicChannel = fixture.publicChannel;
+  });
+
   test('SSRAPI-1: public server info returns id, name, slug, memberCount', async () => {
     const res = await fetch(`${BACKEND_URL}/api/public/servers/${serverSlug}`);
     expect(res.status).toBe(200);
