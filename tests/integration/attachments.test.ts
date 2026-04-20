@@ -9,7 +9,7 @@
  *                    there is no public cleanup endpoint for shared cloud envs)
  */
 
-import { BACKEND_URL, LOCAL_SEEDS, isCloud, localOnlyDescribe } from './env';
+import { BACKEND_URL, LOCAL_SEEDS, isCloud, localOnlyDescribe, cloudTokenTest } from './env';
 import { login } from './helpers/auth';
 
 describe('Attachments Smoke (cloud-safe)', () => {
@@ -50,9 +50,7 @@ describe('Attachments Smoke (cloud-safe)', () => {
     expect(res.status).toBe(401);
   });
 
-  test('ATT-3: upload of a disallowed file type returns 400', async () => {
-    if (!accessToken) return;
-
+  cloudTokenTest('ATT-3: upload of a disallowed file type returns 400', async () => {
     const form = buildFormData(Buffer.from('MZ'), 'test.exe', 'application/octet-stream');
     const res = await fetch(`${BACKEND_URL}/api/attachments/upload`, {
       method: 'POST',
@@ -64,9 +62,7 @@ describe('Attachments Smoke (cloud-safe)', () => {
     expect(body.error).toBeTruthy();
   });
 
-  test('ATT-4: upload of a file exceeding 25 MB returns 400 or 413', async () => {
-    if (!accessToken) return;
-
+  cloudTokenTest('ATT-4: upload of a file exceeding 25 MB returns 400 or 413', async () => {
     // 26 MB of zeros declared as PNG (size validation fires before magic-byte check)
     const bigBuffer = Buffer.alloc(26 * 1024 * 1024, 0);
     const form = buildFormData(bigBuffer, 'big.png', 'image/png');
@@ -78,9 +74,7 @@ describe('Attachments Smoke (cloud-safe)', () => {
     expect([400, 413]).toContain(res.status);
   }, 30000);
 
-  test('ATT-6: magic-byte mismatch is rejected - text file renamed to .png', async () => {
-    if (!accessToken) return;
-
+  cloudTokenTest('ATT-6: magic-byte mismatch is rejected - text file renamed to .png', async () => {
     const textContent = Buffer.from('This is not a PNG file\n');
     const form = buildFormData(textContent, 'fake.png', 'image/png');
     const res = await fetch(`${BACKEND_URL}/api/attachments/upload`, {

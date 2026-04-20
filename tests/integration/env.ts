@@ -50,6 +50,17 @@ export const localOnlyTest = (name: string, fn: jest.ProvidesCallback, timeout?:
   wrapper(name, fn, timeout);
 };
 
+/**
+ * Convenience wrapper: wraps a test so it skips when running in cloud mode
+ * without a CLOUD_TEST_ACCESS_TOKEN. Keeps the test active in local mode
+ * (where login() always provides a token) and in cloud mode when the token
+ * is provisioned.
+ */
+export const cloudTokenTest = (name: string, fn: jest.ProvidesCallback, timeout?: number): void => {
+  const needsSkip = isCloud && !process.env.CLOUD_TEST_ACCESS_TOKEN;
+  (needsSkip ? test.skip : test)(name, fn, timeout);
+};
+
 // Known mock-seed data used by local tests (harmony-backend/src/dev/mock-seed-data.json).
 // Server server-001 is "harmony-hq".
 export const LOCAL_SEEDS = {
