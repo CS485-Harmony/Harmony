@@ -120,7 +120,12 @@ export const fetchPublicChannel = cache(
     try {
       const res = await fetch(
         `${API_CONFIG.BASE_URL}/api/public/servers/${encodeURIComponent(serverSlug)}/channels/${encodeURIComponent(channelSlug)}`,
-        { next: { revalidate: CACHE_DURATION.PUBLIC_API_REVALIDATE } },
+        {
+          // Visibility changes must be reflected immediately in guest page access
+          // control and metadata. Caching this fetch causes the public page to
+          // keep serving stale indexable/private state after a toggle.
+          cache: 'no-store',
+        },
       );
 
       if (res.status === 404) return null;
