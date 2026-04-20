@@ -5,7 +5,7 @@ import { ChannelType, ChannelVisibility } from '@/types';
 import type { Channel, Message, Server, User } from '@/types';
 
 const mockUseAuth = jest.fn();
-const mockUseChannelEvents = jest.fn();
+const mockUseServerEvents = jest.fn();
 
 jest.mock('@/hooks/useAuth', () => ({
   useAuth: () => mockUseAuth(),
@@ -19,12 +19,8 @@ jest.mock('@/contexts/VoiceContext', () => ({
   VoiceProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-jest.mock('@/hooks/useChannelEvents', () => ({
-  useChannelEvents: (options: unknown) => mockUseChannelEvents(options),
-}));
-
 jest.mock('@/hooks/useServerEvents', () => ({
-  useServerEvents: jest.fn(),
+  useServerEvents: (options: unknown) => mockUseServerEvents(options),
 }));
 
 jest.mock('@/hooks/useServerListSync', () => ({
@@ -204,6 +200,14 @@ describe('Issue #338 — private channel denial keeps the shell mounted', () => 
     expect(screen.queryByText('Search modal')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Pinned messages' })).toBeDisabled();
-    expect(mockUseChannelEvents).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    // Message callbacks must be undefined when the channel is locked so stale
+    // real-time messages do not accumulate in locked state.
+    expect(mockUseServerEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onMessageCreated: undefined,
+        onMessageEdited: undefined,
+        onMessageDeleted: undefined,
+      }),
+    );
   });
 });

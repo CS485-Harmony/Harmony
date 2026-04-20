@@ -46,7 +46,7 @@ jest.mock('../src/services/auth.service', () => ({
 jest.mock('../src/db/prisma', () => ({
   prisma: {
     message: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
-    channel: { findUnique: jest.fn() },
+    channel: { findUnique: jest.fn(), findMany: jest.fn() },
     serverMember: { findFirst: jest.fn() },
   },
 }));

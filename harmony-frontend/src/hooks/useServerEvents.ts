@@ -1,10 +1,15 @@
 /**
- * useServerEvents — Issue #185 / #186 / #187 / #231
+ * useServerEvents — Issue #185 / #186 / #187 / #189 / #231
  *
  * Subscribes to real-time SSE events for a server.
  * Handles channel list updates (created/updated/deleted), member list
- * updates (joined/left), member status changes, and visibility changes
- * over the single /api/events/server/:serverId endpoint.
+ * updates (joined/left), member status changes, visibility changes, and
+ * message events (created/edited/deleted) over the single
+ * /api/events/server/:serverId endpoint.
+ *
+ * Message events are scoped to the whole server; callers that only want
+ * messages for the current channel should filter by channelId in their
+ * callback.
  *
  * Uses the native EventSource API (no library needed).
  *
@@ -20,6 +25,10 @@
  *       prev.map(m => m.id === id ? { ...m, status } : m)
  *     ),
  *     onChannelVisibilityChanged: (ch, oldVis) => { ... },
+ *     onMessageCreated: (msg) => { if (msg.channelId === activeChannelId) append(msg); },
+ *     onMessageEdited: (msg) => { if (msg.channelId === activeChannelId) update(msg); },
+ *     onMessageDeleted: (messageId, channelId) => { if (channelId === activeChannelId) remove(messageId); },
+ *     onServerUpdated: (server) => updateServer(server),
  *   });
  */
 
@@ -27,7 +36,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Channel, ChannelVisibility } from '@/types/channel';
+import type { Message } from '@/types/message';
 import type { User, UserStatus } from '@/types/user';
+import type { Server } from '@/types/server';
 import { getAccessToken, refreshAccessToken } from '@/lib/api-client';
 import { createFrontendLogger } from '@/lib/frontend-logger';
 import { getApiBaseUrl } from '@/lib/runtime-config';
@@ -54,6 +65,14 @@ export interface UseServerEventsOptions {
    * revocation (e.g. a PUBLIC channel became PRIVATE). Optional.
    */
   onChannelVisibilityChanged?: (channel: Channel, oldVisibility: ChannelVisibility) => void;
+  /** Called when a new message is created in any channel of the server. Filter by msg.channelId as needed. Optional. */
+  onMessageCreated?: (msg: Message) => void;
+  /** Called when a message is edited in any channel of the server. Filter by msg.channelId as needed. Optional. */
+  onMessageEdited?: (msg: Message) => void;
+  /** Called when a message is deleted in any channel of the server. Provides messageId and channelId. Optional. */
+  onMessageDeleted?: (messageId: string, channelId: string) => void;
+  /** Called when server metadata (name, icon, description) changes. Optional. */
+  onServerUpdated?: (server: Server) => void;
   /** Set to false to disable the connection (e.g. for unauthenticated guests). Defaults to true. */
   enabled?: boolean;
 }
@@ -67,6 +86,10 @@ export function useServerEvents({
   onMemberLeft,
   onMemberStatusChanged,
   onChannelVisibilityChanged,
+  onMessageCreated,
+  onMessageEdited,
+  onMessageDeleted,
+  onServerUpdated,
   enabled = true,
 }: UseServerEventsOptions): void {
   // Incrementing this triggers the effect to re-run with a fresh token after a
@@ -83,6 +106,10 @@ export function useServerEvents({
   const onMemberLeftRef = useRef(onMemberLeft);
   const onMemberStatusChangedRef = useRef(onMemberStatusChanged);
   const onVisibilityChangedRef = useRef(onChannelVisibilityChanged);
+  const onMessageCreatedRef = useRef(onMessageCreated);
+  const onMessageEditedRef = useRef(onMessageEdited);
+  const onMessageDeletedRef = useRef(onMessageDeleted);
+  const onServerUpdatedRef = useRef(onServerUpdated);
 
   useLayoutEffect(() => {
     onCreatedRef.current = onChannelCreated;
@@ -92,6 +119,10 @@ export function useServerEvents({
     onMemberLeftRef.current = onMemberLeft;
     onMemberStatusChangedRef.current = onMemberStatusChanged;
     onVisibilityChangedRef.current = onChannelVisibilityChanged;
+    onMessageCreatedRef.current = onMessageCreated;
+    onMessageEditedRef.current = onMessageEdited;
+    onMessageDeletedRef.current = onMessageDeleted;
+    onServerUpdatedRef.current = onServerUpdated;
   });
 
   useEffect(() => {
@@ -218,6 +249,70 @@ export function useServerEvents({
       }
     };
 
+    const handleMessageCreated = (event: MessageEvent<string>) => {
+      try {
+        const msg = JSON.parse(event.data) as Message;
+        onMessageCreatedRef.current?.(msg);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'message:created',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
+    const handleMessageEdited = (event: MessageEvent<string>) => {
+      try {
+        const msg = JSON.parse(event.data) as Message;
+        onMessageEditedRef.current?.(msg);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'message:edited',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
+    const handleMessageDeleted = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as { messageId: string; channelId: string };
+        onMessageDeletedRef.current?.(payload.messageId, payload.channelId);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'message:deleted',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
+    const handleServerUpdated = (event: MessageEvent<string>) => {
+      try {
+        const server = JSON.parse(event.data) as Server;
+        onServerUpdatedRef.current?.(server);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'server:updated',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
     es.addEventListener('channel:created', handleCreated);
     es.addEventListener('channel:updated', handleUpdated);
     es.addEventListener('channel:deleted', handleDeleted);
@@ -225,6 +320,10 @@ export function useServerEvents({
     es.addEventListener('member:left', handleMemberLeft);
     es.addEventListener('member:statusChanged', handleMemberStatusChanged);
     es.addEventListener('channel:visibility-changed', handleVisibilityChanged);
+    es.addEventListener('message:created', handleMessageCreated);
+    es.addEventListener('message:edited', handleMessageEdited);
+    es.addEventListener('message:deleted', handleMessageDeleted);
+    es.addEventListener('server:updated', handleServerUpdated);
 
     let everOpened = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -270,6 +369,10 @@ export function useServerEvents({
       es.removeEventListener('member:left', handleMemberLeft);
       es.removeEventListener('member:statusChanged', handleMemberStatusChanged);
       es.removeEventListener('channel:visibility-changed', handleVisibilityChanged);
+      es.removeEventListener('message:created', handleMessageCreated);
+      es.removeEventListener('message:edited', handleMessageEdited);
+      es.removeEventListener('message:deleted', handleMessageDeleted);
+      es.removeEventListener('server:updated', handleServerUpdated);
       es.close();
     };
   }, [serverId, enabled, reconnectKey]);

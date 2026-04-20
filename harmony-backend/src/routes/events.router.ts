@@ -186,7 +186,11 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     EventChannels.MESSAGE_DELETED,
     (payload: MessageDeletedPayload) => {
       if (payload.channelId !== channelId) return;
-      sendEvent(res, 'message:deleted', { messageId: payload.messageId });
+      // Include channelId so the payload shape is consistent with the server endpoint.
+      sendEvent(res, 'message:deleted', {
+        messageId: payload.messageId,
+        channelId: payload.channelId,
+      });
     },
   );
 
@@ -197,7 +201,8 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
       sendEvent(res, 'server:updated', {
         id: payload.serverId,
         name: payload.name,
-        iconUrl: payload.iconUrl,
+        // Use 'icon' to match the frontend Server type (Server.icon, not iconUrl)
+        icon: payload.iconUrl ?? undefined,
         description: payload.description,
         updatedAt: payload.timestamp,
       });
@@ -291,27 +296,42 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     return;
   }
 
-  // ── SSE headers ──────────────────────────────────────────────────────────
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+  // ── Initialize channel ID set — registered before findMany so any CHANNEL_CREATED
+  //    events that fire during the preload query are captured by the handler below.
+  //    Message events carry channelId but not serverId; this set is the filter.
+  const serverChannelIds = new Set<string>();
 
-  // ── Subscribe to channel events ──────────────────────────────────────────
+  // ── Idempotent cleanup — registered before any subscription so that a client
+  //    disconnect or preload failure during setup always releases all handlers.
+  const cleanupFns: Array<() => void> = [];
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    for (const fn of cleanupFns) fn();
+  };
+  req.on('close', cleanup);
 
+  // ── Subscribe CHANNEL_CREATED / CHANNEL_DELETED before findMany ───────────
+  // Registering these two handlers before the preload query closes the race window:
+  // if a channel is created (or deleted) while findMany is awaiting, the handler
+  // mutates serverChannelIds synchronously so subsequent message events for that
+  // channel are correctly forwarded (or suppressed). Handlers skip res.write()
+  // until headers are flushed, using res.headersSent as the gate.
+  // Teardown is registered (above) before these subscriptions so a disconnect or
+  // preload failure during setup always releases them.
   const { unsubscribe: unsubChannelCreated } = eventBus.subscribe(
     EventChannels.CHANNEL_CREATED,
     async (payload: ChannelCreatedPayload) => {
       if (payload.serverId !== serverId) return;
-
+      serverChannelIds.add(payload.channelId);
+      if (!res.headersSent) return; // headers not flushed yet — skip SSE write
       try {
         const channel = await prisma.channel.findUnique({
           where: { id: payload.channelId },
           select: CHANNEL_SSE_SELECT,
         });
         if (!channel) return;
-
         sendEvent(res, 'channel:created', channel);
       } catch (err) {
         logger.warn(
@@ -321,6 +341,144 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  cleanupFns.push(unsubChannelCreated);
+
+  const { unsubscribe: unsubChannelDeleted } = eventBus.subscribe(
+    EventChannels.CHANNEL_DELETED,
+    (payload: ChannelDeletedPayload) => {
+      if (payload.serverId !== serverId) return;
+      serverChannelIds.delete(payload.channelId);
+      if (!res.headersSent) return;
+      sendEvent(res, 'channel:deleted', { channelId: payload.channelId });
+    },
+  );
+  cleanupFns.push(unsubChannelDeleted);
+
+  // ── Preload existing channel IDs — handlers above capture creations/deletions
+  //    that race with this await.
+  let serverChannels: { id: string }[];
+  try {
+    serverChannels = await prisma.channel.findMany({
+      where: { serverId },
+      select: { id: true },
+    });
+  } catch (err) {
+    cleanup();
+    logger.error({ err, serverId }, 'Failed to preload channel IDs for server SSE');
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+    return;
+  }
+  for (const c of serverChannels) serverChannelIds.add(c.id);
+
+  // Guard: if the client disconnected while findMany was in flight, cleanup()
+  // has already fired (cleanedUp === true) and the early subscriptions are
+  // released. Stop here so no further handlers are registered under a dead conn.
+  if (cleanedUp) return;
+
+  // ── SSE headers ──────────────────────────────────────────────────────────
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  // ── Subscribe to message events ──────────────────────────────────────────
+
+  const { unsubscribe: unsubMessageCreated } = eventBus.subscribe(
+    EventChannels.MESSAGE_CREATED,
+    async (payload: MessageCreatedPayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+
+      try {
+        const message = await prisma.message.findUnique({
+          where: { id: payload.messageId },
+          include: MESSAGE_SSE_INCLUDE,
+        });
+        if (!message || message.isDeleted) return;
+
+        sendEvent(res, 'message:created', {
+          id: message.id,
+          channelId: message.channelId,
+          authorId: message.authorId,
+          author: message.author,
+          content: message.content,
+          timestamp: message.createdAt.toISOString(),
+          attachments: message.attachments,
+          editedAt: message.editedAt ? message.editedAt.toISOString() : null,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, serverId, messageId: payload.messageId },
+          'Failed to hydrate SSE message:created payload on server endpoint',
+        );
+      }
+    },
+  );
+  cleanupFns.push(unsubMessageCreated);
+
+  const { unsubscribe: unsubMessageEdited } = eventBus.subscribe(
+    EventChannels.MESSAGE_EDITED,
+    async (payload: MessageEditedPayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+
+      try {
+        const message = await prisma.message.findUnique({
+          where: { id: payload.messageId },
+          include: MESSAGE_SSE_INCLUDE,
+        });
+        if (!message || message.isDeleted) return;
+
+        sendEvent(res, 'message:edited', {
+          id: message.id,
+          channelId: message.channelId,
+          authorId: message.authorId,
+          author: message.author,
+          content: message.content,
+          timestamp: message.createdAt.toISOString(),
+          attachments: message.attachments,
+          editedAt: message.editedAt ? message.editedAt.toISOString() : null,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, serverId, messageId: payload.messageId },
+          'Failed to hydrate SSE message:edited payload on server endpoint',
+        );
+      }
+    },
+  );
+  cleanupFns.push(unsubMessageEdited);
+
+  const { unsubscribe: unsubMessageDeleted } = eventBus.subscribe(
+    EventChannels.MESSAGE_DELETED,
+    (payload: MessageDeletedPayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+      sendEvent(res, 'message:deleted', {
+        messageId: payload.messageId,
+        channelId: payload.channelId,
+      });
+    },
+  );
+  cleanupFns.push(unsubMessageDeleted);
+
+  // ── Subscribe to server:updated events ───────────────────────────────────
+
+  const { unsubscribe: unsubServerUpdated } = eventBus.subscribe(
+    EventChannels.SERVER_UPDATED,
+    (payload: ServerUpdatedPayload) => {
+      if (payload.serverId !== serverId) return;
+      sendEvent(res, 'server:updated', {
+        id: payload.serverId,
+        name: payload.name,
+        // Use 'icon' to match the frontend Server type (Server.icon, not iconUrl)
+        icon: payload.iconUrl ?? undefined,
+        description: payload.description,
+        updatedAt: payload.timestamp,
+      });
+    },
+  );
+  cleanupFns.push(unsubServerUpdated);
+
+  // ── Subscribe to remaining channel events ────────────────────────────────
 
   const { unsubscribe: unsubChannelUpdated } = eventBus.subscribe(
     EventChannels.CHANNEL_UPDATED,
@@ -343,14 +501,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
-
-  const { unsubscribe: unsubChannelDeleted } = eventBus.subscribe(
-    EventChannels.CHANNEL_DELETED,
-    (payload: ChannelDeletedPayload) => {
-      if (payload.serverId !== serverId) return;
-      sendEvent(res, 'channel:deleted', { channelId: payload.channelId });
-    },
-  );
+  cleanupFns.push(unsubChannelUpdated);
 
   // ── Subscribe to member status change events ──────────────────────────────
   // Status reflects presence (ONLINE/IDLE/OFFLINE) not identity, so it is emitted
@@ -367,6 +518,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       });
     },
   );
+  cleanupFns.push(unsubStatusChanged);
 
   // ── Subscribe to member join/leave events ─────────────────────────────────
   // When a member joins, look up their profile and push the full user object so
@@ -414,6 +566,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  cleanupFns.push(unsubMemberJoined);
 
   const { unsubscribe: unsubMemberLeft } = eventBus.subscribe(
     EventChannels.MEMBER_LEFT,
@@ -422,6 +575,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       sendEvent(res, 'member:left', { userId: payload.userId });
     },
   );
+  cleanupFns.push(unsubMemberLeft);
 
   // ── Subscribe to visibility change events ─────────────────────────────────
   // When a channel's visibility changes, push the updated channel object so
@@ -454,21 +608,11 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  cleanupFns.push(unsubVisibilityChanged);
 
   // ── Heartbeat ────────────────────────────────────────────────────────────
   const heartbeat = setInterval(() => {
     res.write(':\n\n');
   }, 30_000);
-
-  // ── Cleanup on client disconnect ─────────────────────────────────────────
-  req.on('close', () => {
-    clearInterval(heartbeat);
-    unsubChannelCreated();
-    unsubChannelUpdated();
-    unsubChannelDeleted();
-    unsubStatusChanged();
-    unsubMemberJoined();
-    unsubMemberLeft();
-    unsubVisibilityChanged();
-  });
+  cleanupFns.push(() => clearInterval(heartbeat));
 });

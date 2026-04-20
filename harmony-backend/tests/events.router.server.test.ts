@@ -45,7 +45,7 @@ jest.mock('../src/services/auth.service', () => ({
 jest.mock('../src/db/prisma', () => ({
   prisma: {
     message: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
-    channel: { findUnique: jest.fn() },
+    channel: { findUnique: jest.fn(), findMany: jest.fn() },
     server: { findUnique: jest.fn() },
     serverMember: { findFirst: jest.fn() },
   },
@@ -128,6 +128,7 @@ beforeEach(() => {
   mockSubscribe.mockReturnValue({ unsubscribe: jest.fn(), ready: Promise.resolve() });
   (prisma.server.findUnique as jest.Mock).mockResolvedValue({ id: VALID_SERVER_ID });
   (prisma.serverMember.findFirst as jest.Mock).mockResolvedValue({ userId: 'test-user-id' });
+  (prisma.channel.findMany as jest.Mock).mockResolvedValue([]);
 });
 
 // ─── SSE headers ──────────────────────────────────────────────────────────────

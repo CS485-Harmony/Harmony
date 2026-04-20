@@ -21,7 +21,6 @@ import { CreateChannelModal } from '@/components/channel/CreateChannelModal';
 import { useAuth } from '@/hooks/useAuth';
 import { VoiceProvider } from '@/contexts/VoiceContext';
 import { BrowseServersModal } from '@/components/server-rail/BrowseServersModal';
-import { useChannelEvents } from '@/hooks/useChannelEvents';
 import { useServerEvents } from '@/hooks/useServerEvents';
 import { useServerListSync } from '@/hooks/useServerListSync';
 import { ChannelType, ChannelVisibility, UserStatus } from '@/types';
@@ -228,33 +227,38 @@ export function HarmonyShell({
 
   // ── Real-time SSE handlers ────────────────────────────────────────────────
 
-  const handleRealTimeCreated = useCallback((msg: Message) => {
-    // Dedup: skip if the message was already optimistically added (e.g. sent by this client)
-    setLocalMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
-  }, []);
+  const handleRealTimeCreated = useCallback(
+    (msg: Message) => {
+      // Filter: server endpoint delivers messages for all channels; only update
+      // localMessages for the channel currently in view.
+      if (msg.channelId !== currentChannel.id) return;
+      // Dedup: skip if the message was already optimistically added (e.g. sent by this client)
+      setLocalMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+    },
+    [currentChannel.id],
+  );
 
-  const handleRealTimeEdited = useCallback((msg: Message) => {
-    setLocalMessages(prev => prev.map(m => (m.id === msg.id ? msg : m)));
-  }, []);
+  const handleRealTimeEdited = useCallback(
+    (msg: Message) => {
+      if (msg.channelId !== currentChannel.id) return;
+      setLocalMessages(prev => prev.map(m => (m.id === msg.id ? msg : m)));
+    },
+    [currentChannel.id],
+  );
 
-  const handleRealTimeDeleted = useCallback((messageId: string) => {
-    setLocalMessages(prev => prev.filter(m => m.id !== messageId));
-  }, []);
+  const handleRealTimeDeleted = useCallback(
+    (messageId: string, channelId: string) => {
+      if (channelId !== currentChannel.id) return;
+      setLocalMessages(prev => prev.filter(m => m.id !== messageId));
+    },
+    [currentChannel.id],
+  );
 
   const handleServerUpdated = useCallback((updatedServer: Server) => {
     setLocalServers(prev =>
       prev.map(s => (s.id === updatedServer.id ? { ...s, ...updatedServer } : s)),
     );
   }, []);
-
-  useChannelEvents({
-    channelId: currentChannel.id,
-    onMessageCreated: handleRealTimeCreated,
-    onMessageEdited: handleRealTimeEdited,
-    onMessageDeleted: handleRealTimeDeleted,
-    onServerUpdated: handleServerUpdated,
-    enabled: isAuthenticated && !isChannelLocked,
-  });
 
   // ── Real-time channel list updates ────────────────────────────────────────
 
@@ -362,6 +366,12 @@ export function HarmonyShell({
     onMemberLeft: handleMemberLeft,
     onMemberStatusChanged: handleMemberStatusChanged,
     onChannelVisibilityChanged: handleChannelVisibilityChanged,
+    // Message callbacks are disabled when the channel is locked (same guard as the
+    // former useChannelEvents call) so locked guests don't accumulate stale state.
+    onMessageCreated: isChannelLocked ? undefined : handleRealTimeCreated,
+    onMessageEdited: isChannelLocked ? undefined : handleRealTimeEdited,
+    onMessageDeleted: isChannelLocked ? undefined : handleRealTimeDeleted,
+    onServerUpdated: handleServerUpdated,
     enabled: isAuthenticated,
   });
 
