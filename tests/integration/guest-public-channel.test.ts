@@ -10,17 +10,22 @@ import {
   BACKEND_URL,
   FRONTEND_URL,
   LOCAL_SEEDS,
-  CLOUD_KNOWN,
   isCloud,
   localOnlyDescribe,
+  getCloudFixture,
 } from './env';
 
-const serverSlug = isCloud ? CLOUD_KNOWN.serverSlug : LOCAL_SEEDS.server.slug;
-const publicIndexableSlug = isCloud
-  ? CLOUD_KNOWN.publicChannel
-  : LOCAL_SEEDS.channels.publicIndexable;
-
 describe('Guest Public Channel — cloud-read-only', () => {
+  let serverSlug: string = LOCAL_SEEDS.server.slug;
+  let publicIndexableSlug: string = LOCAL_SEEDS.channels.publicIndexable;
+
+  beforeAll(async () => {
+    if (!isCloud) return;
+    const fixture = await getCloudFixture();
+    serverSlug = fixture.serverSlug;
+    publicIndexableSlug = fixture.publicChannel;
+  });
+
   test('GPC-1: public channel page renders with HTTP 200 for unauthenticated user', async () => {
     const res = await fetch(`${FRONTEND_URL}/c/${serverSlug}/${publicIndexableSlug}`);
     expect(res.status).toBe(200);
@@ -62,9 +67,7 @@ describe('Guest Public Channel — cloud-read-only', () => {
     const channel = (await channelRes.json()) as { id?: string };
     if (!channel.id) return;
 
-    const res = await fetch(
-      `${BACKEND_URL}/api/public/channels/${channel.id}/messages?page=2`,
-    );
+    const res = await fetch(`${BACKEND_URL}/api/public/channels/${channel.id}/messages?page=2`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { page?: number; messages?: unknown[] };
     expect(body.page).toBe(2);
@@ -76,6 +79,7 @@ describe('Guest Public Channel — cloud-read-only', () => {
 // GPC-4 and GPC-6 need seeded PRIVATE channel data — local-only
 localOnlyDescribe('Guest Public Channel — local-only (PRIVATE access)', () => {
   const privateSlug = LOCAL_SEEDS.channels.private;
+  const serverSlug: string = LOCAL_SEEDS.server.slug;
 
   test('GPC-4: PRIVATE channel shows access-denied UI for guest', async () => {
     const res = await fetch(`${FRONTEND_URL}/c/${serverSlug}/${privateSlug}`);
@@ -103,9 +107,7 @@ localOnlyDescribe('Guest Public Channel — local-only (PRIVATE access)', () => 
     // If the endpoint resolved an ID, verify messages returns 404
     const channel = (await channelRes.json()) as { id?: string };
     if (channel.id) {
-      const msgRes = await fetch(
-        `${BACKEND_URL}/api/public/channels/${channel.id}/messages`,
-      );
+      const msgRes = await fetch(`${BACKEND_URL}/api/public/channels/${channel.id}/messages`);
       expect(msgRes.status).toBe(404);
     }
   });
