@@ -15,14 +15,19 @@ production deploy authority — only `main` promotes to production.
 4. CI must pass and at least one review must be approved before merge.
 5. Prefer squash-merge for a clean linear history on `main`.
 
-Direct pushes to `main` are blocked by branch protection. All changes land via
-pull request.
+Direct pushes to `main` are blocked for non-admins by branch protection, and
+all normal changes land via pull request. Repository administrators retain
+bypass ability (`enforce_admins: false`) so course staff can land emergency
+hotfixes; admin bypasses should be rare and called out in the PR or an
+equivalent record.
 
 ## 2. Branch Protection Rules (`main`)
 
 Configured via GitHub branch protection on the `main` branch:
 
-- **Direct pushes blocked** — all changes arrive through pull requests.
+- **Direct pushes blocked for non-admins** — all normal changes arrive through
+  pull requests. `enforce_admins` is currently `false`, so repository
+  administrators can still push directly when necessary.
 - **Required pull request reviews** — at least **1** approving review.
 - **Required status checks** (must be green and up to date with `main`):
   - `Backend Lint and Build` — `.github/workflows/ci.yml`
@@ -48,7 +53,9 @@ production promotion.
 - Reviewer confirms all required status checks are green.
 - Security-sensitive changes (auth, new API routes, uploads, AI prompts) get a
   second review from the security reviewer or security-reviewer agent.
-- Conversations should be resolved before merge.
+- Conversations should be resolved before merge (team norm; not currently
+  enforced by branch protection — `required_conversation_resolution` is
+  `false`).
 
 ## 4. Merge & Post-Merge
 
