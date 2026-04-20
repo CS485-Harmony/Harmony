@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "build:e2e": "NEXT_PUBLIC_API_URL=http://localhost:4000 NEXT_PUBLIC_BASE_URL=http://localhost:3000 next build",
+    "start:e2e": "PORT=3000 NEXT_PUBLIC_API_URL=http://localhost:4000 NEXT_PUBLIC_BASE_URL=http://localhost:3000 next start",
     "test": "jest --forceExit",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",

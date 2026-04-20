@@ -193,7 +193,7 @@ describe('publicApiService', () => {
 
         expect(mockFetch).toHaveBeenCalledWith(
           `http://localhost:4000/api/public/servers/${encodeURIComponent(serverSlug)}/channels/${encodeURIComponent(channelSlug)}`,
-          { next: { revalidate: CACHE_DURATION.PUBLIC_API_REVALIDATE } },
+          { cache: 'no-store' },
         );
         expect(result).toEqual({
           channel: {

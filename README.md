@@ -64,7 +64,7 @@ username/email: alice_admin / alice_admin@mock.harmony.test
 password: HarmonyAdmin123!
 ```
 
-### 3. Start the app
+### 3. Start the app for normal local development
 
 Use three terminals:
 
@@ -95,6 +95,39 @@ Local endpoints:
 - Backend worker health: `http://localhost:4100/health`
 
 The backend and worker split is intentional. `backend-api` owns HTTP/tRPC/SSE traffic, while `backend-worker` owns singleton background subscribers such as cache invalidation. See `docs/deployment/deployment-architecture.md` and `docs/deployment/replica-readiness-audit.md`.
+
+### 4. Start the app for local integration testing
+
+The integration suite is intended to run against the same backend mode used in CI:
+
+- backend API in `NODE_ENV=e2e`
+- backend worker in `NODE_ENV=e2e`
+- frontend built and served in production mode
+
+Use three terminals:
+
+```bash
+# Terminal 1: backend API
+cd harmony-backend
+npm run dev:e2e
+```
+
+```bash
+# Terminal 2: backend worker
+cd harmony-backend
+npm run dev:e2e:worker
+```
+
+`npm run dev:e2e:worker` keeps the worker health server on port `4100`, matching the CI split between API and worker processes.
+
+```bash
+# Terminal 3: frontend
+cd harmony-frontend
+npm run build:e2e
+npm run start:e2e
+```
+
+This CI-faithful path matters because `NODE_ENV=e2e` raises the backend auth rate limits used by the full local integration suite.
 
 ## Tests
 
@@ -134,6 +167,9 @@ The integration suite and its execution rules are documented in `docs/test-specs
 Local target:
 
 ```bash
+# After starting the backend via `npm run dev:e2e`,
+# the worker via `npm run dev:e2e:worker`,
+# and the frontend via `npm run build:e2e` + `npm run start:e2e`
 npm run test:integration
 ```
 
