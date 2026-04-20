@@ -230,3 +230,24 @@ describe('GET /api/events/server/:serverId — authorisation', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('GET /api/events/server/:serverId — subscription readiness', () => {
+  it('returns 500 when SSE subscriptions fail to become ready', async () => {
+    const failingReady = Promise.reject(new Error('redis subscribe failed'));
+    // Mark as handled immediately so Jest doesn't flag an unhandled rejection
+    // before the route awaits the readiness promise.
+    failingReady.catch(() => undefined);
+    mockSubscribe.mockReturnValueOnce({
+      unsubscribe: jest.fn(),
+      ready: failingReady,
+    });
+    mockSubscribe.mockReturnValue({ unsubscribe: jest.fn(), ready: Promise.resolve() });
+
+    const res = await request(app).get(
+      `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}`,
+    );
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Failed to initialize event stream' });
+  });
+});
