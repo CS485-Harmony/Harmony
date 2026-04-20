@@ -6,7 +6,7 @@
  * Classification: cloud-read-only
  */
 
-import { BACKEND_URL, LOCAL_SEEDS, isCloud, localOnlyDescribe } from './env';
+import { BACKEND_URL, LOCAL_SEEDS, isCloud, localOnlyDescribe, getCloudFixture } from './env';
 import { login } from './helpers/auth';
 
 const serverSlug = LOCAL_SEEDS.server.slug;
@@ -14,10 +14,14 @@ const serverSlug = LOCAL_SEEDS.server.slug;
 // ─── Cloud-read-only smoke tests ─────────────────────────────────────────────
 
 describe('Visibility Smoke (cloud-read-only)', () => {
+  let knownSlug: string = serverSlug;
+
+  beforeAll(async () => {
+    if (!isCloud) return;
+    knownSlug = (await getCloudFixture()).serverSlug;
+  });
+
   test('VIS-SMOKE-1: sitemap endpoint is reachable and returns XML', async () => {
-    const knownSlug = isCloud
-      ? (process.env.CLOUD_TEST_SERVER_SLUG ?? 'harmony-hq')
-      : serverSlug;
     const res = await fetch(`${BACKEND_URL}/sitemap/${knownSlug}.xml`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toMatch(/xml/i);
@@ -69,7 +73,11 @@ localOnlyDescribe('Visibility Change Impact (local-only)', () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ serverId, channelId, visibility: 'PUBLIC_INDEXABLE' }),
+        body: JSON.stringify({
+          serverId,
+          channelId,
+          visibility: 'PUBLIC_INDEXABLE',
+        }),
       });
     }
   });
@@ -121,9 +129,7 @@ localOnlyDescribe('Visibility Change Impact (local-only)', () => {
   test('VIS-3: PUBLIC_NO_INDEX channel does not appear in the sitemap', async () => {
     // The introductions channel is seeded as PUBLIC_NO_INDEX
     const sitemap = await getSitemapText();
-    expect(sitemap).not.toContain(
-      `/c/${serverSlug}/${LOCAL_SEEDS.channels.publicNoIndex}`,
-    );
+    expect(sitemap).not.toContain(`/c/${serverSlug}/${LOCAL_SEEDS.channels.publicNoIndex}`);
   });
 
   test('VIS-4: guest cannot access PRIVATE channel page — sees access-denied UI', async () => {
@@ -150,7 +156,11 @@ localOnlyDescribe('Visibility Change Impact (local-only)', () => {
   test('VIS-5-unauthed: unauthenticated request to a PRIVATE channel is rejected with 401', async () => {
     await setVisibility('PRIVATE');
     const input = encodeURIComponent(
-      JSON.stringify({ serverSlug, serverId, channelSlug: LOCAL_SEEDS.channels.publicIndexable }),
+      JSON.stringify({
+        serverSlug,
+        serverId,
+        channelSlug: LOCAL_SEEDS.channels.publicIndexable,
+      }),
     );
     const res = await fetch(`${BACKEND_URL}/trpc/channel.getChannel?input=${input}`);
     expect(res.status).toBe(401);
@@ -169,7 +179,9 @@ localOnlyDescribe('Visibility Change Impact (local-only)', () => {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { result?: { data?: { slug?: string } } };
+    const body = (await res.json()) as {
+      result?: { data?: { slug?: string } };
+    };
     expect(body.result?.data?.slug).toBe(LOCAL_SEEDS.channels.publicIndexable);
   });
 });

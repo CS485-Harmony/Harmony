@@ -1,9 +1,9 @@
 /**
- * useServerEvents.test.tsx — Issue #185 / #186 / #187 / #231
+ * useServerEvents.test.tsx — Issue #185 / #186 / #187 / #189 / #231
  *
  * Tests the useServerEvents hook that subscribes to real-time SSE events for
- * channel list updates, member list updates, member status changes, and
- * visibility changes on a server.
+ * channel list updates, member list updates, member status changes, visibility
+ * changes, message events, and server:updated events.
  *
  * EventSource is mocked to avoid actual network connections.
  */
@@ -12,6 +12,7 @@ import { renderHook, act } from '@testing-library/react';
 import { useServerEvents } from '../hooks/useServerEvents';
 import { ChannelType, ChannelVisibility } from '../types/channel';
 import type { Channel } from '../types/channel';
+import type { Message } from '../types/message';
 import type { User } from '../types/user';
 
 // ─── Mock api-client ──────────────────────────────────────────────────────────
@@ -110,6 +111,16 @@ const MOCK_USER: User = {
   role: 'member',
 };
 
+const MOCK_MESSAGE: Message = {
+  id: 'msg-001',
+  channelId: 'ch-001',
+  authorId: 'user-001',
+  author: { id: 'user-001', username: 'alice', displayName: 'Alice' },
+  content: 'Hello world',
+  timestamp: '2024-01-01T00:00:00.000Z',
+  attachments: [],
+};
+
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 const originalEnv = process.env;
@@ -173,7 +184,7 @@ describe('useServerEvents — connection', () => {
     expect(mockEventSourceInstance?.close).toHaveBeenCalled();
   });
 
-  it('registers listeners for all seven event types', () => {
+  it('registers listeners for all eleven event types', () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -184,6 +195,10 @@ describe('useServerEvents — connection', () => {
         onMemberLeft: jest.fn(),
         onMemberStatusChanged: jest.fn(),
         onChannelVisibilityChanged: jest.fn(),
+        onMessageCreated: jest.fn(),
+        onMessageEdited: jest.fn(),
+        onMessageDeleted: jest.fn(),
+        onServerUpdated: jest.fn(),
       }),
     );
 
@@ -198,6 +213,10 @@ describe('useServerEvents — connection', () => {
     expect(addedTypes).toContain('member:left');
     expect(addedTypes).toContain('member:statusChanged');
     expect(addedTypes).toContain('channel:visibility-changed');
+    expect(addedTypes).toContain('message:created');
+    expect(addedTypes).toContain('message:edited');
+    expect(addedTypes).toContain('message:deleted');
+    expect(addedTypes).toContain('server:updated');
   });
 });
 
@@ -643,5 +662,215 @@ describe('useServerEvents — channel:visibility-changed events', () => {
         }),
       }),
     );
+  });
+});
+
+// ─── Message event handling ───────────────────────────────────────────────────
+
+describe('useServerEvents — message events', () => {
+  it('calls onMessageCreated with parsed message on message:created event', () => {
+    const onMessageCreated = jest.fn();
+
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onMessageCreated,
+      }),
+    );
+
+    act(() => {
+      mockEventSourceInstance!.simulateEvent('message:created', MOCK_MESSAGE);
+    });
+
+    expect(onMessageCreated).toHaveBeenCalledTimes(1);
+    expect(onMessageCreated).toHaveBeenCalledWith(MOCK_MESSAGE);
+  });
+
+  it('calls onMessageEdited with parsed message on message:edited event', () => {
+    const onMessageEdited = jest.fn();
+
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onMessageEdited,
+      }),
+    );
+
+    act(() => {
+      mockEventSourceInstance!.simulateEvent('message:edited', {
+        ...MOCK_MESSAGE,
+        content: 'edited content',
+      });
+    });
+
+    expect(onMessageEdited).toHaveBeenCalledTimes(1);
+    expect(onMessageEdited).toHaveBeenCalledWith({ ...MOCK_MESSAGE, content: 'edited content' });
+  });
+
+  it('calls onMessageDeleted with messageId and channelId on message:deleted event', () => {
+    const onMessageDeleted = jest.fn();
+
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onMessageDeleted,
+      }),
+    );
+
+    act(() => {
+      mockEventSourceInstance!.simulateEvent('message:deleted', {
+        messageId: 'msg-001',
+        channelId: 'ch-001',
+      });
+    });
+
+    expect(onMessageDeleted).toHaveBeenCalledTimes(1);
+    expect(onMessageDeleted).toHaveBeenCalledWith('msg-001', 'ch-001');
+  });
+
+  it('does not throw when message callbacks are not provided', () => {
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+      }),
+    );
+
+    expect(() => {
+      act(() => {
+        mockEventSourceInstance!.simulateEvent('message:created', MOCK_MESSAGE);
+        mockEventSourceInstance!.simulateEvent('message:edited', MOCK_MESSAGE);
+        mockEventSourceInstance!.simulateEvent('message:deleted', {
+          messageId: 'msg-001',
+          channelId: 'ch-001',
+        });
+      });
+    }).not.toThrow();
+  });
+
+  it('removes message listeners on unmount', () => {
+    const { unmount } = renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onMessageCreated: jest.fn(),
+        onMessageEdited: jest.fn(),
+        onMessageDeleted: jest.fn(),
+      }),
+    );
+
+    unmount();
+
+    const removedTypes = (
+      mockEventSourceInstance!.removeEventListener.mock.calls as [string, unknown][]
+    ).map(([type]) => type);
+
+    expect(removedTypes).toContain('message:created');
+    expect(removedTypes).toContain('message:edited');
+    expect(removedTypes).toContain('message:deleted');
+  });
+
+  it('does not call onMessageCreated on malformed JSON', () => {
+    const onMessageCreated = jest.fn();
+
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onMessageCreated,
+      }),
+    );
+
+    expect(() => {
+      act(() => {
+        const badEvent = new MessageEvent('message:created', { data: 'not-json{{{' });
+        (mockEventSourceInstance!.addEventListener.mock.calls as [string, EventSourceHandler][])
+          .filter(([type]) => type === 'message:created')
+          .forEach(([, handler]) => handler(badEvent));
+      });
+    }).not.toThrow();
+
+    expect(onMessageCreated).not.toHaveBeenCalled();
+  });
+});
+
+// ─── server:updated event handling ───────────────────────────────────────────
+
+describe('useServerEvents — server:updated events', () => {
+  it('calls onServerUpdated with parsed server on server:updated event', () => {
+    const onServerUpdated = jest.fn();
+    const MOCK_SERVER = { id: SERVER_ID, name: 'Test Server', iconUrl: null, description: null };
+
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onServerUpdated,
+      }),
+    );
+
+    act(() => {
+      mockEventSourceInstance!.simulateEvent('server:updated', MOCK_SERVER);
+    });
+
+    expect(onServerUpdated).toHaveBeenCalledTimes(1);
+    expect(onServerUpdated).toHaveBeenCalledWith(MOCK_SERVER);
+  });
+
+  it('does not throw when onServerUpdated is not provided', () => {
+    renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+      }),
+    );
+
+    expect(() => {
+      act(() => {
+        mockEventSourceInstance!.simulateEvent('server:updated', {
+          id: SERVER_ID,
+          name: 'Updated Server',
+        });
+      });
+    }).not.toThrow();
+  });
+
+  it('removes server:updated listener on unmount', () => {
+    const { unmount } = renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onServerUpdated: jest.fn(),
+      }),
+    );
+
+    unmount();
+
+    const removedTypes = (
+      mockEventSourceInstance!.removeEventListener.mock.calls as [string, unknown][]
+    ).map(([type]) => type);
+
+    expect(removedTypes).toContain('server:updated');
   });
 });

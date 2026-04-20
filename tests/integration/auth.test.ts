@@ -7,7 +7,14 @@
  */
 
 import crypto from 'crypto';
-import { BACKEND_URL, isCloud, LOCAL_SEEDS, localOnlyDescribe, localOnlyTest } from './env';
+import {
+  BACKEND_URL,
+  FRONTEND_URL,
+  isCloud,
+  LOCAL_SEEDS,
+  localOnlyDescribe,
+  localOnlyTest,
+} from './env';
 import { login } from './helpers/auth';
 
 function derivePasswordVerifier(password: string, saltHex: string): string {
@@ -34,7 +41,7 @@ describe('Auth Smoke', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Origin: isCloud ? 'https://harmony.chat' : 'http://localhost:3000',
+        Origin: FRONTEND_URL,
       },
       body: JSON.stringify({ email: 'smoke@example.invalid' }),
     });
@@ -77,7 +84,10 @@ localOnlyDescribe('Auth (local-only)', () => {
     const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: nonExistentEmail, passwordVerifier: verifier }),
+      body: JSON.stringify({
+        email: nonExistentEmail,
+        passwordVerifier: verifier,
+      }),
     });
     expect(res.status).toBe(401);
   });
@@ -99,7 +109,9 @@ localOnlyDescribe('Auth (local-only)', () => {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { result?: { data?: { email?: string } } };
+    const body = (await res.json()) as {
+      result?: { data?: { email?: string } };
+    };
     expect(body.result?.data?.email).toBe(email);
   });
 
@@ -111,7 +123,10 @@ localOnlyDescribe('Auth (local-only)', () => {
       body: JSON.stringify({ refreshToken: first.refreshToken }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { accessToken?: string; refreshToken?: string };
+    const body = (await res.json()) as {
+      accessToken?: string;
+      refreshToken?: string;
+    };
     expect(typeof body.accessToken).toBe('string');
     expect(typeof body.refreshToken).toBe('string');
 

@@ -272,7 +272,10 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     EventChannels.MESSAGE_DELETED,
     (payload: MessageDeletedPayload) => {
       if (payload.channelId !== channelId) return;
-      writeEvent('message:deleted', { messageId: payload.messageId });
+      writeEvent('message:deleted', {
+        messageId: payload.messageId,
+        channelId: payload.channelId,
+      });
     },
   );
 
@@ -283,7 +286,7 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
       writeEvent('server:updated', {
         id: payload.serverId,
         name: payload.name,
-        iconUrl: payload.iconUrl,
+        icon: payload.iconUrl ?? undefined,
         description: payload.description,
         updatedAt: payload.timestamp,
       });
@@ -324,9 +327,9 @@ const CHANNEL_SSE_SELECT = {
 /**
  * GET /api/events/server/:serverId?token=<accessToken>
  *
- * Streams real-time channel events (created, updated, deleted) to authenticated,
- * authorised clients using Server-Sent Events. Scoped to a server so all members
- * see the same sidebar updates regardless of which channel they're currently viewing.
+ * Streams real-time server events to authenticated, authorised clients using
+ * Server-Sent Events. Scoped to a server so all members see the same sidebar,
+ * member, message, and server updates regardless of which channel they are viewing.
  *
  * Auth: same token-via-query-param pattern as /channel/:channelId (EventSource cannot
  * send custom headers).
@@ -378,13 +381,24 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
 
   const sseState = createBufferedSseState();
   const writeEvent = createBufferedEventWriter(res, sseState);
+  const serverChannelIds = new Set<string>();
+  const subscriptions: EventSubscription[] = [];
+  let cleanedUp = false;
 
-  // ── Subscribe to channel events ──────────────────────────────────────────
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    cleanupSseConnection(sseState, subscriptions);
+  };
+  req.on('close', cleanup);
 
+  // Register create/delete subscriptions before the preload query so channel-ID
+  // tracking stays correct if channels change while the initial lookup is in flight.
   const channelCreatedSubscription = eventBus.subscribe(
     EventChannels.CHANNEL_CREATED,
     async (payload: ChannelCreatedPayload) => {
       if (payload.serverId !== serverId) return;
+      serverChannelIds.add(payload.channelId);
 
       try {
         const channel = await prisma.channel.findUnique({
@@ -402,6 +416,126 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  subscriptions.push(channelCreatedSubscription);
+
+  const channelDeletedSubscription = eventBus.subscribe(
+    EventChannels.CHANNEL_DELETED,
+    (payload: ChannelDeletedPayload) => {
+      if (payload.serverId !== serverId) return;
+      serverChannelIds.delete(payload.channelId);
+      writeEvent('channel:deleted', { channelId: payload.channelId });
+    },
+  );
+  subscriptions.push(channelDeletedSubscription);
+
+  let serverChannels: { id: string }[];
+  try {
+    serverChannels = await prisma.channel.findMany({
+      where: { serverId },
+      select: { id: true },
+    });
+  } catch (err) {
+    cleanup();
+    logger.error({ err, serverId }, 'Failed to preload channel IDs for server SSE');
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+    return;
+  }
+  for (const currentChannel of serverChannels) {
+    serverChannelIds.add(currentChannel.id);
+  }
+
+  if (cleanedUp) return;
+
+  const messageCreatedSubscription = eventBus.subscribe(
+    EventChannels.MESSAGE_CREATED,
+    async (payload: MessageCreatedPayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+
+      try {
+        const message = await prisma.message.findUnique({
+          where: { id: payload.messageId },
+          include: MESSAGE_SSE_INCLUDE,
+        });
+        if (!message || message.isDeleted) return;
+
+        writeEvent('message:created', {
+          id: message.id,
+          channelId: message.channelId,
+          authorId: message.authorId,
+          author: message.author,
+          content: message.content,
+          timestamp: message.createdAt.toISOString(),
+          attachments: message.attachments,
+          editedAt: message.editedAt ? message.editedAt.toISOString() : null,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, serverId, messageId: payload.messageId },
+          'Failed to hydrate SSE message:created payload on server endpoint',
+        );
+      }
+    },
+  );
+  subscriptions.push(messageCreatedSubscription);
+
+  const messageEditedSubscription = eventBus.subscribe(
+    EventChannels.MESSAGE_EDITED,
+    async (payload: MessageEditedPayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+
+      try {
+        const message = await prisma.message.findUnique({
+          where: { id: payload.messageId },
+          include: MESSAGE_SSE_INCLUDE,
+        });
+        if (!message || message.isDeleted) return;
+
+        writeEvent('message:edited', {
+          id: message.id,
+          channelId: message.channelId,
+          authorId: message.authorId,
+          author: message.author,
+          content: message.content,
+          timestamp: message.createdAt.toISOString(),
+          attachments: message.attachments,
+          editedAt: message.editedAt ? message.editedAt.toISOString() : null,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, serverId, messageId: payload.messageId },
+          'Failed to hydrate SSE message:edited payload on server endpoint',
+        );
+      }
+    },
+  );
+  subscriptions.push(messageEditedSubscription);
+
+  const messageDeletedSubscription = eventBus.subscribe(
+    EventChannels.MESSAGE_DELETED,
+    (payload: MessageDeletedPayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+      writeEvent('message:deleted', {
+        messageId: payload.messageId,
+        channelId: payload.channelId,
+      });
+    },
+  );
+  subscriptions.push(messageDeletedSubscription);
+
+  const serverUpdatedSubscription = eventBus.subscribe(
+    EventChannels.SERVER_UPDATED,
+    (payload: ServerUpdatedPayload) => {
+      if (payload.serverId !== serverId) return;
+      writeEvent('server:updated', {
+        id: payload.serverId,
+        name: payload.name,
+        icon: payload.iconUrl ?? undefined,
+        description: payload.description,
+        updatedAt: payload.timestamp,
+      });
+    },
+  );
+  subscriptions.push(serverUpdatedSubscription);
 
   const channelUpdatedSubscription = eventBus.subscribe(
     EventChannels.CHANNEL_UPDATED,
@@ -424,16 +558,8 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  subscriptions.push(channelUpdatedSubscription);
 
-  const channelDeletedSubscription = eventBus.subscribe(
-    EventChannels.CHANNEL_DELETED,
-    (payload: ChannelDeletedPayload) => {
-      if (payload.serverId !== serverId) return;
-      writeEvent('channel:deleted', { channelId: payload.channelId });
-    },
-  );
-
-  // ── Subscribe to member status change events ──────────────────────────────
   // Status reflects presence (ONLINE/IDLE/OFFLINE) not identity, so it is emitted
   // regardless of the user's publicProfile setting — consistent with the rationale
   // documented in PR #202 for member join/leave events.
@@ -441,17 +567,13 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     EventChannels.USER_STATUS_CHANGED,
     (payload: UserStatusChangedPayload) => {
       if (payload.serverId !== serverId) return;
-      // Normalize Prisma enum ('IDLE') to the lowercase format the frontend expects ('idle').
       writeEvent('member:statusChanged', {
         id: payload.userId,
         status: payload.status.toLowerCase(),
       });
     },
   );
-
-  // ── Subscribe to member join/leave events ─────────────────────────────────
-  // When a member joins, look up their profile and push the full user object so
-  // clients can add the new member to the sidebar without a page reload.
+  subscriptions.push(statusChangedSubscription);
 
   const memberJoinedSubscription = eventBus.subscribe(
     EventChannels.MEMBER_JOINED,
@@ -472,19 +594,13 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
         });
         if (!user) return;
 
-        // Respect the publicProfile privacy flag — consistent with userService.getUser().
-        // Users who have opted out of public profile display appear as Anonymous with no avatar.
-        // status reflects server presence (ONLINE/IDLE/OFFLINE), not identity — intentionally
-        // emitted even for private-profile users since it reveals no personally identifying information.
         const isPublic = user.publicProfile;
         writeEvent('member:joined', {
           id: user.id,
           username: isPublic ? user.username : 'Anonymous',
           displayName: isPublic ? user.displayName : undefined,
           avatar: isPublic ? (user.avatarUrl ?? undefined) : undefined,
-          // Cast backend RoleTypeValue (e.g. 'MEMBER') to frontend UserRole (e.g. 'member')
           role: payload.role.toLowerCase(),
-          // Cast DB UserStatus (e.g. 'ONLINE') to frontend UserStatus (e.g. 'online')
           status: user.status.toLowerCase(),
         });
       } catch (err) {
@@ -495,6 +611,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  subscriptions.push(memberJoinedSubscription);
 
   const memberLeftSubscription = eventBus.subscribe(
     EventChannels.MEMBER_LEFT,
@@ -503,11 +620,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       writeEvent('member:left', { userId: payload.userId });
     },
   );
-
-  // ── Subscribe to visibility change events ─────────────────────────────────
-  // When a channel's visibility changes, push the updated channel object so
-  // connected clients can update the sidebar badge and handle access revocation
-  // (PRIVATE channels become inaccessible to non-members) without a page reload.
+  subscriptions.push(memberLeftSubscription);
 
   const visibilityChangedSubscription = eventBus.subscribe(
     EventChannels.VISIBILITY_CHANGED,
@@ -523,8 +636,6 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
 
         writeEvent('channel:visibility-changed', {
           ...channel,
-          // Include old visibility so clients can detect access revocation
-          // (e.g. current user is viewing a channel that just became PRIVATE).
           oldVisibility: payload.oldVisibility,
         });
       } catch (err) {
@@ -535,18 +646,9 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     },
   );
+  subscriptions.push(visibilityChangedSubscription);
 
-  const serverSubscriptions = [
-    channelCreatedSubscription,
-    channelUpdatedSubscription,
-    channelDeletedSubscription,
-    statusChangedSubscription,
-    memberJoinedSubscription,
-    memberLeftSubscription,
-    visibilityChangedSubscription,
-  ];
-
-  await finalizeSseSetup(req, res, sseState, serverSubscriptions, {
+  await finalizeSseSetup(req, res, sseState, subscriptions, {
     route: 'server-events',
     serverId,
   });

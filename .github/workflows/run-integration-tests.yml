@@ -1,25 +1,33 @@
-# Integration test workflow — runs the local-target integration suite in CI.
+# Integration test workflow — runs both the local-target CI suite and the
+# deployed cloud-read-only smoke suite in CI.
 #
 # Job names are stable so this workflow can be used as a required status check
 # in branch protection rules (Settings → Branches → Require status checks →
-# "Run Integration Tests").
+# "Run Integration Tests" / "Run Cloud Integration Tests").
 #
 # ─── Cloud-target usage (outside CI) ────────────────────────────────────────
-# To run read-only smoke tests against the deployed URLs, export the required
-# env vars and run from the repo root:
+# To run read-only smoke tests against deployed URLs locally, export the
+# required env vars and run from the repo root:
 #
 #   export TEST_TARGET=cloud
-#   export BACKEND_URL=<railway-backend-url>   # required in cloud mode
-#   export FRONTEND_URL=<vercel-frontend-url>  # required in cloud mode
+#   export BACKEND_URL=<railway-backend-url>
+#   export FRONTEND_URL=<vercel-frontend-url>
 #   cd tests/integration && npm test
-#
-# Both BACKEND_URL and FRONTEND_URL must be set in cloud mode (env.ts throws
-# if they are missing or use a localhost default while TEST_TARGET=cloud).
 #
 # Cloud mode skips local-only test cases (those that require seeded data or
 # write operations) and executes only cloud-read-only cases. No local services
 # need to be started for cloud mode. See docs/test-specs/integration-test-spec.md
 # for per-test classification (cloud-read-only vs local-only).
+#
+# ─── Cloud-target usage (GitHub Actions) ────────────────────────────────────
+# The "Run Cloud Integration Tests" job uses the `cloud-integration-tests`
+# GitHub Actions environment. Configure these environment-scoped settings:
+#   vars.CLOUD_TEST_BACKEND_URL    required (deployed backend base URL)
+#   vars.CLOUD_TEST_FRONTEND_URL   required (deployed frontend base URL)
+#   vars.CLOUD_TEST_SERVER_SLUG    optional (defaults to test code fallback)
+#   vars.CLOUD_TEST_PUBLIC_CHANNEL optional (defaults to test code fallback)
+#   vars.CLOUD_TEST_SERVER_ID      optional (enables authenticated SSE smoke)
+#   secrets.CLOUD_TEST_ACCESS_TOKEN optional (enables authenticated smoke cases)
 #
 # Environment contract reference: docs/deployment/deployment-architecture.md
 # Replica-sensitive exclusions: docs/deployment/replica-readiness-audit.md
@@ -218,3 +226,49 @@ jobs:
             /tmp/backend-worker.log
             /tmp/frontend.log
           retention-days: 3
+
+  run-cloud-integration-tests:
+    name: Run Cloud Integration Tests
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: cloud-integration-tests
+    env:
+      TEST_TARGET: cloud
+      BACKEND_URL: ${{ vars.CLOUD_TEST_BACKEND_URL }}
+      FRONTEND_URL: ${{ vars.CLOUD_TEST_FRONTEND_URL }}
+      CLOUD_TEST_SERVER_SLUG: ${{ vars.CLOUD_TEST_SERVER_SLUG }}
+      CLOUD_TEST_PUBLIC_CHANNEL: ${{ vars.CLOUD_TEST_PUBLIC_CHANNEL }}
+      CLOUD_TEST_SERVER_ID: ${{ vars.CLOUD_TEST_SERVER_ID }}
+      CLOUD_TEST_ACCESS_TOKEN: ${{ secrets.CLOUD_TEST_ACCESS_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate cloud integration test configuration
+        run: |
+          missing=0
+          for name in BACKEND_URL FRONTEND_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing cloud integration test config::Set repository variable ${name} for run-integration-tests.yml"
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Set up Node.js (integration tests)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tests/integration/package-lock.json
+
+      - name: Install integration test dependencies
+        working-directory: tests/integration
+        run: npm ci
+
+      - name: Run integration tests (cloud target)
+        working-directory: tests/integration
+        run: npm run test:cloud

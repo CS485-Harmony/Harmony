@@ -164,9 +164,12 @@ Until an isolated environment is provisioned, all write-path test cases in this 
 
 **Backend routes:** `harmony-backend/src/routes/attachment.router.ts`
 **Storage backend:** `harmony-backend/src/lib/storage/`
-**Classification:** local-only (upload is a write path; production storage is `STORAGE_PROVIDER=local` until issue #319 implements S3)
+**Classification:** mixed
 
-> **Production storage note:** The current backend only supports `STORAGE_PROVIDER=local`, which writes files to the instance's local disk. This is not safe for 2+ replicas (see `docs/deployment/replica-readiness-audit.md §3.4`). These tests are local-only until issue #319 implements `S3StorageProvider`. Once S3 is in place, upload and retrieval tests may be promoted to `cloud-isolated-env-only`.
+- **cloud-safe:** `ATT-2` always; `ATT-3`, `ATT-4`, and `ATT-6` when a cloud test bearer token is provisioned. These requests are rejected before any object is stored.
+- **local-only:** `ATT-1` and `ATT-5`, because successful uploads create durable objects and there is no public cleanup endpoint for the shared cloud environment.
+
+> **Storage note:** Production storage uses `STORAGE_PROVIDER=s3` (Cloudflare R2) after issue #319, so multi-replica serving is no longer the blocker. The remaining reason successful upload tests stay local-only is lifecycle hygiene: the current public API does not expose a delete/cleanup path for uploaded objects created by CI.
 
 | ID | Description | Steps | Expected |
 |---|---|---|---|
@@ -231,7 +234,7 @@ These tests confirm the auth and CORS contract described in `docs/deployment/dep
 | AUTH — Login / refresh | Yes | AUTH-SMOKE-1 only | Not yet |
 | SSRAPI — SSR public API | Yes | Yes (except SSRAPI-7) | — |
 | VIS — Visibility change | Yes | VIS-SMOKE-1, VIS-SMOKE-2 | Not yet |
-| ATT — Attachments | Yes | Not until #319 lands | Post-#319 only |
+| ATT — Attachments | Yes | ATT-2 always; ATT-3/4/6 with cloud token | ATT-1 and ATT-5 |
 | SSE — Real-time events | Yes | SSE-SMOKE-1 only | — |
 | CORS — Header verification | Yes | Yes | — |
 
