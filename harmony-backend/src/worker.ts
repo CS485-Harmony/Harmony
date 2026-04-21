@@ -17,7 +17,6 @@ import { cacheInvalidator } from './services/cacheInvalidator.service';
 import { instanceId } from './lib/instance-identity';
 import { createLogger } from './lib/logger';
 import { parsePortEnv } from './lib/parsePortEnv';
-import { startMetaTagUpdateRuntime, stopMetaTagUpdateRuntime } from './workers/metaTagUpdate.runtime';
 
 const PORT = parsePortEnv(4100);
 const HOST = '0.0.0.0';
@@ -78,10 +77,9 @@ cacheInvalidator
     process.exit(1);
   });
 
-startMetaTagUpdateRuntime().catch((err) => {
-  logger.error({ err }, 'Meta tag update runtime startup failed');
-  process.exit(1);
-});
+// The meta-tag queue producer/consumer path is still incomplete because
+// generateMetaTags(channelId) has not been implemented yet. Do not start the
+// regeneration event runtime until the worker can actually drain jobs.
 
 let shuttingDown = false;
 const shutdown = async (signal: string) => {
@@ -106,13 +104,6 @@ const shutdown = async (signal: string) => {
     } catch (err) {
       exitCode = 1;
       logger.error({ err }, 'Cache invalidator stop failed during shutdown');
-    }
-
-    try {
-      await stopMetaTagUpdateRuntime();
-    } catch (err) {
-      exitCode = 1;
-      logger.error({ err }, 'Meta tag update runtime stop failed during shutdown');
     }
   } finally {
     clearTimeout(timer);

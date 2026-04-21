@@ -51,4 +51,22 @@ describe('metaTagUpdateQueue.scheduleUpdate', () => {
     expect(removeMock).toHaveBeenCalledTimes(1);
     expect(addMock).toHaveBeenCalledTimes(2);
   });
+
+  it('uses bounded Redis retries for the producer connection', async () => {
+    await metaTagUpdateQueue.scheduleUpdate({
+      channelId: 'channel-2',
+      triggeredBy: 'manual',
+    });
+
+    const { Queue } = jest.requireMock('bullmq') as {
+      Queue: jest.Mock;
+    };
+    expect(Queue.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        connection: expect.objectContaining({
+          maxRetriesPerRequest: 3,
+        }),
+      }),
+    );
+  });
 });

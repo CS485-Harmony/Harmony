@@ -33,7 +33,9 @@ let queue: Queue<MetaTagUpdateJobData> | null = null;
 function getRedisConnection(): RedisOptions {
   return {
     url: process.env.REDIS_URL ?? 'redis://localhost:6379',
-    maxRetriesPerRequest: null,
+    // Producer calls are awaited by request/worker code paths, so Redis write
+    // failures should surface promptly instead of hanging on unbounded retries.
+    maxRetriesPerRequest: 3,
   };
 }
 
