@@ -4,6 +4,7 @@ import { DescriptionGenerator } from './descriptionGenerator';
 import { OpenGraphGenerator } from './openGraphGenerator';
 import { StructuredDataGenerator } from './structuredDataGenerator';
 import { MetaTagCache } from './metaTagCache';
+import { ContentFilter } from './contentFilter';
 import type {
   MetaTagSet,
   ChannelContext,
@@ -65,8 +66,10 @@ export const metaTagService = {
    */
   async generateMetaTagsFromContext(channel: ChannelContext, messages: MessageContext[]): Promise<MetaTagSet> {
     try {
-      const title = TitleGenerator.generateFromThread(messages, channel);
-      const description = DescriptionGenerator.generateFromMessages(messages, channel);
+      const rawTitle = TitleGenerator.generateFromThread(messages, channel);
+      const rawDescription = DescriptionGenerator.generateFromMessages(messages, channel);
+      const title = ContentFilter.filterContent(rawTitle);
+      const description = ContentFilter.filterContent(rawDescription);
       const keywords = DescriptionGenerator.extractKeyPhrases(messages.map((m) => m.content).join(' '), 5);
       const analysis: ContentAnalysis = {
         keywords,
@@ -166,5 +169,15 @@ export const metaTagService = {
 
   buildCanonicalUrl(serverSlug: string, channelSlug: string): string {
     return `${BASE_URL}/c/${encodeURIComponent(serverSlug)}/${encodeURIComponent(channelSlug)}`;
+  },
+
+  /**
+   * Sanitize admin-supplied custom override strings before they are stored or
+   * served in the <head>. Strips tags, filters PII/profanity, then HTML-encodes.
+   * Used by the write path (PUT /meta-tags) to satisfy AC-8 / §12.3.
+   */
+  sanitizeCustomOverride(value: string | null | undefined): string | null {
+    if (value == null) return null;
+    return ContentFilter.sanitizeForHead(ContentFilter.filterContent(value));
   },
 };
