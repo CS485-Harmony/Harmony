@@ -291,4 +291,35 @@ describe('metaTagService', () => {
     const url = metaTagService.buildCanonicalUrl('game-dev-hub', 'unity-physics-help');
     expect(url).toContain('/c/game-dev-hub/unity-physics-help');
   });
+
+  it('buildCanonicalUrl encodes reserved characters in slug segments', () => {
+    const url = metaTagService.buildCanonicalUrl('my server', 'q&a channel');
+    expect(url).toContain('/c/my%20server/q%26a%20channel');
+    expect(url).not.toContain(' ');
+    expect(url).not.toContain('&');
+  });
+
+  it('generateMetaTagsFromContext emits index,follow for PUBLIC_INDEXABLE', async () => {
+    const tags = await metaTagService.generateMetaTagsFromContext(
+      { ...channel, visibility: 'PUBLIC_INDEXABLE' },
+      messages,
+    );
+    expect(tags.robots).toBe('index, follow');
+  });
+
+  it('generateMetaTagsFromContext emits noindex,follow for PUBLIC_NO_INDEX', async () => {
+    const tags = await metaTagService.generateMetaTagsFromContext(
+      { ...channel, visibility: 'PUBLIC_NO_INDEX' },
+      messages,
+    );
+    expect(tags.robots).toBe('noindex, follow');
+  });
+
+  it('generateMetaTagsFromContext emits noindex,nofollow for PRIVATE', async () => {
+    const tags = await metaTagService.generateMetaTagsFromContext(
+      { ...channel, visibility: 'PRIVATE' },
+      messages,
+    );
+    expect(tags.robots).toBe('noindex, nofollow');
+  });
 });

@@ -78,6 +78,9 @@ export interface MetaTagJobStatus {
   errorMessage: string | null;
 }
 
+// Canonical values from the SEO spec visibility model
+export type ChannelVisibility = 'PUBLIC_INDEXABLE' | 'PUBLIC_NO_INDEX' | 'PRIVATE';
+
 export interface ChannelContext {
   id: string;
   name: string;
@@ -86,6 +89,7 @@ export interface ChannelContext {
   serverName: string;
   serverSlug: string;
   canonicalUrl: string;
+  visibility?: ChannelVisibility;
 }
 
 export interface MessageContext {

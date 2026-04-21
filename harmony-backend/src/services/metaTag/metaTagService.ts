@@ -7,6 +7,7 @@ import { MetaTagCache } from './metaTagCache';
 import type {
   MetaTagSet,
   ChannelContext,
+  ChannelVisibility,
   MessageContext,
   MetaTagPreview,
   MetaTagJobStatus,
@@ -17,6 +18,13 @@ import { createLogger } from '../../lib/logger';
 const logger = createLogger({ component: 'meta-tag-service' });
 
 const BASE_URL = process.env.BASE_URL ?? 'https://harmony.chat';
+
+// Spec §9.1.1 visibility → robots mapping
+function getRobotsDirective(visibility: ChannelVisibility | undefined): string {
+  if (visibility === 'PUBLIC_NO_INDEX') return 'noindex, follow';
+  if (visibility === 'PRIVATE') return 'noindex, nofollow';
+  return 'index, follow'; // PUBLIC_INDEXABLE or unset
+}
 
 function sanitizeChannelContext(channel: ChannelContext): ChannelContext {
   return {
@@ -41,7 +49,7 @@ function buildFallbackTags(channel: ChannelContext): MetaTagSet {
     title: TitleGenerator.truncateWithEllipsis(title),
     description: DescriptionGenerator.enforceLength(description),
     canonical: safe.canonicalUrl,
-    robots: 'index, follow',
+    robots: getRobotsDirective(safe.visibility),
     openGraph: OpenGraphGenerator.generateOGTags(safe, {}, analysis),
     twitter: OpenGraphGenerator.generateTwitterCard(safe, {}, analysis),
     structuredData: StructuredDataGenerator.generateDiscussionForum(safe, [], {}),
@@ -75,7 +83,7 @@ export const metaTagService = {
         title,
         description,
         canonical: channel.canonicalUrl,
-        robots: 'index, follow',
+        robots: getRobotsDirective(channel.visibility),
         openGraph: og,
         twitter,
         structuredData,
@@ -157,6 +165,6 @@ export const metaTagService = {
   },
 
   buildCanonicalUrl(serverSlug: string, channelSlug: string): string {
-    return `${BASE_URL}/c/${serverSlug}/${channelSlug}`;
+    return `${BASE_URL}/c/${encodeURIComponent(serverSlug)}/${encodeURIComponent(channelSlug)}`;
   },
 };
