@@ -86,8 +86,16 @@ export function middleware(request: NextRequest) {
 
   const tokenCookie = request.cookies.get(AUTH_COOKIE_NAME);
 
-  // ── Unauthenticated: redirect to login ────────────────────────────────────
+  // ── Unauthenticated ───────────────────────────────────────────────────────
   if (!tokenCookie?.value) {
+    // /channels/[serverSlug]/[channelSlug] → hand off to the public guest route
+    // which checks visibility and renders or shows a locked pane accordingly.
+    const channelRouteMatch = pathname.match(/^\/channels\/([^/]+)\/([^/]+)$/);
+    if (channelRouteMatch) {
+      const guestUrl = new URL(`/c/${channelRouteMatch[1]}/${channelRouteMatch[2]}`, request.url);
+      return NextResponse.redirect(guestUrl);
+    }
+
     const loginUrl = new URL('/auth/login', request.url);
     loginUrl.searchParams.set('returnUrl', pathname);
     return NextResponse.redirect(loginUrl);

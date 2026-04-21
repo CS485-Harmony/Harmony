@@ -76,6 +76,22 @@ describe('middleware', () => {
     );
   });
 
+  it('redirects unauthenticated channel+slug routes to the guest /c/ path', () => {
+    const response = middleware(buildRequest('/channels/my-server/my-channel'));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('http://localhost/c/my-server/my-channel');
+  });
+
+  it('redirects to login (not /c/) for server-only channel routes without a channel slug', () => {
+    const response = middleware(buildRequest('/channels/my-server'));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe(
+      'http://localhost/auth/login?returnUrl=%2Fchannels%2Fmy-server',
+    );
+  });
+
   it('redirects the exact settings route when no auth cookie is present', () => {
     const response = middleware(buildRequest('/settings'));
 
