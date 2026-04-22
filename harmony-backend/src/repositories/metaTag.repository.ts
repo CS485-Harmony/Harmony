@@ -29,6 +29,10 @@ export const metaTagRepository = {
     return client.generatedMetaTags.create({ data });
   },
 
+  /**
+   * Persist custom override fields as-is. Does NOT sanitize inputs.
+   * Callers must go through metaTagService.setCustomOverrides to satisfy AC-8 / §12.3.
+   */
   updateCustomOverrides(
     channelId: string,
     overrides: {

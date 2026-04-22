@@ -1,0 +1,5 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`<head> output snapshot — crafted XSS fixture snapshot: XSS customDescription with attribute breakout is safe 1`] = `"<meta name="description" content="Great channel&quot; onload=&quot;stealCookies() &amp; more" />"`;
+
+exports[`<head> output snapshot — crafted XSS fixture snapshot: XSS customTitle renders as safe escaped string for <head> 1`] = `"<meta name="title" content="alert(&quot;xss&quot;)Best Channel &amp; Community" />"`;

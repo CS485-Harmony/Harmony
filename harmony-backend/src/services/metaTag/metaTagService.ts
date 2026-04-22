@@ -4,6 +4,8 @@ import { DescriptionGenerator } from './descriptionGenerator';
 import { OpenGraphGenerator } from './openGraphGenerator';
 import { StructuredDataGenerator } from './structuredDataGenerator';
 import { MetaTagCache } from './metaTagCache';
+import { ContentFilter } from './contentFilter';
+import { metaTagRepository } from '../../repositories/metaTag.repository';
 import type {
   MetaTagSet,
   ChannelContext,
@@ -65,9 +67,15 @@ export const metaTagService = {
    */
   async generateMetaTagsFromContext(channel: ChannelContext, messages: MessageContext[]): Promise<MetaTagSet> {
     try {
-      const title = TitleGenerator.generateFromThread(messages, channel);
-      const description = DescriptionGenerator.generateFromMessages(messages, channel);
-      const keywords = DescriptionGenerator.extractKeyPhrases(messages.map((m) => m.content).join(' '), 5);
+      const rawTitle = TitleGenerator.generateFromThread(messages, channel);
+      const rawDescription = DescriptionGenerator.generateFromMessages(messages, channel);
+      const title = ContentFilter.filterContent(rawTitle);
+      const description = ContentFilter.filterContent(rawDescription);
+      const filteredContent = ContentFilter.filterContent(messages.map((m) => m.content).join(' '));
+      // Drop placeholder tokens that filterContent inserts — they leak filter presence into og/twitter tags
+      const FILTER_PLACEHOLDERS = new Set(['email', 'phone', 'user']);
+      const keywords = DescriptionGenerator.extractKeyPhrases(filteredContent, 5)
+        .filter((k) => !FILTER_PLACEHOLDERS.has(k) && !/^\*+$/.test(k));
       const analysis: ContentAnalysis = {
         keywords,
         topics: [title],
@@ -166,5 +174,40 @@ export const metaTagService = {
 
   buildCanonicalUrl(serverSlug: string, channelSlug: string): string {
     return `${BASE_URL}/c/${encodeURIComponent(serverSlug)}/${encodeURIComponent(channelSlug)}`;
+  },
+
+  /**
+   * Sanitize admin-supplied custom override strings before they are stored or
+   * served in the <head>. Strips HTML tags first (prevents tag-splitting bypass),
+   * then filters PII/profanity, then HTML-entity-encodes for safe <head> embedding.
+   * Used by the write path (PUT /meta-tags) to satisfy AC-8 / §12.3.
+   */
+  sanitizeCustomOverride(value: string | null | undefined): string | null {
+    if (value == null) return null;
+    // Strip HTML before PII/profanity filtering — otherwise "f<b>u</b>ck" bypasses the word-boundary regex
+    const stripped = value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    return ContentFilter.escapeHtml(ContentFilter.filterContent(stripped));
+  },
+
+  /**
+   * Sanitize and persist admin-supplied custom overrides for a channel.
+   * All callers must go through this method rather than metaTagRepository.updateCustomOverrides
+   * directly — the repository method accepts raw strings and does not sanitize.
+   * AC-8 / §12.3: customTitle and customDescription are sanitized on write.
+   */
+  async setCustomOverrides(
+    channelId: string,
+    overrides: {
+      customTitle?: string | null;
+      customDescription?: string | null;
+      customOgImage?: string | null;
+    },
+  ): Promise<void> {
+    await metaTagRepository.updateCustomOverrides(channelId, {
+      customTitle: metaTagService.sanitizeCustomOverride(overrides.customTitle),
+      customDescription: metaTagService.sanitizeCustomOverride(overrides.customDescription),
+      customOgImage: overrides.customOgImage ?? null,
+    });
+    await metaTagService.invalidateCache(channelId);
   },
 };
