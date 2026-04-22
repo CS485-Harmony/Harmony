@@ -105,7 +105,7 @@ export const metaTagService = {
     _channelId: string,
     _options?: { forceRegenerate?: boolean; includeStructuredData?: boolean },
   ): Promise<MetaTagSet> {
-    throw new Error('generateMetaTags(channelId) not yet implemented — wired by M4 (issue #356)');
+    throw new Error('generateMetaTags(channelId) not yet implemented — wired by M4 (issue #354)');
   },
 
   /**
@@ -133,7 +133,7 @@ export const metaTagService = {
    * Full implementation wired by M4 (MetaTagUpdateWorker, issue #354).
    */
   async getOrGenerateCached(_channelId: string): Promise<MetaTagSet> {
-    throw new Error('getOrGenerateCached(channelId) not yet implemented — wired by M4 (issue #356)');
+    throw new Error('getOrGenerateCached(channelId) not yet implemented — wired by M4 (issue #354)');
   },
 
   async invalidateCache(channelId: string): Promise<void> {

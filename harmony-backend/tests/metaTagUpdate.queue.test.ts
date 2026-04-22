@@ -89,4 +89,37 @@ describe('metaTagUpdateQueue.scheduleUpdate', () => {
       status: 'queued',
     });
   });
+
+  it('schedules a delayed follow-up job when the current job is active', async () => {
+    const activeJob = {
+      remove: removeMock,
+      getState: jest.fn().mockResolvedValue('active'),
+    };
+    getJobMock
+      .mockResolvedValueOnce(activeJob)
+      .mockResolvedValueOnce(null);
+
+    const result = await metaTagUpdateQueue.scheduleUpdate({
+      channelId: 'channel-4',
+      triggeredBy: 'edit',
+    });
+
+    expect(addMock).toHaveBeenCalledTimes(1);
+    expect(addMock).toHaveBeenCalledWith(
+      'meta-tag-updates',
+      expect.objectContaining({
+        channelId: 'channel-4',
+        idempotencyKey: 'channel:followup',
+        triggeredBy: 'edit',
+      }),
+      expect.objectContaining({
+        jobId: 'meta-tag-update:channel-4:channel:followup',
+        delay: 60_000,
+      }),
+    );
+    expect(result).toEqual({
+      jobId: 'meta-tag-update:channel-4:channel:followup',
+      status: 'queued',
+    });
+  });
 });

@@ -61,6 +61,10 @@ function buildJobId(channelId: string, idempotencyKey: string): string {
   return `meta-tag-update:${channelId}:${idempotencyKey}`;
 }
 
+function buildFollowUpIdempotencyKey(idempotencyKey: string): string {
+  return `${idempotencyKey}:followup`;
+}
+
 function toBullMqPriority(priority: MetaTagUpdatePriority): number | undefined {
   if (priority === 'high') return 1;
   if (priority === 'normal') return 5;
@@ -99,26 +103,75 @@ export const metaTagUpdateQueue = {
       priority: toBullMqPriority(jobData.priority),
     };
 
+    const enqueueJob = async (
+      scheduledJobId: string,
+      scheduledJobData: MetaTagUpdateJobData,
+      status: 'queued' | 'deduplicated',
+    ) => {
+      await jobQueue.add(META_TAG_UPDATE_QUEUE_NAME, scheduledJobData, {
+        ...addOptions,
+        jobId: scheduledJobId,
+      });
+      return { jobId: scheduledJobId, status };
+    };
+
+    const scheduleFollowUp = async () => {
+      const followUpIdempotencyKey = buildFollowUpIdempotencyKey(idempotencyKey);
+      const followUpJobId = buildJobId(input.channelId, followUpIdempotencyKey);
+      const followUpJob = await jobQueue.getJob(followUpJobId);
+      const followUpJobData: MetaTagUpdateJobData = {
+        ...jobData,
+        jobId: followUpJobId,
+        idempotencyKey: followUpIdempotencyKey,
+      };
+
+      if (!followUpJob) {
+        return enqueueJob(followUpJobId, followUpJobData, 'queued');
+      }
+
+      const followUpState = await followUpJob.getState();
+      if (
+        followUpState === 'delayed' ||
+        followUpState === 'waiting' ||
+        followUpState === 'prioritized' ||
+        followUpState === 'completed' ||
+        followUpState === 'failed'
+      ) {
+        await followUpJob.remove();
+        return enqueueJob(
+          followUpJobId,
+          followUpJobData,
+          followUpState === 'completed' || followUpState === 'failed' ? 'queued' : 'deduplicated',
+        );
+      }
+
+      logger.info(
+        { jobId: followUpJobId, channelId: input.channelId, state: followUpState },
+        'Meta tag update follow-up already in flight',
+      );
+      return { jobId: followUpJobId, status: 'deduplicated' as const };
+    };
+
     if (existingJob) {
       const state = await existingJob.getState();
       if (state === 'delayed' || state === 'waiting' || state === 'prioritized') {
         await existingJob.remove();
-        await jobQueue.add(META_TAG_UPDATE_QUEUE_NAME, jobData, addOptions);
-        return { jobId, status: 'deduplicated' };
+        return enqueueJob(jobId, jobData, 'deduplicated');
       }
 
       if (state === 'completed' || state === 'failed') {
         await existingJob.remove();
-        await jobQueue.add(META_TAG_UPDATE_QUEUE_NAME, jobData, addOptions);
-        return { jobId, status: 'queued' };
+        return enqueueJob(jobId, jobData, 'queued');
       }
 
-      logger.info({ jobId, channelId: input.channelId, state }, 'Meta tag update already in flight');
-      return { jobId, status: 'deduplicated' };
+      logger.info(
+        { jobId, channelId: input.channelId, state },
+        'Meta tag update already in flight, scheduling follow-up',
+      );
+      return scheduleFollowUp();
     }
 
-    await jobQueue.add(META_TAG_UPDATE_QUEUE_NAME, jobData, addOptions);
-    return { jobId, status: 'queued' };
+    return enqueueJob(jobId, jobData, 'queued');
   },
 
   async close(): Promise<void> {
