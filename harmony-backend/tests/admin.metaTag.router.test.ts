@@ -14,6 +14,8 @@
 import request from 'supertest';
 import { createApp } from '../src/app';
 import type { Express } from 'express';
+import { processRegenerationJob } from '../src/routes/admin.metaTag.router';
+import type { MetaTagJobStatus } from '../src/services/metaTag/types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -42,12 +44,14 @@ jest.mock('../src/services/auth.service', () => ({
 jest.mock('../src/db/prisma', () => ({
   prisma: {
     channel: { findUnique: jest.fn() },
+    message: { findMany: jest.fn() },
   },
 }));
 
 import { prisma } from '../src/db/prisma';
 const mockPrisma = prisma as unknown as {
   channel: { findUnique: jest.Mock };
+  message: { findMany: jest.Mock };
 };
 
 // ─── Permission service mock ──────────────────────────────────────────────────
@@ -71,6 +75,7 @@ jest.mock('../src/repositories/metaTag.repository', () => ({
   metaTagRepository: {
     findByChannelId: jest.fn(),
     updateCustomOverrides: jest.fn(),
+    saveGeneratedFields: jest.fn(),
   },
 }));
 
@@ -78,6 +83,7 @@ import { metaTagRepository } from '../src/repositories/metaTag.repository';
 const mockMetaTagRepo = metaTagRepository as unknown as {
   findByChannelId: jest.Mock;
   updateCustomOverrides: jest.Mock;
+  saveGeneratedFields: jest.Mock;
 };
 
 // ─── Redis mock ───────────────────────────────────────────────────────────────
@@ -136,11 +142,22 @@ beforeEach(() => {
   redisStore.clear();
   jest.clearAllMocks();
 
-  // Default: channel exists and belongs to SERVER_ID
+  // Default: channel exists with server data (required by requireServerAdmin and processRegenerationJob)
   mockPrisma.channel.findUnique.mockResolvedValue({
     id: CHANNEL_ID,
     serverId: SERVER_ID,
+    name: 'general',
+    slug: 'general',
+    topic: null,
+    visibility: 'PUBLIC_INDEXABLE',
+    server: { name: 'Test Server', slug: 'test-server' },
   });
+
+  // Default: no messages
+  mockPrisma.message.findMany.mockResolvedValue([]);
+
+  // Default: saveGeneratedFields succeeds
+  mockMetaTagRepo.saveGeneratedFields.mockResolvedValue(1);
 
   // Default: admin user has permission; non-admin does not
   mockPermission.checkPermission.mockImplementation(async (userId: string) => {
@@ -503,12 +520,14 @@ describe('GET /api/admin/channels/:channelId/meta-tags/jobs/:jobId', () => {
     });
   });
 
-  it('round-trips: POST job then GET status returns queued state', async () => {
+  it('round-trips: POST job then GET status returns a valid terminal or transitional state', async () => {
     const postRes = await request(app)
       .post(`/api/admin/channels/${CHANNEL_ID}/meta-tags/jobs`)
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
     expect(postRes.status).toBe(202);
+    // POST response always reflects the initial queued state (sent before background processing)
+    expect(postRes.body.status).toBe('queued');
     const { jobId } = postRes.body as { jobId: string };
 
     const getRes = await request(app)
@@ -518,7 +537,8 @@ describe('GET /api/admin/channels/:channelId/meta-tags/jobs/:jobId', () => {
     expect(getRes.status).toBe(200);
     expect(getRes.body.jobId).toBe(jobId);
     expect(getRes.body.channelId).toBe(CHANNEL_ID);
-    expect(getRes.body.status).toBe('queued');
+    // Status advances asynchronously; all three states are valid at poll time
+    expect(['queued', 'processing', 'succeeded', 'failed']).toContain(getRes.body.status);
   });
 
   it('returns 404 when the Redis value is corrupt JSON (parse guard)', async () => {
@@ -527,5 +547,103 @@ describe('GET /api/admin/channels/:channelId/meta-tags/jobs/:jobId', () => {
     const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
 
     expect(res.status).toBe(404);
+  });
+});
+
+// ─── processRegenerationJob — terminal state transitions (AC-5) ───────────────
+
+describe('processRegenerationJob terminal states (AC-5)', () => {
+  const JOB_ID = 'regen-test-job-0000-0000-000000000001';
+
+  function seedQueuedJob(jobId: string): MetaTagJobStatus {
+    const job: MetaTagJobStatus = {
+      jobId,
+      channelId: CHANNEL_ID,
+      status: 'queued',
+      attempts: 0,
+      startedAt: null,
+      completedAt: null,
+      errorCode: null,
+      errorMessage: null,
+    };
+    redisStore.set(`meta-tag:job:${jobId}`, JSON.stringify(job));
+    return job;
+  }
+
+  it('transitions job to succeeded after successful regeneration', async () => {
+    seedQueuedJob(JOB_ID);
+
+    await processRegenerationJob(CHANNEL_ID, JOB_ID);
+
+    const stored = redisStore.get(`meta-tag:job:${JOB_ID}`);
+    const parsed = JSON.parse(stored!) as MetaTagJobStatus;
+    expect(parsed.status).toBe('succeeded');
+    expect(parsed.attempts).toBe(1);
+    expect(parsed.startedAt).not.toBeNull();
+    expect(parsed.completedAt).not.toBeNull();
+    expect(parsed.errorCode).toBeNull();
+    expect(mockMetaTagRepo.saveGeneratedFields).toHaveBeenCalledWith(CHANNEL_ID, expect.any(Object));
+  });
+
+  it('transitions job to processing before succeeding', async () => {
+    seedQueuedJob(JOB_ID);
+
+    // Capture intermediate state by intercepting the second storeJob call
+    const states: string[] = [];
+    const origSet = redisStore.set.bind(redisStore);
+    jest.spyOn(redisStore, 'set').mockImplementation((key, value) => {
+      try {
+        const parsed = JSON.parse(value) as MetaTagJobStatus;
+        if (parsed.jobId === JOB_ID) states.push(parsed.status);
+      } catch { /* not a job record */ }
+      return origSet(key, value);
+    });
+
+    await processRegenerationJob(CHANNEL_ID, JOB_ID);
+
+    expect(states).toContain('processing');
+    expect(states).toContain('succeeded');
+    expect(states.indexOf('processing')).toBeLessThan(states.indexOf('succeeded'));
+
+    jest.restoreAllMocks();
+  });
+
+  it('transitions job to failed when channel is not found', async () => {
+    seedQueuedJob(JOB_ID);
+    mockPrisma.channel.findUnique.mockResolvedValue(null);
+
+    await processRegenerationJob(CHANNEL_ID, JOB_ID);
+
+    const stored = redisStore.get(`meta-tag:job:${JOB_ID}`);
+    const parsed = JSON.parse(stored!) as MetaTagJobStatus;
+    expect(parsed.status).toBe('failed');
+    expect(parsed.errorCode).toBe('REGEN_FAILED');
+    expect(parsed.errorMessage).toContain('Channel not found');
+  });
+
+  it('transitions job to failed when saveGeneratedFields throws', async () => {
+    seedQueuedJob(JOB_ID);
+    mockMetaTagRepo.saveGeneratedFields.mockRejectedValue(new Error('DB write error'));
+
+    await processRegenerationJob(CHANNEL_ID, JOB_ID);
+
+    const stored = redisStore.get(`meta-tag:job:${JOB_ID}`);
+    const parsed = JSON.parse(stored!) as MetaTagJobStatus;
+    expect(parsed.status).toBe('failed');
+    expect(parsed.errorCode).toBe('REGEN_FAILED');
+    expect(parsed.errorMessage).toBe('DB write error');
+  });
+
+  it('GET job endpoint returns succeeded state after processRegenerationJob resolves', async () => {
+    seedQueuedJob(JOB_ID);
+    await processRegenerationJob(CHANNEL_ID, JOB_ID);
+
+    const res = await request(app)
+      .get(`/api/admin/channels/${CHANNEL_ID}/meta-tags/jobs/${JOB_ID}`)
+      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('succeeded');
+    expect(res.body.jobId).toBe(JOB_ID);
   });
 });
