@@ -80,6 +80,7 @@ afterAll(async () => {
 
 describe('indexingService.generateSitemap', () => {
   it('generates a sitemap index that points crawlers at the frontend host', async () => {
+    await cacheService.invalidate('sitemap:index');
     const xml = await indexingService.generateSitemapIndex();
 
     expect(xml).not.toBeNull();
@@ -189,6 +190,7 @@ describe('GET /robots.txt', () => {
 
 describe('GET /sitemap-index.xml', () => {
   it('returns the sitemap index for the frontend host', async () => {
+    await cacheService.invalidate('sitemap:index');
     const res = await request(app).get('/sitemap-index.xml');
 
     expect(res.status).toBe(200);

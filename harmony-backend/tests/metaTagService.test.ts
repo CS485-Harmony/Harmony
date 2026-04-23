@@ -24,6 +24,14 @@ jest.mock('../src/services/cache.service', () => ({
   sanitizeKeySegment: (s: string) => s.replace(/[*?\[\]]/g, ''),
 }));
 
+const scheduleUpdateMock = jest.fn();
+
+jest.mock('../src/workers/metaTagUpdate.queue', () => ({
+  metaTagUpdateQueue: {
+    scheduleUpdate: scheduleUpdateMock,
+  },
+}));
+
 import { TitleGenerator } from '../src/services/metaTag/titleGenerator';
 import { DescriptionGenerator } from '../src/services/metaTag/descriptionGenerator';
 import { MetaTagCache } from '../src/services/metaTag/metaTagCache';
@@ -50,6 +58,10 @@ const messages: MessageContext[] = [
 
 beforeEach(() => {
   jest.clearAllMocks();
+  scheduleUpdateMock.mockResolvedValue({
+    jobId: 'meta-tag-update:chan-001:channel',
+    status: 'queued',
+  });
 });
 
 // ─── TitleGenerator ──────────────────────────────────────────────────────────
@@ -257,6 +269,21 @@ describe('metaTagService', () => {
     const tags = await metaTagService.getOrGenerateCachedFromContext(channel, messages);
     expect(tags).toEqual(cachedTags);
     expect(mockCacheService.set).not.toHaveBeenCalled();
+  });
+
+  it('scheduleRegeneration delegates to the queue adapter with priority and idempotency', async () => {
+    const result = await metaTagService.scheduleRegeneration('chan-001', 'high', 'manual-refresh');
+
+    expect(scheduleUpdateMock).toHaveBeenCalledWith({
+      channelId: 'chan-001',
+      triggeredBy: 'manual',
+      priority: 'high',
+      idempotencyKey: 'manual-refresh',
+    });
+    expect(result).toEqual({
+      jobId: 'meta-tag-update:chan-001:channel',
+      status: 'queued',
+    });
   });
 
   it('getOrGenerateCachedFromContext generates and caches on miss', async () => {
