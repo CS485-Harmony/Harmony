@@ -149,7 +149,10 @@ export async function getCloudFixture(): Promise<CloudFixture> {
   }
 
   if (!cloudFixturePromise) {
-    cloudFixturePromise = resolveCloudFixtureFromPublicApi();
+    cloudFixturePromise = resolveCloudFixtureFromPublicApi().catch((error: unknown) => {
+      cloudFixturePromise = null;
+      throw error;
+    });
   }
   return cloudFixturePromise;
 }
