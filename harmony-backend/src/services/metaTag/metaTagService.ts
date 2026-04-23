@@ -1,4 +1,7 @@
 // CL-C2.1 MetaTagService — facade for meta tag generation, caching, and invalidation
+import { createHash } from 'crypto';
+import { Prisma, type GeneratedMetaTags } from '@prisma/client';
+import { prisma } from '../../db/prisma';
 import { TitleGenerator } from './titleGenerator';
 import { DescriptionGenerator } from './descriptionGenerator';
 import { OpenGraphGenerator } from './openGraphGenerator';
@@ -12,13 +15,17 @@ import type {
   MetaTagPreview,
   MetaTagJobStatus,
   ContentAnalysis,
+  StructuredData,
 } from './types';
 import { createLogger } from '../../lib/logger';
 import { metaTagUpdateQueue } from '../../workers/metaTagUpdate.queue';
+import { metaTagRepository } from '../../repositories/metaTag.repository';
 
 const logger = createLogger({ component: 'meta-tag-service' });
 
 const BASE_URL = process.env.BASE_URL ?? 'https://harmony.chat';
+const META_TAG_SCHEMA_VERSION = 1;
+const META_TAG_MESSAGE_LIMIT = 20;
 
 // Spec §9.1.1 visibility → robots mapping
 function getRobotsDirective(visibility: ChannelVisibility | undefined): string {
@@ -56,6 +63,174 @@ function buildFallbackTags(channel: ChannelContext): MetaTagSet {
     structuredData: StructuredDataGenerator.generateDiscussionForum(safe, [], {}),
     keywords: [],
     needsRegeneration: true,
+  };
+}
+
+function applyPersistedOverrides(
+  tags: MetaTagSet,
+  record: Pick<GeneratedMetaTags, 'customTitle' | 'customDescription' | 'customOgImage'> | null,
+): MetaTagSet {
+  if (!record) return tags;
+
+  const title = record.customTitle ?? tags.title;
+  const description = record.customDescription ?? tags.description;
+  const image = record.customOgImage ?? tags.openGraph.ogImage;
+
+  return {
+    ...tags,
+    title,
+    description,
+    openGraph: {
+      ...tags.openGraph,
+      ogTitle: title,
+      ogDescription: description,
+      ogImage: image,
+    },
+    twitter: {
+      ...tags.twitter,
+      title,
+      description,
+      image,
+    },
+  };
+}
+
+function buildChannelContext(channel: {
+  id: string;
+  name: string;
+  slug: string;
+  topic: string | null;
+  visibility: ChannelVisibility;
+  server: {
+    name: string;
+    slug: string;
+  };
+}): ChannelContext {
+  return {
+    id: channel.id,
+    name: channel.name,
+    slug: channel.slug,
+    topic: channel.topic,
+    serverName: channel.server.name,
+    serverSlug: channel.server.slug,
+    canonicalUrl: `${BASE_URL}/c/${encodeURIComponent(channel.server.slug)}/${encodeURIComponent(channel.slug)}`,
+    visibility: channel.visibility,
+  };
+}
+
+function buildPersistedMetaTagSet(
+  channel: ChannelContext,
+  record: GeneratedMetaTags,
+): MetaTagSet {
+  const baseTags: MetaTagSet = {
+    title: record.title,
+    description: record.description,
+    canonical: channel.canonicalUrl,
+    robots: getRobotsDirective(channel.visibility),
+    openGraph: {
+      ogTitle: record.title,
+      ogDescription: record.description,
+      ogImage: record.ogImage ?? `${BASE_URL}/og-default.png`,
+      ogType: 'article',
+      ogUrl: channel.canonicalUrl,
+      ogSiteName: channel.serverName,
+    },
+    twitter: {
+      card: record.twitterCard,
+      title: record.title,
+      description: record.description,
+      image: record.ogImage ?? `${BASE_URL}/og-default.png`,
+      site: '@harmonychat',
+    },
+    structuredData: record.structuredData as StructuredData,
+    keywords: record.keywords
+      .split(',')
+      .map((keyword) => keyword.trim())
+      .filter(Boolean),
+    needsRegeneration: record.needsRegeneration,
+  };
+
+  return applyPersistedOverrides(baseTags, record);
+}
+
+function buildContentHash(channel: ChannelContext, messages: MessageContext[]): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        visibility: channel.visibility ?? 'PUBLIC_INDEXABLE',
+        topic: channel.topic ?? null,
+        messages: messages.map((message) => ({
+          content: message.content,
+          createdAt: message.createdAt.toISOString(),
+          authorDisplayName: message.authorDisplayName ?? null,
+        })),
+      }),
+    )
+    .digest('hex');
+}
+
+function mapQueueStateToStatus(state: string): MetaTagJobStatus['status'] {
+  if (state === 'completed') return 'succeeded';
+  if (state === 'failed') return 'failed';
+  if (state === 'active') return 'processing';
+  return 'queued';
+}
+
+async function loadGenerationInputs(channelId: string): Promise<{
+  channel: ChannelContext;
+  persisted: GeneratedMetaTags | null;
+  messages: MessageContext[];
+}> {
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      topic: true,
+      visibility: true,
+      server: {
+        select: {
+          name: true,
+          slug: true,
+        },
+      },
+      generatedMetaTags: true,
+    },
+  });
+
+  if (!channel) {
+    throw new Error(`Channel ${channelId} not found`);
+  }
+
+  const messages = await prisma.message.findMany({
+    where: {
+      channelId,
+      isDeleted: false,
+    },
+    take: META_TAG_MESSAGE_LIMIT,
+    orderBy: {
+      createdAt: 'asc',
+    },
+    select: {
+      content: true,
+      createdAt: true,
+      author: {
+        select: {
+          displayName: true,
+        },
+      },
+    },
+  });
+
+  return {
+    channel: buildChannelContext(channel),
+    persisted: channel.generatedMetaTags,
+    messages: messages.map((message) => ({
+      content: message.content,
+      createdAt: message.createdAt,
+      authorDisplayName: message.author.displayName,
+    })),
   };
 }
 
@@ -102,10 +277,77 @@ export const metaTagService = {
    * Full implementation wired by M4 (MetaTagUpdateWorker, issue #354).
    */
   async generateMetaTags(
-    _channelId: string,
+    channelId: string,
     _options?: { forceRegenerate?: boolean; includeStructuredData?: boolean },
   ): Promise<MetaTagSet> {
-    throw new Error('generateMetaTags(channelId) not yet implemented — wired by M4 (issue #354)');
+    const { channel, persisted, messages } = await loadGenerationInputs(channelId);
+
+    if (channel.visibility === 'PRIVATE') {
+      await MetaTagCache.invalidate(channelId);
+      if (persisted) {
+        await metaTagRepository.deleteByChannelId(channelId).catch(() => undefined);
+      }
+      return buildFallbackTags(channel);
+    }
+
+    const generated = await metaTagService.generateMetaTagsFromContext(channel, messages);
+    const contentHash = buildContentHash(channel, messages);
+    const generatedAt = new Date();
+
+    if (persisted) {
+      const rowsUpdated = await metaTagRepository.saveGeneratedFields(channelId, {
+        title: generated.title,
+        description: generated.description,
+        ogTitle: generated.openGraph.ogTitle,
+        ogDescription: generated.openGraph.ogDescription,
+        ogImage: generated.openGraph.ogImage,
+        twitterCard: generated.twitter.card,
+        keywords: generated.keywords.join(','),
+        structuredData: generated.structuredData as Prisma.InputJsonValue,
+        contentHash,
+        needsRegeneration: generated.needsRegeneration ?? false,
+        generatedAt,
+        schemaVersion: META_TAG_SCHEMA_VERSION,
+      });
+
+      const record = rowsUpdated > 0
+        ? await metaTagRepository.findByChannelId(channelId)
+        : persisted;
+      const finalTags = buildPersistedMetaTagSet(channel, record ?? persisted);
+
+      if (finalTags.needsRegeneration) {
+        await MetaTagCache.invalidate(channelId);
+      } else {
+        await MetaTagCache.set(channelId, finalTags);
+      }
+
+      return finalTags;
+    }
+
+    const created = await metaTagRepository.create({
+      channelId,
+      title: generated.title,
+      description: generated.description,
+      ogTitle: generated.openGraph.ogTitle,
+      ogDescription: generated.openGraph.ogDescription,
+      ogImage: generated.openGraph.ogImage,
+      twitterCard: generated.twitter.card,
+      keywords: generated.keywords.join(','),
+      structuredData: generated.structuredData as Prisma.InputJsonValue,
+      contentHash,
+      needsRegeneration: generated.needsRegeneration ?? false,
+      generatedAt,
+      schemaVersion: META_TAG_SCHEMA_VERSION,
+    });
+
+    const finalTags = buildPersistedMetaTagSet(channel, created);
+    if (finalTags.needsRegeneration) {
+      await MetaTagCache.invalidate(channelId);
+    } else {
+      await MetaTagCache.set(channelId, finalTags);
+    }
+
+    return finalTags;
   },
 
   /**
@@ -132,8 +374,18 @@ export const metaTagService = {
    * Spec-aligned stub: getOrGenerateCached(channelId).
    * Full implementation wired by M4 (MetaTagUpdateWorker, issue #354).
    */
-  async getOrGenerateCached(_channelId: string): Promise<MetaTagSet> {
-    throw new Error('getOrGenerateCached(channelId) not yet implemented — wired by M4 (issue #354)');
+  async getOrGenerateCached(channelId: string): Promise<MetaTagSet> {
+    const cached = await MetaTagCache.get(channelId);
+    if (cached) return cached;
+
+    const { channel, persisted } = await loadGenerationInputs(channelId);
+    if (persisted && !persisted.needsRegeneration) {
+      const tags = buildPersistedMetaTagSet(channel, persisted);
+      await MetaTagCache.set(channelId, tags);
+      return tags;
+    }
+
+    return metaTagService.generateMetaTags(channelId);
   },
 
   async invalidateCache(channelId: string): Promise<void> {
@@ -154,14 +406,55 @@ export const metaTagService = {
   },
 
   async getRegenerationJobStatus(
-    _channelId: string,
-    _jobId: string,
+    channelId: string,
+    jobId: string,
   ): Promise<MetaTagJobStatus> {
-    throw new Error('getRegenerationJobStatus not yet implemented — wired by M4 (issue #354)');
+    const job = await metaTagUpdateQueue.getJob(jobId);
+    if (!job || job.data.channelId !== channelId) {
+      throw new Error(`Meta tag regeneration job ${jobId} not found for channel ${channelId}`);
+    }
+
+    const state = await job.getState();
+    return {
+      jobId,
+      channelId,
+      status: mapQueueStateToStatus(state),
+      attempts: job.attemptsMade,
+      startedAt: job.processedOn ? new Date(job.processedOn).toISOString() : null,
+      completedAt: job.finishedOn ? new Date(job.finishedOn).toISOString() : null,
+      errorCode: null,
+      errorMessage: job.failedReason ?? null,
+    };
   },
 
-  async getMetaTagsForPreview(_channelId: string): Promise<MetaTagPreview> {
-    throw new Error('getMetaTagsForPreview(channelId) not yet implemented — wired by M4 (issue #354)');
+  async getMetaTagsForPreview(channelId: string): Promise<MetaTagPreview> {
+    const tags = await metaTagService.getOrGenerateCached(channelId);
+    const { persisted } = await loadGenerationInputs(channelId);
+
+    return {
+      title: tags.title,
+      description: tags.description,
+      ogTitle: tags.openGraph.ogTitle,
+      ogDescription: tags.openGraph.ogDescription,
+      ogImage: tags.openGraph.ogImage,
+      keywords: tags.keywords,
+      generatedAt: persisted?.generatedAt.toISOString() ?? new Date().toISOString(),
+      isCustom: Boolean(
+        persisted?.customTitle ||
+        persisted?.customDescription ||
+        persisted?.customOgImage,
+      ),
+      searchPreview: {
+        title: tags.title,
+        description: tags.description,
+        url: tags.canonical,
+      },
+      socialPreview: {
+        title: tags.openGraph.ogTitle,
+        description: tags.openGraph.ogDescription,
+        image: tags.openGraph.ogImage,
+      },
+    };
   },
 
   buildCanonicalUrl(serverSlug: string, channelSlug: string): string {

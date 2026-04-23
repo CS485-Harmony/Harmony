@@ -2,7 +2,13 @@ import { Queue, type JobsOptions, type RedisOptions } from 'bullmq';
 import { createLogger } from '../lib/logger';
 
 export const META_TAG_UPDATE_QUEUE_NAME = 'meta-tag-updates';
-export const META_TAG_UPDATE_DEBOUNCE_MS = 60_000;
+
+function parseDebounceMs(): number {
+  const raw = Number(process.env.META_TAG_UPDATE_DEBOUNCE_MS ?? 60_000);
+  return Number.isFinite(raw) && raw > 0 ? raw : 60_000;
+}
+
+export const META_TAG_UPDATE_DEBOUNCE_MS = parseDebounceMs();
 
 export type MetaTagUpdateTrigger = 'message' | 'edit' | 'manual' | 'schedule' | 'visibility';
 export type MetaTagUpdatePriority = 'high' | 'normal' | 'low';
@@ -30,19 +36,22 @@ const logger = createLogger({ component: 'meta-tag-update-queue' });
 
 let queue: Queue<MetaTagUpdateJobData> | null = null;
 
-function getRedisConnection(): RedisOptions {
+export function buildMetaTagUpdateRedisConnection(
+  overrides: Partial<RedisOptions> = {},
+): RedisOptions {
   return {
     url: process.env.REDIS_URL ?? 'redis://localhost:6379',
     // Producer calls are awaited by request/worker code paths, so Redis write
     // failures should surface promptly instead of hanging on unbounded retries.
     maxRetriesPerRequest: 3,
+    ...overrides,
   };
 }
 
 function getQueue(): Queue<MetaTagUpdateJobData> {
   if (!queue) {
     queue = new Queue<MetaTagUpdateJobData>(META_TAG_UPDATE_QUEUE_NAME, {
-      connection: getRedisConnection(),
+      connection: buildMetaTagUpdateRedisConnection(),
       defaultJobOptions: {
         attempts: 3,
         backoff: {
@@ -73,6 +82,10 @@ function toBullMqPriority(priority: MetaTagUpdatePriority): number | undefined {
 
 export const metaTagUpdateQueue = {
   buildJobId,
+
+  async getJob(jobId: string) {
+    return getQueue().getJob(jobId);
+  },
 
   async scheduleUpdate(input: ScheduleMetaTagUpdateInput): Promise<{
     jobId: string;
