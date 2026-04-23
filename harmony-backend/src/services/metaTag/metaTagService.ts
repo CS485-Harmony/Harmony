@@ -21,7 +21,6 @@ import type {
 } from './types';
 import { createLogger } from '../../lib/logger';
 import { metaTagUpdateQueue } from '../../workers/metaTagUpdate.queue';
-import { metaTagRepository } from '../../repositories/metaTag.repository';
 
 const logger = createLogger({ component: 'meta-tag-service' });
 

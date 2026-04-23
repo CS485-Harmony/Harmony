@@ -5,10 +5,6 @@
  * pointing at a running Redis instance.
  */
 
-process.env.DATABASE_URL ??= 'postgresql://harmony:harmony@localhost:5432/harmony_dev';
-process.env.REDIS_URL ??= 'redis://:devsecret@localhost:6379';
-process.env.BASE_URL ??= 'http://localhost:3000';
-
 import { ChannelVisibility, PrismaClient } from '@prisma/client';
 import { MetaTagCache } from '../src/services/metaTag/metaTagCache';
 import { metaTagRepository } from '../src/repositories/metaTag.repository';
@@ -16,12 +12,19 @@ import { metaTagService } from '../src/services/metaTag/metaTagService';
 
 const prisma = new PrismaClient();
 const ts = Date.now();
+const originalDatabaseUrl = process.env.DATABASE_URL;
+const originalRedisUrl = process.env.REDIS_URL;
+const originalBaseUrl = process.env.BASE_URL;
 
 let userId: string;
 let serverId: string;
 let channelId: string;
 
 beforeAll(async () => {
+  process.env.DATABASE_URL ??= 'postgresql://harmony:harmony@localhost:5432/harmony_dev';
+  process.env.REDIS_URL ??= 'redis://:devsecret@localhost:6379';
+  process.env.BASE_URL ??= 'http://localhost:3000';
+
   const user = await prisma.user.create({
     data: {
       email: `metatag-svc-${ts}@test.local`,
@@ -85,6 +88,10 @@ afterAll(async () => {
   }
 
   await prisma.$disconnect();
+
+  process.env.DATABASE_URL = originalDatabaseUrl;
+  process.env.REDIS_URL = originalRedisUrl;
+  process.env.BASE_URL = originalBaseUrl;
 });
 
 beforeEach(async () => {

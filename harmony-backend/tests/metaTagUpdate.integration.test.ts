@@ -5,16 +5,15 @@
  * pointing at a running Redis instance.
  */
 
-process.env.DATABASE_URL ??= 'postgresql://harmony:harmony@localhost:5432/harmony_dev';
-process.env.REDIS_URL ??= 'redis://:devsecret@localhost:6379';
-process.env.BASE_URL ??= 'http://localhost:3000';
-
 import { ChannelVisibility, PrismaClient } from '@prisma/client';
 import { Queue } from 'bullmq';
 import type { MetaTagUpdateJobData } from '../src/workers/metaTagUpdate.queue';
 
 const prisma = new PrismaClient();
 const ts = Date.now();
+const originalDatabaseUrl = process.env.DATABASE_URL;
+const originalRedisUrl = process.env.REDIS_URL;
+const originalBaseUrl = process.env.BASE_URL;
 
 let userId: string;
 let serverId: string;
@@ -50,8 +49,14 @@ describe('meta tag worker burst integration', () => {
   let queueInspector: Queue<MetaTagUpdateJobData>;
 
   beforeAll(async () => {
+    process.env.DATABASE_URL ??= 'postgresql://harmony:harmony@localhost:5432/harmony_dev';
+    process.env.REDIS_URL ??= 'redis://:devsecret@localhost:6379';
+    process.env.BASE_URL ??= 'http://localhost:3000';
     process.env.META_TAG_UPDATE_DEBOUNCE_MS = '100';
     jest.resetModules();
+    jest.unmock('../src/workers/metaTagUpdate.runtime');
+    jest.unmock('../src/workers/metaTagUpdate.worker');
+    jest.unmock('../src/workers/metaTagUpdate.queue');
 
     ({ eventBus, EventChannels } = await import('../src/events/eventBus'));
     ({ startMetaTagUpdateRuntime, stopMetaTagUpdateRuntime } = await import('../src/workers/metaTagUpdate.runtime'));
@@ -120,6 +125,9 @@ describe('meta tag worker burst integration', () => {
     }
 
     await prisma.$disconnect();
+    process.env.DATABASE_URL = originalDatabaseUrl;
+    process.env.REDIS_URL = originalRedisUrl;
+    process.env.BASE_URL = originalBaseUrl;
   });
 
   beforeEach(async () => {
