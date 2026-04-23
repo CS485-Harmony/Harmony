@@ -323,3 +323,54 @@ describe('metaTagService', () => {
     expect(tags.robots).toBe('noindex, nofollow');
   });
 });
+
+// ─── setCustomOverrides (AC-8 write path) ─────────────────────────────────────
+
+jest.mock('../src/repositories/metaTag.repository', () => ({
+  metaTagRepository: {
+    updateCustomOverrides: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
+import { metaTagRepository } from '../src/repositories/metaTag.repository';
+
+const mockMetaTagRepo = metaTagRepository as jest.Mocked<typeof metaTagRepository>;
+
+describe('metaTagService.setCustomOverrides — AC-8 write-path sanitization', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockCacheService.invalidate.mockResolvedValue(undefined);
+  });
+
+  it('sanitizes customTitle and customDescription before persisting', async () => {
+    await metaTagService.setCustomOverrides('chan-001', {
+      customTitle: '<script>alert(1)</script>My Title',
+      customDescription: 'Contact us at admin@corp.com for help',
+    });
+
+    expect(mockMetaTagRepo.updateCustomOverrides).toHaveBeenCalledWith(
+      'chan-001',
+      expect.objectContaining({
+        customTitle: expect.not.stringContaining('<script>'),
+        customDescription: expect.not.stringContaining('@'),
+      }),
+    );
+  });
+
+  it('passes null overrides through as null', async () => {
+    await metaTagService.setCustomOverrides('chan-001', {
+      customTitle: null,
+      customDescription: null,
+    });
+
+    expect(mockMetaTagRepo.updateCustomOverrides).toHaveBeenCalledWith(
+      'chan-001',
+      expect.objectContaining({ customTitle: null, customDescription: null }),
+    );
+  });
+
+  it('invalidates the cache after persisting', async () => {
+    await metaTagService.setCustomOverrides('chan-001', { customTitle: 'Clean Title' });
+    expect(mockCacheService.invalidate).toHaveBeenCalledWith('meta:channel:chan-001');
+  });
+});

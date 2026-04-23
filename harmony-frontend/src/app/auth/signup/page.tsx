@@ -76,6 +76,9 @@ function SignupForm() {
               placeholder='Choose a username'
               disabled={isSubmitting}
             />
+            <p className='mt-1 text-xs text-discord-text-muted'>
+              3–32 characters. Letters, numbers, underscores, and hyphens only.
+            </p>
           </div>
 
           <div>

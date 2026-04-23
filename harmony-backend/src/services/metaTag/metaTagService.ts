@@ -4,6 +4,7 @@ import { DescriptionGenerator } from './descriptionGenerator';
 import { OpenGraphGenerator } from './openGraphGenerator';
 import { StructuredDataGenerator } from './structuredDataGenerator';
 import { MetaTagCache } from './metaTagCache';
+import { ContentFilter } from './contentFilter';
 import { metaTagRepository } from '../../repositories/metaTag.repository';
 import type {
   MetaTagSet,
@@ -19,21 +20,6 @@ import { createLogger } from '../../lib/logger';
 const logger = createLogger({ component: 'meta-tag-service' });
 
 const BASE_URL = process.env.BASE_URL ?? 'https://harmony.chat';
-
-// Strip HTML, redact PII (emails, @mentions), and HTML-encode remaining special chars.
-// Applied to free-text custom overrides (title, description) before DB storage (AC-8 / §12.3).
-function sanitizeOverrideText(text: string): string {
-  return text
-    .replace(/<[^>]*>/g, '') // strip HTML tags
-    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[email]') // redact emails
-    .replace(/@\w+/g, '[mention]') // redact @mentions
-    .replace(/&/g, '&amp;') // HTML-encode (ampersand first to avoid double-encoding)
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 // Spec §9.1.1 visibility → robots mapping
 function getRobotsDirective(visibility: ChannelVisibility | undefined): string {
@@ -84,11 +70,15 @@ export const metaTagService = {
     messages: MessageContext[],
   ): Promise<MetaTagSet> {
     try {
-      const title = TitleGenerator.generateFromThread(messages, channel);
-      const description = DescriptionGenerator.generateFromMessages(messages, channel);
-      const keywords = DescriptionGenerator.extractKeyPhrases(
-        messages.map((m) => m.content).join(' '),
-        5,
+      const rawTitle = TitleGenerator.generateFromThread(messages, channel);
+      const rawDescription = DescriptionGenerator.generateFromMessages(messages, channel);
+      const title = ContentFilter.filterContent(rawTitle);
+      const description = ContentFilter.filterContent(rawDescription);
+      const filteredContent = ContentFilter.filterContent(messages.map((m) => m.content).join(' '));
+      // Drop placeholder tokens that filterContent inserts — they leak filter presence into og/twitter tags
+      const FILTER_PLACEHOLDERS = new Set(['email', 'phone', 'user']);
+      const keywords = DescriptionGenerator.extractKeyPhrases(filteredContent, 5).filter(
+        (k) => !FILTER_PLACEHOLDERS.has(k) && !/^\*+$/.test(k),
       );
       const analysis: ContentAnalysis = {
         keywords,
@@ -165,8 +155,9 @@ export const metaTagService = {
 
   /**
    * Sanitize and persist admin custom overrides (AC-8 / §12.3).
-   * Strips HTML, redacts PII, HTML-encodes text fields, then invalidates the meta cache.
-   * Only fields present in `overrides` are written — absent fields are left unchanged.
+   * Routes text fields through ContentFilter (strips HTML, filters PII/profanity, HTML-encodes),
+   * then invalidates the meta cache. Only fields present in `overrides` are written — absent
+   * fields are left unchanged in the DB (partial-update semantics).
    */
   async setCustomOverrides(
     channelId: string,
@@ -176,19 +167,27 @@ export const metaTagService = {
       customOgImage?: string | null;
     },
   ) {
+    // Full sanitization pipeline: strip HTML → filter PII/profanity → HTML-encode.
+    // Stripping before filtering prevents tag-splitting bypasses (e.g. "f<b>u</b>ck").
+    const sanitizeText = (text: string) => {
+      const stripped = text
+        .replace(/<[^>]*>/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return ContentFilter.escapeHtml(ContentFilter.filterContent(stripped));
+    };
+
     const sanitized: typeof overrides = {};
     if (overrides.customTitle !== undefined) {
       sanitized.customTitle =
-        overrides.customTitle !== null ? sanitizeOverrideText(overrides.customTitle) : null;
+        overrides.customTitle !== null ? sanitizeText(overrides.customTitle) : null;
     }
     if (overrides.customDescription !== undefined) {
       sanitized.customDescription =
-        overrides.customDescription !== null
-          ? sanitizeOverrideText(overrides.customDescription)
-          : null;
+        overrides.customDescription !== null ? sanitizeText(overrides.customDescription) : null;
     }
     if (overrides.customOgImage !== undefined) {
-      sanitized.customOgImage = overrides.customOgImage; // URL already validated by Zod; no text sanitization
+      sanitized.customOgImage = overrides.customOgImage; // URL already validated by Zod
     }
     const updated = await metaTagRepository.updateCustomOverrides(channelId, sanitized);
     await MetaTagCache.invalidate(channelId);
