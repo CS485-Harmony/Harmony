@@ -11,6 +11,7 @@ import { createPublicRouter } from './routes/public.router';
 import { seoRouter } from './routes/seo.router';
 import { eventsRouter } from './routes/events.router';
 import { attachmentRouter } from './routes/attachment.router';
+import { adminMetaTagRouter } from './routes/admin.metaTag.router';
 import { instanceId } from './lib/instance-identity';
 import { createLogger } from './lib/logger';
 import { redis } from './db/redis';
@@ -156,6 +157,9 @@ export function createApp(options: CreateAppOptions = {}) {
 
   // Attachment upload + file serving
   app.use('/api/attachments', attachmentRouter);
+
+  // Admin meta-tag management endpoints (server admin only)
+  app.use('/api/admin', adminMetaTagRouter);
 
   // tRPC endpoint
   app.use(

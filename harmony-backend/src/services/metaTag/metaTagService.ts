@@ -2,6 +2,7 @@
 import { createHash } from 'crypto';
 import { Prisma, type GeneratedMetaTags } from '@prisma/client';
 import { prisma } from '../../db/prisma';
+import { redis } from '../../db/redis';
 import { TitleGenerator } from './titleGenerator';
 import { DescriptionGenerator } from './descriptionGenerator';
 import { OpenGraphGenerator } from './openGraphGenerator';
@@ -177,6 +178,29 @@ function mapQueueStateToStatus(state: string): MetaTagJobStatus['status'] {
   return 'queued';
 }
 
+// ─── Admin Redis job helpers (distinct from BullMQ-based scheduleRegeneration) ────
+
+const ADMIN_JOB_TTL_SECONDS = 86400; // 24 hours
+
+function adminJobKey(jobId: string): string {
+  return `meta-tag:job:${jobId}`;
+}
+
+async function storeAdminJob(job: MetaTagJobStatus): Promise<void> {
+  await redis.set(adminJobKey(job.jobId), JSON.stringify(job), 'EX', ADMIN_JOB_TTL_SECONDS);
+}
+
+async function getAdminJob(jobId: string): Promise<MetaTagJobStatus | null> {
+  const raw = await redis.get(adminJobKey(jobId));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as MetaTagJobStatus;
+  } catch {
+    logger.warn({ jobId, key: adminJobKey(jobId) }, 'Failed to parse admin meta-tag job from Redis — treating as not found');
+    return null;
+  }
+}
+
 async function loadGenerationInputs(channelId: string): Promise<{
   channel: ChannelContext;
   persisted: GeneratedMetaTags | null;
@@ -235,12 +259,112 @@ async function loadGenerationInputs(channelId: string): Promise<{
   };
 }
 
+/**
+ * Runs meta tag regeneration for an admin-initiated job stored in Redis as `queued`.
+ * Transitions: queued → processing → succeeded | failed.
+ * Exported for direct use in tests.
+ */
+export async function processAdminRegenerationJob(channelId: string, jobId: string): Promise<void> {
+  const startedAt = new Date().toISOString();
+
+  try {
+    await storeAdminJob({
+      jobId,
+      channelId,
+      status: 'processing',
+      attempts: 1,
+      startedAt,
+      completedAt: null,
+      errorCode: null,
+      errorMessage: null,
+    });
+
+    const channel = await prisma.channel.findUnique({
+      where: { id: channelId },
+      include: { server: { select: { name: true, slug: true } } },
+    });
+
+    if (!channel) throw new Error('Channel not found during regeneration');
+
+    const rawMessages = await prisma.message.findMany({
+      where: { channelId, isDeleted: false },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: { author: { select: { displayName: true } } },
+    });
+
+    const channelCtx: ChannelContext = {
+      id: channel.id,
+      name: channel.name,
+      slug: channel.slug,
+      topic: channel.topic,
+      serverName: channel.server.name,
+      serverSlug: channel.server.slug,
+      canonicalUrl: metaTagService.buildCanonicalUrl(channel.server.slug, channel.slug),
+      visibility: channel.visibility as unknown as ChannelVisibility,
+    };
+
+    const msgCtxs: MessageContext[] = rawMessages.map((m) => ({
+      content: m.content,
+      createdAt: m.createdAt,
+      authorDisplayName: m.author.displayName,
+    }));
+
+    const tags = await metaTagService.generateMetaTagsFromContext(channelCtx, msgCtxs);
+
+    await metaTagRepository.saveGeneratedFields(channelId, {
+      title: tags.title,
+      description: tags.description,
+      ogTitle: tags.openGraph.ogTitle,
+      ogDescription: tags.openGraph.ogDescription,
+      ogImage: tags.openGraph.ogImage,
+      twitterCard: tags.twitter.card,
+      keywords: tags.keywords.join(','),
+      structuredData: tags.structuredData as Prisma.InputJsonValue,
+      contentHash: buildContentHash(channelCtx, msgCtxs),
+      needsRegeneration: tags.needsRegeneration ?? false,
+      generatedAt: new Date(),
+      schemaVersion: META_TAG_SCHEMA_VERSION,
+    });
+
+    await storeAdminJob({
+      jobId,
+      channelId,
+      status: 'succeeded',
+      attempts: 1,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      errorCode: null,
+      errorMessage: null,
+    });
+
+    logger.info({ jobId, channelId }, 'Admin meta tag regeneration succeeded');
+  } catch (err) {
+    logger.error({ err, jobId, channelId }, 'Admin meta tag regeneration failed');
+    await storeAdminJob({
+      jobId,
+      channelId,
+      status: 'failed',
+      attempts: 1,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      errorCode: 'REGEN_FAILED',
+      errorMessage: err instanceof Error ? err.message : 'Unknown error',
+    }).catch((storeErr) =>
+      logger.error({ err: storeErr, jobId }, 'Failed to store failed admin job status'),
+    );
+  }
+}
+
 export const metaTagService = {
   /**
    * Generate meta tags from pre-resolved context (used internally and in unit tests).
    * Production callers should prefer the spec-aligned generateMetaTags(channelId, options?).
    */
-  async generateMetaTagsFromContext(channel: ChannelContext, messages: MessageContext[]): Promise<MetaTagSet> {
+  async generateMetaTagsFromContext(
+    channel: ChannelContext,
+    messages: MessageContext[],
+  ): Promise<MetaTagSet> {
     try {
       const rawTitle = TitleGenerator.generateFromThread(messages, channel);
       const rawDescription = DescriptionGenerator.generateFromMessages(messages, channel);
@@ -249,8 +373,9 @@ export const metaTagService = {
       const filteredContent = ContentFilter.filterContent(messages.map((m) => m.content).join(' '));
       // Drop placeholder tokens that filterContent inserts — they leak filter presence into og/twitter tags
       const FILTER_PLACEHOLDERS = new Set(['email', 'phone', 'user']);
-      const keywords = DescriptionGenerator.extractKeyPhrases(filteredContent, 5)
-        .filter((k) => !FILTER_PLACEHOLDERS.has(k) && !/^\*+$/.test(k));
+      const keywords = DescriptionGenerator.extractKeyPhrases(filteredContent, 5).filter(
+        (k) => !FILTER_PLACEHOLDERS.has(k) && !/^\*+$/.test(k),
+      );
       const analysis: ContentAnalysis = {
         keywords,
         topics: [title],
@@ -399,6 +524,39 @@ export const metaTagService = {
     await MetaTagCache.invalidate(channelId);
   },
 
+  sanitizeCustomOverride(value: string | null | undefined): string | null {
+    if (value == null) return null;
+    const stripped = value
+      .replace(/<[^>]*>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return ContentFilter.escapeHtml(ContentFilter.filterContent(stripped));
+  },
+
+  async setCustomOverrides(
+    channelId: string,
+    overrides: {
+      customTitle?: string | null;
+      customDescription?: string | null;
+      customOgImage?: string | null;
+    },
+  ) {
+    const sanitized: typeof overrides = {};
+    if (overrides.customTitle !== undefined) {
+      sanitized.customTitle = metaTagService.sanitizeCustomOverride(overrides.customTitle);
+    }
+    if (overrides.customDescription !== undefined) {
+      sanitized.customDescription = metaTagService.sanitizeCustomOverride(
+        overrides.customDescription,
+      );
+    }
+    if (overrides.customOgImage !== undefined) {
+      sanitized.customOgImage = overrides.customOgImage; // URL already validated by Zod
+    }
+    const updated = await metaTagRepository.updateCustomOverrides(channelId, sanitized);
+    await MetaTagCache.invalidate(channelId);
+    return updated;
+  },
   async scheduleRegeneration(
     channelId: string,
     priority: 'high' | 'normal' | 'low' = 'normal',
@@ -468,38 +626,21 @@ export const metaTagService = {
     return `${BASE_URL}/c/${encodeURIComponent(serverSlug)}/${encodeURIComponent(channelSlug)}`;
   },
 
-  /**
-   * Sanitize admin-supplied custom override strings before they are stored or
-   * served in the <head>. Strips HTML tags first (prevents tag-splitting bypass),
-   * then filters PII/profanity, then HTML-entity-encodes for safe <head> embedding.
-   * Used by the write path (PUT /meta-tags) to satisfy AC-8 / §12.3.
-   */
-  sanitizeCustomOverride(value: string | null | undefined): string | null {
-    if (value == null) return null;
-    // Strip HTML before PII/profanity filtering — otherwise "f<b>u</b>ck" bypasses the word-boundary regex
-    const stripped = value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-    return ContentFilter.escapeHtml(ContentFilter.filterContent(stripped));
+  async enqueueAdminJob(channelId: string, jobId: string): Promise<void> {
+    await storeAdminJob({
+      jobId,
+      channelId,
+      status: 'queued',
+      attempts: 0,
+      startedAt: null,
+      completedAt: null,
+      errorCode: null,
+      errorMessage: null,
+    });
+    setImmediate(() => void processAdminRegenerationJob(channelId, jobId));
   },
 
-  /**
-   * Sanitize and persist admin-supplied custom overrides for a channel.
-   * All callers must go through this method rather than metaTagRepository.updateCustomOverrides
-   * directly — the repository method accepts raw strings and does not sanitize.
-   * AC-8 / §12.3: customTitle and customDescription are sanitized on write.
-   */
-  async setCustomOverrides(
-    channelId: string,
-    overrides: {
-      customTitle?: string | null;
-      customDescription?: string | null;
-      customOgImage?: string | null;
-    },
-  ): Promise<void> {
-    await metaTagRepository.updateCustomOverrides(channelId, {
-      customTitle: metaTagService.sanitizeCustomOverride(overrides.customTitle),
-      customDescription: metaTagService.sanitizeCustomOverride(overrides.customDescription),
-      customOgImage: overrides.customOgImage ?? null,
-    });
-    await metaTagService.invalidateCache(channelId);
+  async getAdminJobStatus(channelId: string, jobId: string): Promise<MetaTagJobStatus | null> {
+    return getAdminJob(jobId);
   },
 };
