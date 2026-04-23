@@ -154,10 +154,24 @@ export const metaTagService = {
   },
 
   /**
+   * Sanitize a single custom override string for safe storage/serving in <head> (AC-8 / §12.3).
+   * Pipeline: strip HTML tags first (prevents tag-splitting bypasses), then filter PII/profanity,
+   * then HTML-entity-encode. Returns null for null/undefined input.
+   */
+  sanitizeCustomOverride(value: string | null | undefined): string | null {
+    if (value == null) return null;
+    const stripped = value
+      .replace(/<[^>]*>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return ContentFilter.escapeHtml(ContentFilter.filterContent(stripped));
+  },
+
+  /**
    * Sanitize and persist admin custom overrides (AC-8 / §12.3).
-   * Routes text fields through ContentFilter (strips HTML, filters PII/profanity, HTML-encodes),
-   * then invalidates the meta cache. Only fields present in `overrides` are written — absent
-   * fields are left unchanged in the DB (partial-update semantics).
+   * Routes text fields through sanitizeCustomOverride, then invalidates the meta cache.
+   * Only fields present in `overrides` are written — absent fields are left unchanged in the DB
+   * (partial-update semantics).
    */
   async setCustomOverrides(
     channelId: string,
@@ -167,24 +181,14 @@ export const metaTagService = {
       customOgImage?: string | null;
     },
   ) {
-    // Full sanitization pipeline: strip HTML → filter PII/profanity → HTML-encode.
-    // Stripping before filtering prevents tag-splitting bypasses (e.g. "f<b>u</b>ck").
-    const sanitizeText = (text: string) => {
-      const stripped = text
-        .replace(/<[^>]*>/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      return ContentFilter.escapeHtml(ContentFilter.filterContent(stripped));
-    };
-
     const sanitized: typeof overrides = {};
     if (overrides.customTitle !== undefined) {
-      sanitized.customTitle =
-        overrides.customTitle !== null ? sanitizeText(overrides.customTitle) : null;
+      sanitized.customTitle = metaTagService.sanitizeCustomOverride(overrides.customTitle);
     }
     if (overrides.customDescription !== undefined) {
-      sanitized.customDescription =
-        overrides.customDescription !== null ? sanitizeText(overrides.customDescription) : null;
+      sanitized.customDescription = metaTagService.sanitizeCustomOverride(
+        overrides.customDescription,
+      );
     }
     if (overrides.customOgImage !== undefined) {
       sanitized.customOgImage = overrides.customOgImage; // URL already validated by Zod
