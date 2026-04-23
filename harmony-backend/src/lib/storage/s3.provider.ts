@@ -42,8 +42,12 @@ export class S3StorageProvider implements StorageProvider {
     }
 
     this.bucket = bucket;
-    // Strip trailing slashes so URL joins are consistent
-    this.publicUrl = publicUrl.endsWith('/') ? publicUrl.slice(0, -1) : publicUrl;
+    // Strip all trailing slashes so URL joins are consistent even for malformed inputs.
+    let normalizedPublicUrl = publicUrl;
+    while (normalizedPublicUrl.endsWith('/')) {
+      normalizedPublicUrl = normalizedPublicUrl.slice(0, -1);
+    }
+    this.publicUrl = normalizedPublicUrl;
 
     this.client = new S3Client({
       // R2 requires region 'auto'; any other value is rejected
