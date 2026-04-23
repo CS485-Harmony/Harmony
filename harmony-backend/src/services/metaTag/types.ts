@@ -64,6 +64,11 @@ export interface MetaTagPreview {
   keywords: string[];
   generatedAt: string;
   isCustom: boolean;
+  generatedTitle: string;
+  generatedDescription: string;
+  customTitle: string | null;
+  customDescription: string | null;
+  customOgImage: string | null;
   searchPreview: { title: string; description: string; url: string };
   socialPreview: { title: string; description: string; image: string };
 }

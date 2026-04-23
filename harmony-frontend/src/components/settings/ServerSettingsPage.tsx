@@ -6,10 +6,9 @@
 
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn, getUserErrorMessage } from '@/lib/utils';
-import { useAuth } from '@/hooks/useAuth';
 import { saveServerSettings, deleteServerAction } from '@/app/settings/[serverSlug]/actions';
 import { MembersSection } from '@/components/settings/MembersSection';
 import { VisibilitySection } from '@/components/settings/VisibilitySection';
@@ -251,48 +250,25 @@ function DangerZoneSection({ server }: { server: Server }) {
   );
 }
 
-// ─── Loading spinner ──────────────────────────────────────────────────────────
-
-function LoadingScreen() {
-  return (
-    <div
-      className={cn('flex h-screen items-center justify-center', BG.base)}
-      role='status'
-      aria-live='polite'
-    >
-      <div className='h-8 w-8 animate-spin rounded-full border-4 border-[#5865f2] border-t-transparent' />
-      <span className='sr-only'>Loading…</span>
-    </div>
-  );
-}
-
-// ─── Props ────────────────────────────────────────────────────────────────────
-
 export interface ServerSettingsPageProps {
   server: Server;
   serverSlug: string;
+  canDeleteServer?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ServerSettingsPage({ server, serverSlug }: ServerSettingsPageProps) {
-  const { isAdmin, isLoading, isAuthenticated } = useAuth();
+export function ServerSettingsPage({
+  server,
+  serverSlug,
+  canDeleteServer = false,
+}: ServerSettingsPageProps) {
   const router = useRouter();
   const [activeSection, setActiveSection] = useState<Section>('overview');
   const [displayName, setDisplayName] = useState(server.name);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const backHref = `/channels/${serverSlug}`;
-
-  // Safe because useAuth keeps isLoading=true until role is fully resolved —
-  // shouldRedirect is never evaluated on partial auth state.
-  const shouldRedirect = !isLoading && (!isAuthenticated || !isAdmin(server.ownerId));
-
-  useEffect(() => {
-    if (shouldRedirect) router.replace(backHref);
-  }, [shouldRedirect, router, backHref]);
-
-  if (isLoading || shouldRedirect) return <LoadingScreen />;
 
   return (
     <div className={cn('flex h-screen overflow-hidden', BG.base)}>
@@ -407,7 +383,17 @@ export function ServerSettingsPage({ server, serverSlug }: ServerSettingsPagePro
           {activeSection === 'privacy' && (
             <VisibilitySection server={server} serverSlug={serverSlug} />
           )}
-          {activeSection === 'danger-zone' && <DangerZoneSection server={server} />}
+          {activeSection === 'danger-zone' &&
+            (canDeleteServer ? (
+              <DangerZoneSection server={server} />
+            ) : (
+              <div className='max-w-lg space-y-3'>
+                <h2 className='text-xl font-semibold text-white'>Danger Zone</h2>
+                <p className='text-sm text-gray-400'>
+                  Only the server owner can delete this server.
+                </p>
+              </div>
+            ))}
         </div>
       </main>
     </div>

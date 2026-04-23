@@ -6,6 +6,7 @@ import { createLogger } from '../lib/logger';
 import { cacheMiddleware } from '../middleware/cache.middleware';
 import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from '../services/cache.service';
 import { createPublicRateLimiter } from '../middleware/rate-limit.middleware';
+import { metaTagService } from '../services/metaTag/metaTagService';
 
 const logger = createLogger({ component: 'public-router' });
 
@@ -20,261 +21,259 @@ export function createPublicRouter(store?: Store) {
   // Redis-backed rate limiting per Issue #318: 100 req/min per IP, shared across replicas
   router.use(createPublicRateLimiter(store));
 
-/**
- * GET /api/public/channels/:channelId/messages
- * Returns paginated messages for a PUBLIC_INDEXABLE channel.
- * Uses cache middleware with stale-while-revalidate.
- */
-router.get(
-  '/channels/:channelId/messages',
-  cacheMiddleware({
-    ttl: CacheTTL.channelMessages,
-    staleTtl: CacheTTL.channelMessages, // keep stale data for an extra TTL window
-    keyFn: (req: Request) =>
-      CacheKeys.channelMessages(req.params.channelId, Number(req.query.page) || 1),
-  }),
-  async (req: Request, res: Response) => {
-    try {
-      const { channelId } = req.params;
-      const page = Math.max(1, Number(req.query.page) || 1);
-      const pageSize = 50;
+  /**
+   * GET /api/public/channels/:channelId/messages
+   * Returns paginated messages for a PUBLIC_INDEXABLE channel.
+   * Uses cache middleware with stale-while-revalidate.
+   */
+  router.get(
+    '/channels/:channelId/messages',
+    cacheMiddleware({
+      ttl: CacheTTL.channelMessages,
+      staleTtl: CacheTTL.channelMessages, // keep stale data for an extra TTL window
+      keyFn: (req: Request) =>
+        CacheKeys.channelMessages(req.params.channelId, Number(req.query.page) || 1),
+    }),
+    async (req: Request, res: Response) => {
+      try {
+        const { channelId } = req.params;
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const pageSize = 50;
 
-      const channel = await prisma.channel.findUnique({
-        where: { id: channelId },
-        select: { id: true, visibility: true },
-      });
+        const channel = await prisma.channel.findUnique({
+          where: { id: channelId },
+          select: { id: true, visibility: true },
+        });
 
-      if (!channel || channel.visibility !== ChannelVisibility.PUBLIC_INDEXABLE) {
-        res.status(404).json({ error: 'Channel not found' });
-        return;
+        if (!channel || channel.visibility !== ChannelVisibility.PUBLIC_INDEXABLE) {
+          res.status(404).json({ error: 'Channel not found' });
+          return;
+        }
+
+        const messages = await prisma.message.findMany({
+          where: { channelId, isDeleted: false },
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: {
+            id: true,
+            content: true,
+            createdAt: true,
+            editedAt: true,
+            author: { select: { id: true, username: true } },
+          },
+        });
+
+        res.set('Cache-Control', `public, max-age=${CacheTTL.channelMessages}`);
+        res.json({ messages, page, pageSize });
+      } catch (err) {
+        logger.error({ err, channelId: req.params.channelId }, 'Public messages route failed');
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Internal server error' });
+        }
       }
+    },
+  );
 
-      const messages = await prisma.message.findMany({
-        where: { channelId, isDeleted: false },
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+  /**
+   * GET /api/public/channels/:channelId/messages/:messageId
+   * Returns a single message from a PUBLIC_INDEXABLE channel.
+   * Uses cache middleware with stale-while-revalidate.
+   */
+  router.get(
+    '/channels/:channelId/messages/:messageId',
+    cacheMiddleware({
+      ttl: CacheTTL.channelMessages,
+      staleTtl: CacheTTL.channelMessages,
+      keyFn: (req: Request) =>
+        `channel:msg:${sanitizeKeySegment(req.params.channelId)}:${sanitizeKeySegment(req.params.messageId)}`,
+    }),
+    async (req: Request, res: Response) => {
+      try {
+        const { channelId, messageId } = req.params;
+
+        const channel = await prisma.channel.findUnique({
+          where: { id: channelId },
+          select: { id: true, visibility: true },
+        });
+
+        if (!channel || channel.visibility !== ChannelVisibility.PUBLIC_INDEXABLE) {
+          res.status(404).json({ error: 'Channel not found' });
+          return;
+        }
+
+        const message = await prisma.message.findFirst({
+          where: { id: messageId, channelId, isDeleted: false },
+          select: {
+            id: true,
+            content: true,
+            createdAt: true,
+            editedAt: true,
+            author: { select: { id: true, username: true } },
+          },
+        });
+
+        if (!message) {
+          res.status(404).json({ error: 'Message not found' });
+          return;
+        }
+
+        res.set('Cache-Control', `public, max-age=${CacheTTL.channelMessages}`);
+        res.json(message);
+      } catch (err) {
+        logger.error(
+          { err, channelId: req.params.channelId, messageId: req.params.messageId },
+          'Public message route failed',
+        );
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Internal server error' });
+        }
+      }
+    },
+  );
+
+  /**
+   * GET /api/public/servers
+   * Returns a list of public servers ordered by member count (desc).
+   * Used by the home page to discover a default public channel to show visitors.
+   */
+  router.get('/servers', async (_req: Request, res: Response) => {
+    try {
+      const servers = await prisma.server.findMany({
+        where: { isPublic: true },
+        orderBy: { memberCount: 'desc' },
+        take: 20,
         select: {
           id: true,
-          content: true,
+          name: true,
+          slug: true,
+          iconUrl: true,
+          description: true,
+          memberCount: true,
           createdAt: true,
-          editedAt: true,
-          author: { select: { id: true, username: true } },
         },
       });
-
-      res.set('Cache-Control', `public, max-age=${CacheTTL.channelMessages}`);
-      res.json({ messages, page, pageSize });
+      res.set('Cache-Control', `public, max-age=${CacheTTL.serverInfo}`);
+      res.json(servers);
     } catch (err) {
-      logger.error({ err, channelId: req.params.channelId }, 'Public messages route failed');
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Internal server error' });
-      }
+      logger.error({ err }, 'Public servers list route failed');
+      res.status(500).json({ error: 'Internal server error' });
     }
-  },
-);
+  });
 
-/**
- * GET /api/public/channels/:channelId/messages/:messageId
- * Returns a single message from a PUBLIC_INDEXABLE channel.
- * Uses cache middleware with stale-while-revalidate.
- */
-router.get(
-  '/channels/:channelId/messages/:messageId',
-  cacheMiddleware({
-    ttl: CacheTTL.channelMessages,
-    staleTtl: CacheTTL.channelMessages,
-    keyFn: (req: Request) =>
-      `channel:msg:${sanitizeKeySegment(req.params.channelId)}:${sanitizeKeySegment(req.params.messageId)}`,
-  }),
-  async (req: Request, res: Response) => {
+  /**
+   * GET /api/public/servers/:serverSlug
+   * Returns public server info. Uses getOrRevalidate for SWR.
+   * Cache key: server:{serverId}:info per §4.4.
+   */
+  router.get('/servers/:serverSlug', async (req: Request, res: Response) => {
     try {
-      const { channelId, messageId } = req.params;
-
-      const channel = await prisma.channel.findUnique({
-        where: { id: channelId },
-        select: { id: true, visibility: true },
-      });
-
-      if (!channel || channel.visibility !== ChannelVisibility.PUBLIC_INDEXABLE) {
-        res.status(404).json({ error: 'Channel not found' });
-        return;
-      }
-
-      const message = await prisma.message.findFirst({
-        where: { id: messageId, channelId, isDeleted: false },
+      const server = await prisma.server.findUnique({
+        where: { slug: req.params.serverSlug },
         select: {
           id: true,
-          content: true,
+          name: true,
+          slug: true,
+          iconUrl: true,
+          description: true,
+          memberCount: true,
           createdAt: true,
-          editedAt: true,
-          author: { select: { id: true, username: true } },
         },
       });
 
-      if (!message) {
-        res.status(404).json({ error: 'Message not found' });
+      if (!server) {
+        res.status(404).json({ error: 'Server not found' });
         return;
       }
 
-      res.set('Cache-Control', `public, max-age=${CacheTTL.channelMessages}`);
-      res.json(message);
-    } catch (err) {
-      logger.error(
-        { err, channelId: req.params.channelId, messageId: req.params.messageId },
-        'Public message route failed',
+      const cacheKey = CacheKeys.serverInfo(server.id);
+      const cacheOpts = { ttl: CacheTTL.serverInfo, staleTtl: CacheTTL.serverInfo };
+
+      // Check cache state for X-Cache header
+      let xCache = 'MISS';
+      try {
+        const entry = await cacheService.get(cacheKey);
+        if (entry) {
+          xCache = cacheService.isStale(entry, CacheTTL.serverInfo) ? 'STALE' : 'HIT';
+        }
+      } catch (err) {
+        logger.warn({ err, cacheKey }, 'Failed to inspect public server cache state');
+      }
+
+      const data = await cacheService.getOrRevalidate(
+        cacheKey,
+        async () => server, // fetcher — server already fetched from DB above
+        cacheOpts,
       );
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Internal server error' });
-      }
-    }
-  },
-);
 
-/**
- * GET /api/public/servers
- * Returns a list of public servers ordered by member count (desc).
- * Used by the home page to discover a default public channel to show visitors.
- */
-router.get('/servers', async (_req: Request, res: Response) => {
-  try {
-    const servers = await prisma.server.findMany({
-      where: { isPublic: true },
-      orderBy: { memberCount: 'desc' },
-      take: 20,
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        iconUrl: true,
-        description: true,
-        memberCount: true,
-        createdAt: true,
-      },
-    });
-    res.set('Cache-Control', `public, max-age=${CacheTTL.serverInfo}`);
-    res.json(servers);
-  } catch (err) {
-    logger.error({ err }, 'Public servers list route failed');
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-/**
- * GET /api/public/servers/:serverSlug
- * Returns public server info. Uses getOrRevalidate for SWR.
- * Cache key: server:{serverId}:info per §4.4.
- */
-router.get('/servers/:serverSlug', async (req: Request, res: Response) => {
-  try {
-    const server = await prisma.server.findUnique({
-      where: { slug: req.params.serverSlug },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        iconUrl: true,
-        description: true,
-        memberCount: true,
-        createdAt: true,
-      },
-    });
-
-    if (!server) {
-      res.status(404).json({ error: 'Server not found' });
-      return;
-    }
-
-    const cacheKey = CacheKeys.serverInfo(server.id);
-    const cacheOpts = { ttl: CacheTTL.serverInfo, staleTtl: CacheTTL.serverInfo };
-
-    // Check cache state for X-Cache header
-    let xCache = 'MISS';
-    try {
-      const entry = await cacheService.get(cacheKey);
-      if (entry) {
-        xCache = cacheService.isStale(entry, CacheTTL.serverInfo) ? 'STALE' : 'HIT';
-      }
+      res.set('X-Cache', xCache);
+      res.set('X-Cache-Key', cacheKey);
+      res.set('Cache-Control', `public, max-age=${CacheTTL.serverInfo}`);
+      res.json(data);
     } catch (err) {
-      logger.warn({ err, cacheKey }, 'Failed to inspect public server cache state');
+      logger.error({ err, serverSlug: req.params.serverSlug }, 'Public server route failed');
+      res.status(500).json({ error: 'Internal server error' });
     }
+  });
 
-    const data = await cacheService.getOrRevalidate(
-      cacheKey,
-      async () => server, // fetcher — server already fetched from DB above
-      cacheOpts,
-    );
-
-    res.set('X-Cache', xCache);
-    res.set('X-Cache-Key', cacheKey);
-    res.set('Cache-Control', `public, max-age=${CacheTTL.serverInfo}`);
-    res.json(data);
-  } catch (err) {
-    logger.error({ err, serverSlug: req.params.serverSlug }, 'Public server route failed');
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-/**
- * GET /api/public/servers/:serverSlug/channels
- * Returns public channels for a server. Uses getOrRevalidate for SWR.
- * Cache key: server:{serverId}:public_channels per §4.4.
- */
-router.get('/servers/:serverSlug/channels', async (req: Request, res: Response) => {
-  try {
-    const server = await prisma.server.findUnique({
-      where: { slug: req.params.serverSlug },
-      select: { id: true },
-    });
-
-    if (!server) {
-      res.status(404).json({ error: 'Server not found' });
-      return;
-    }
-
-    const cacheKey = `server:${sanitizeKeySegment(server.id)}:public_channels`;
-    const cacheOpts = { ttl: CacheTTL.serverInfo, staleTtl: CacheTTL.serverInfo };
-
-    const fetcher = async () => {
-      const channels = await prisma.channel.findMany({
-        where: { serverId: server.id, visibility: ChannelVisibility.PUBLIC_INDEXABLE },
-        orderBy: { position: 'asc' },
-        select: { id: true, name: true, slug: true, type: true, topic: true },
+  /**
+   * GET /api/public/servers/:serverSlug/channels
+   * Returns public channels for a server. Uses getOrRevalidate for SWR.
+   * Cache key: server:{serverId}:public_channels per §4.4.
+   */
+  router.get('/servers/:serverSlug/channels', async (req: Request, res: Response) => {
+    try {
+      const server = await prisma.server.findUnique({
+        where: { slug: req.params.serverSlug },
+        select: { id: true },
       });
-      return { channels };
-    };
 
-    // Check cache state for X-Cache header
-    let xCache = 'MISS';
-    try {
-      const entry = await cacheService.get(cacheKey);
-      if (entry) {
-        xCache = cacheService.isStale(entry, CacheTTL.serverInfo) ? 'STALE' : 'HIT';
+      if (!server) {
+        res.status(404).json({ error: 'Server not found' });
+        return;
       }
+
+      const cacheKey = `server:${sanitizeKeySegment(server.id)}:public_channels`;
+      const cacheOpts = { ttl: CacheTTL.serverInfo, staleTtl: CacheTTL.serverInfo };
+
+      const fetcher = async () => {
+        const channels = await prisma.channel.findMany({
+          where: { serverId: server.id, visibility: ChannelVisibility.PUBLIC_INDEXABLE },
+          orderBy: { position: 'asc' },
+          select: { id: true, name: true, slug: true, type: true, topic: true },
+        });
+        return { channels };
+      };
+
+      // Check cache state for X-Cache header
+      let xCache = 'MISS';
+      try {
+        const entry = await cacheService.get(cacheKey);
+        if (entry) {
+          xCache = cacheService.isStale(entry, CacheTTL.serverInfo) ? 'STALE' : 'HIT';
+        }
+      } catch (err) {
+        logger.warn({ err, cacheKey }, 'Failed to inspect public channel cache state');
+      }
+
+      const data = await cacheService.getOrRevalidate(cacheKey, fetcher, cacheOpts);
+
+      res.set('X-Cache', xCache);
+      res.set('X-Cache-Key', cacheKey);
+      res.set('Cache-Control', `public, max-age=${CacheTTL.serverInfo}`);
+      res.json(data);
     } catch (err) {
-      logger.warn({ err, cacheKey }, 'Failed to inspect public channel cache state');
+      logger.error({ err, serverSlug: req.params.serverSlug }, 'Public channels route failed');
+      res.status(500).json({ error: 'Internal server error' });
     }
+  });
 
-    const data = await cacheService.getOrRevalidate(cacheKey, fetcher, cacheOpts);
-
-    res.set('X-Cache', xCache);
-    res.set('X-Cache-Key', cacheKey);
-    res.set('Cache-Control', `public, max-age=${CacheTTL.serverInfo}`);
-    res.json(data);
-  } catch (err) {
-    logger.error({ err, serverSlug: req.params.serverSlug }, 'Public channels route failed');
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-/**
- * GET /api/public/servers/:serverSlug/channels/:channelSlug
- * Returns channel info by slug. Returns 403 for PRIVATE channels, 404 if not found.
- * Supports PUBLIC_INDEXABLE and PUBLIC_NO_INDEX channels for guest access.
- */
-router.get(
-  '/servers/:serverSlug/channels/:channelSlug',
-  async (req: Request, res: Response) => {
+  /**
+   * GET /api/public/servers/:serverSlug/channels/:channelSlug
+   * Returns channel info by slug. Returns 403 for PRIVATE channels, 404 if not found.
+   * Supports PUBLIC_INDEXABLE and PUBLIC_NO_INDEX channels for guest access.
+   */
+  router.get('/servers/:serverSlug/channels/:channelSlug', async (req: Request, res: Response) => {
     try {
       const server = await prisma.server.findUnique({
         where: { slug: req.params.serverSlug },
@@ -320,8 +319,52 @@ router.get(
       );
       res.status(500).json({ error: 'Internal server error' });
     }
-  },
-);
+  });
+
+  /**
+   * GET /api/public/servers/:serverSlug/channels/:channelSlug/meta-tags
+   * Returns the persisted/generated metadata for guest-accessible channels so
+   * the frontend generateMetadata path reads the same SEO source of truth that
+   * admins preview and edit.
+   */
+  router.get(
+    '/servers/:serverSlug/channels/:channelSlug/meta-tags',
+    async (req: Request, res: Response) => {
+      try {
+        const channel = await prisma.channel.findFirst({
+          where: {
+            slug: req.params.channelSlug,
+            server: { slug: req.params.serverSlug },
+            visibility: { not: ChannelVisibility.PRIVATE },
+          },
+          select: {
+            id: true,
+            visibility: true,
+          },
+        });
+
+        if (!channel) {
+          res.status(404).json({ error: 'Channel not found' });
+          return;
+        }
+
+        const preview = await metaTagService.getMetaTagsForPreview(channel.id);
+        res.set('Cache-Control', 'public, max-age=60');
+        res.json({
+          ...preview,
+          visibility: channel.visibility,
+        });
+      } catch (err) {
+        logger.error(
+          { err, serverSlug: req.params.serverSlug, channelSlug: req.params.channelSlug },
+          'Public meta tags route failed',
+        );
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Internal server error' });
+        }
+      }
+    },
+  );
 
   return router;
 }

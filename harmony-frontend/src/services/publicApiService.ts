@@ -50,6 +50,16 @@ interface PublicMessagesApiResponse {
   pageSize: number;
 }
 
+export interface PublicMetaTagResponse {
+  title: string;
+  description: string;
+  ogTitle: string;
+  ogDescription: string;
+  ogImage: string;
+  generatedAt: string;
+  visibility: string;
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function mapChannelType(type: string): ChannelType {
@@ -191,3 +201,21 @@ export async function isChannelGuestAccessible(
   const result = await fetchPublicChannel(serverSlug, channelSlug);
   return result !== null && !result.isPrivate;
 }
+
+export const fetchPublicMetaTags = cache(
+  async (serverSlug: string, channelSlug: string): Promise<PublicMetaTagResponse | null> => {
+    try {
+      const res = await fetch(
+        `${API_CONFIG.BASE_URL}/api/public/servers/${encodeURIComponent(serverSlug)}/channels/${encodeURIComponent(channelSlug)}/meta-tags`,
+        {
+          cache: 'no-store',
+        },
+      );
+
+      if (!res.ok) return null;
+      return (await res.json()) as PublicMetaTagResponse;
+    } catch {
+      return null;
+    }
+  },
+);

@@ -553,6 +553,11 @@ export const metaTagService = {
     if (overrides.customOgImage !== undefined) {
       sanitized.customOgImage = overrides.customOgImage; // URL already validated by Zod
     }
+    if (Object.keys(sanitized).length === 0) {
+      const existing = await metaTagRepository.findByChannelId(channelId);
+      if (!existing) throw new Error(`Meta tags not found for channel ${channelId}`);
+      return existing;
+    }
     const updated = await metaTagRepository.updateCustomOverrides(channelId, sanitized);
     await MetaTagCache.invalidate(channelId);
     return updated;
@@ -609,6 +614,11 @@ export const metaTagService = {
         persisted?.customDescription ||
         persisted?.customOgImage,
       ),
+      generatedTitle: persisted?.title ?? tags.title,
+      generatedDescription: persisted?.description ?? tags.description,
+      customTitle: persisted?.customTitle ?? null,
+      customDescription: persisted?.customDescription ?? null,
+      customOgImage: persisted?.customOgImage ?? null,
       searchPreview: {
         title: tags.title,
         description: tags.description,

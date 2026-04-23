@@ -20,6 +20,7 @@ import { permissionService } from '../services/permission.service';
 import { prisma } from '../db/prisma';
 import { redis } from '../db/redis';
 import { createLogger } from '../lib/logger';
+import { auditLogService } from '../services/auditLog.service';
 import type { MetaTagPreview } from '../services/metaTag/types';
 
 const logger = createLogger({ component: 'admin-meta-tag-router' });
@@ -111,6 +112,11 @@ function buildPreview(
     keywords,
     generatedAt: record.generatedAt.toISOString(),
     isCustom,
+    generatedTitle: record.title,
+    generatedDescription: record.description,
+    customTitle: record.customTitle,
+    customDescription: record.customDescription,
+    customOgImage: record.customOgImage,
     searchPreview: { title, description, url: `${BASE_URL}/channels/${record.channelId}` },
     socialPreview: { title: ogTitle, description: ogDescription, image: ogImage },
   };
@@ -187,9 +193,29 @@ adminMetaTagRouter.put(
       }
 
       // Route through service: sanitizes HTML/PII, HTML-encodes text, invalidates cache (AC-8/§12.3)
+      const beforePreview = buildPreview(existing);
       const updated = await metaTagService.setCustomOverrides(channelId, overrides);
+      const afterPreview = buildPreview(updated);
 
-      res.json(buildPreview(updated));
+      await auditLogService.logChannelAuditAction({
+        channelId,
+        actorId: (req as AuthenticatedRequest).userId,
+        action: 'META_TAG_OVERRIDE_UPDATED',
+        oldValue: {
+          customTitle: beforePreview.customTitle,
+          customDescription: beforePreview.customDescription,
+          customOgImage: beforePreview.customOgImage,
+        },
+        newValue: {
+          customTitle: afterPreview.customTitle,
+          customDescription: afterPreview.customDescription,
+          customOgImage: afterPreview.customOgImage,
+        },
+        ipAddress: req.ip ?? '127.0.0.1',
+        userAgent: req.get('user-agent') ?? undefined,
+      });
+
+      res.json(afterPreview);
     } catch (err) {
       logger.error({ err, channelId }, 'PUT meta-tags failed');
       res.status(500).json({ error: 'Internal server error' });

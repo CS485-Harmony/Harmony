@@ -214,11 +214,7 @@ describe('MetaTagCache', () => {
     mockCacheService.set.mockResolvedValue(undefined);
     const tags = { title: 'T' } as never;
     await MetaTagCache.set('chan-001', tags, 1800);
-    expect(mockCacheService.set).toHaveBeenCalledWith(
-      'meta:channel:chan-001',
-      tags,
-      { ttl: 1800 },
-    );
+    expect(mockCacheService.set).toHaveBeenCalledWith('meta:channel:chan-001', tags, { ttl: 1800 });
   });
 
   it('invalidate calls cacheService.invalidate with correct key', async () => {
@@ -253,9 +249,9 @@ describe('metaTagService', () => {
   });
 
   it('AC-9: returns fallback with needsRegeneration=true on generation error', async () => {
-    const spy = jest
-      .spyOn(TitleGenerator, 'generateFromThread')
-      .mockImplementation(() => { throw new Error('NLP timeout'); });
+    const spy = jest.spyOn(TitleGenerator, 'generateFromThread').mockImplementation(() => {
+      throw new Error('NLP timeout');
+    });
     const tags = await metaTagService.generateMetaTagsFromContext(channel, messages);
     spy.mockRestore();
     expect(tags.needsRegeneration).toBe(true);
@@ -297,9 +293,9 @@ describe('metaTagService', () => {
 
   it('getOrGenerateCachedFromContext does not cache fallback tags on generation failure', async () => {
     mockCacheService.get.mockResolvedValue(null);
-    const spy = jest
-      .spyOn(TitleGenerator, 'generateFromThread')
-      .mockImplementation(() => { throw new Error('NLP timeout'); });
+    const spy = jest.spyOn(TitleGenerator, 'generateFromThread').mockImplementation(() => {
+      throw new Error('NLP timeout');
+    });
 
     const tags = await metaTagService.getOrGenerateCachedFromContext(channel, messages);
     spy.mockRestore();
@@ -355,6 +351,7 @@ describe('metaTagService', () => {
 
 jest.mock('../src/repositories/metaTag.repository', () => ({
   metaTagRepository: {
+    findByChannelId: jest.fn().mockResolvedValue({ channelId: 'chan-001' }),
     updateCustomOverrides: jest.fn().mockResolvedValue(undefined),
   },
 }));
@@ -399,5 +396,16 @@ describe('metaTagService.setCustomOverrides — AC-8 write-path sanitization', (
   it('invalidates the cache after persisting', async () => {
     await metaTagService.setCustomOverrides('chan-001', { customTitle: 'Clean Title' });
     expect(mockCacheService.invalidate).toHaveBeenCalledWith('meta:channel:chan-001');
+  });
+
+  it('does not clear customOgImage when the field is omitted', async () => {
+    await metaTagService.setCustomOverrides('chan-001', {
+      customTitle: 'Clean Title',
+    });
+
+    expect(mockMetaTagRepo.updateCustomOverrides).toHaveBeenCalledWith(
+      'chan-001',
+      expect.not.objectContaining({ customOgImage: null }),
+    );
   });
 });
