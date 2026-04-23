@@ -87,9 +87,15 @@ const redisStore = new Map<string, string>();
 jest.mock('../src/db/redis', () => ({
   redis: {
     get: jest.fn(async (key: string) => redisStore.get(key) ?? null),
-    set: jest.fn(async (key: string, value: string) => {
+    set: jest.fn(async (key: string, value: string, ...args: unknown[]) => {
+      // Honour SET ... NX semantics: return null without writing if key already exists
+      if (args.includes('NX') && redisStore.has(key)) return null;
       redisStore.set(key, value);
       return 'OK';
+    }),
+    del: jest.fn(async (key: string) => {
+      redisStore.delete(key);
+      return 1;
     }),
   },
 }));
@@ -153,33 +159,25 @@ describe('GET /api/admin/channels/:channelId/meta-tags', () => {
   });
 
   it('returns 403 when user is not a server admin', async () => {
-    const res = await request(app)
-      .get(url)
-      .set('Authorization', `Bearer ${NON_ADMIN_TOKEN}`);
+    const res = await request(app).get(url).set('Authorization', `Bearer ${NON_ADMIN_TOKEN}`);
     expect(res.status).toBe(403);
   });
 
   it('returns 404 when channel does not exist', async () => {
     mockPrisma.channel.findUnique.mockResolvedValue(null);
-    const res = await request(app)
-      .get(url)
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+    const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
     expect(res.status).toBe(404);
   });
 
   it('returns 404 when meta tags record does not exist', async () => {
     mockMetaTagRepo.findByChannelId.mockResolvedValue(null);
-    const res = await request(app)
-      .get(url)
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+    const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
     expect(res.status).toBe(404);
   });
 
   it('returns 200 with MetaTagPreview on success', async () => {
     mockMetaTagRepo.findByChannelId.mockResolvedValue(META_TAG_RECORD);
-    const res = await request(app)
-      .get(url)
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+    const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
@@ -198,9 +196,7 @@ describe('GET /api/admin/channels/:channelId/meta-tags', () => {
   it('sets isCustom=true when customTitle is present', async () => {
     const withCustom = { ...META_TAG_RECORD, customTitle: 'My Custom Title' };
     mockMetaTagRepo.findByChannelId.mockResolvedValue(withCustom);
-    const res = await request(app)
-      .get(url)
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+    const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
 
     expect(res.status).toBe(200);
     expect(res.body.isCustom).toBe(true);
@@ -272,10 +268,74 @@ describe('PUT /api/admin/channels/:channelId/meta-tags', () => {
     expect(res.status).toBe(200);
     expect(res.body.title).toBe('My Title');
     expect(res.body.isCustom).toBe(true);
+    // Only explicitly provided fields are forwarded — customOgImage was absent so must not be set
     expect(mockMetaTagRepo.updateCustomOverrides).toHaveBeenCalledWith(CHANNEL_ID, {
       customTitle: 'My Title',
       customDescription: 'My Desc',
-      customOgImage: null,
+    });
+  });
+
+  it('does not clear an existing override when only one field is provided (partial update)', async () => {
+    mockMetaTagRepo.findByChannelId.mockResolvedValue(META_TAG_RECORD);
+    mockMetaTagRepo.updateCustomOverrides.mockResolvedValue({
+      ...META_TAG_RECORD,
+      customTitle: 'New Title Only',
+    });
+
+    await request(app)
+      .put(url)
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ customTitle: 'New Title Only' });
+
+    // customDescription and customOgImage must NOT appear in the call — omitting them preserves DB values
+    expect(mockMetaTagRepo.updateCustomOverrides).toHaveBeenCalledWith(CHANNEL_ID, {
+      customTitle: 'New Title Only',
+    });
+  });
+
+  it('passes explicit null through to clear an override', async () => {
+    mockMetaTagRepo.findByChannelId.mockResolvedValue({
+      ...META_TAG_RECORD,
+      customTitle: 'Old Title',
+    });
+    mockMetaTagRepo.updateCustomOverrides.mockResolvedValue(META_TAG_RECORD);
+
+    await request(app)
+      .put(url)
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ customTitle: null });
+
+    expect(mockMetaTagRepo.updateCustomOverrides).toHaveBeenCalledWith(CHANNEL_ID, {
+      customTitle: null,
+    });
+  });
+
+  it('strips HTML tags from customTitle and customDescription before storing (AC-8)', async () => {
+    mockMetaTagRepo.findByChannelId.mockResolvedValue(META_TAG_RECORD);
+    mockMetaTagRepo.updateCustomOverrides.mockResolvedValue(META_TAG_RECORD);
+
+    await request(app)
+      .put(url)
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ customTitle: '<b>Bold</b> Title', customDescription: '<em>Italic</em> Desc' });
+
+    expect(mockMetaTagRepo.updateCustomOverrides).toHaveBeenCalledWith(CHANNEL_ID, {
+      customTitle: 'Bold Title',
+      customDescription: 'Italic Desc',
+    });
+  });
+
+  it('redacts email PII from customDescription before storing (AC-8)', async () => {
+    mockMetaTagRepo.findByChannelId.mockResolvedValue(META_TAG_RECORD);
+    mockMetaTagRepo.updateCustomOverrides.mockResolvedValue(META_TAG_RECORD);
+
+    await request(app)
+      .put(url)
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ customDescription: 'Contact admin@example.com for help' });
+
+    expect(mockMetaTagRepo.updateCustomOverrides).toHaveBeenCalledWith(CHANNEL_ID, {
+      customDescription: 'Contact [email] for help',
     });
   });
 
@@ -319,24 +379,18 @@ describe('POST /api/admin/channels/:channelId/meta-tags/jobs', () => {
   });
 
   it('returns 403 when user is not a server admin', async () => {
-    const res = await request(app)
-      .post(url)
-      .set('Authorization', `Bearer ${NON_ADMIN_TOKEN}`);
+    const res = await request(app).post(url).set('Authorization', `Bearer ${NON_ADMIN_TOKEN}`);
     expect(res.status).toBe(403);
   });
 
   it('returns 404 when channel does not exist', async () => {
     mockPrisma.channel.findUnique.mockResolvedValue(null);
-    const res = await request(app)
-      .post(url)
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+    const res = await request(app).post(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
     expect(res.status).toBe(404);
   });
 
   it('returns 202 with jobId and pollUrl on success (AC-5)', async () => {
-    const res = await request(app)
-      .post(url)
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+    const res = await request(app).post(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
 
     expect(res.status).toBe(202);
     expect(res.body).toHaveProperty('jobId');
@@ -398,16 +452,12 @@ describe('GET /api/admin/channels/:channelId/meta-tags/jobs/:jobId', () => {
   });
 
   it('returns 403 when user is not a server admin', async () => {
-    const res = await request(app)
-      .get(url)
-      .set('Authorization', `Bearer ${NON_ADMIN_TOKEN}`);
+    const res = await request(app).get(url).set('Authorization', `Bearer ${NON_ADMIN_TOKEN}`);
     expect(res.status).toBe(403);
   });
 
   it('returns 404 when job does not exist', async () => {
-    const res = await request(app)
-      .get(url)
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+    const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
     expect(res.status).toBe(404);
   });
 
@@ -425,9 +475,7 @@ describe('GET /api/admin/channels/:channelId/meta-tags/jobs/:jobId', () => {
     };
     redisStore.set(`meta-tag:job:${JOB_ID}`, JSON.stringify(wrongJob));
 
-    const res = await request(app)
-      .get(url)
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+    const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
     expect(res.status).toBe(404);
   });
 
@@ -444,9 +492,7 @@ describe('GET /api/admin/channels/:channelId/meta-tags/jobs/:jobId', () => {
     };
     redisStore.set(`meta-tag:job:${JOB_ID}`, JSON.stringify(job));
 
-    const res = await request(app)
-      .get(url)
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+    const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
@@ -473,5 +519,13 @@ describe('GET /api/admin/channels/:channelId/meta-tags/jobs/:jobId', () => {
     expect(getRes.body.jobId).toBe(jobId);
     expect(getRes.body.channelId).toBe(CHANNEL_ID);
     expect(getRes.body.status).toBe('queued');
+  });
+
+  it('returns 404 when the Redis value is corrupt JSON (parse guard)', async () => {
+    redisStore.set(`meta-tag:job:${JOB_ID}`, 'not-valid-json');
+
+    const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
+
+    expect(res.status).toBe(404);
   });
 });

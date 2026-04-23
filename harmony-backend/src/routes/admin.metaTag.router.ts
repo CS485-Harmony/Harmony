@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { randomUUID } from 'crypto';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.middleware';
 import { metaTagRepository } from '../repositories/metaTag.repository';
+import { metaTagService } from '../services/metaTag/metaTagService';
 import { permissionService } from '../services/permission.service';
 import { prisma } from '../db/prisma';
 import { redis } from '../db/redis';
@@ -53,15 +54,15 @@ async function storeJob(job: MetaTagJobStatus): Promise<void> {
 async function getJob(jobId: string): Promise<MetaTagJobStatus | null> {
   const raw = await redis.get(jobKey(jobId));
   if (!raw) return null;
-  return JSON.parse(raw) as MetaTagJobStatus;
-}
-
-async function getIdempotentJobId(channelId: string, key: string): Promise<string | null> {
-  return redis.get(idempotencyKey(channelId, key));
-}
-
-async function storeIdempotentJobId(channelId: string, key: string, jobId: string): Promise<void> {
-  await redis.set(idempotencyKey(channelId, key), jobId, 'EX', IDEMPOTENCY_TTL_SECONDS);
+  try {
+    return JSON.parse(raw) as MetaTagJobStatus;
+  } catch {
+    logger.warn(
+      { jobId, key: jobKey(jobId) },
+      'Failed to parse meta-tag job from Redis — treating as not found',
+    );
+    return null;
+  }
 }
 
 // ─── Admin authorization middleware ──────────────────────────────────────────
@@ -189,7 +190,17 @@ adminMetaTagRouter.put(
       return;
     }
 
-    const { customTitle, customDescription, customOgImage } = parsed.data;
+    // Build partial update — only include fields explicitly present in the body.
+    // Omitted fields are left unchanged; explicit null clears the override.
+    const d = parsed.data;
+    const overrides: {
+      customTitle?: string | null;
+      customDescription?: string | null;
+      customOgImage?: string | null;
+    } = {};
+    if (d.customTitle !== undefined) overrides.customTitle = d.customTitle;
+    if (d.customDescription !== undefined) overrides.customDescription = d.customDescription;
+    if (d.customOgImage !== undefined) overrides.customOgImage = d.customOgImage;
 
     try {
       const existing = await metaTagRepository.findByChannelId(channelId);
@@ -198,11 +209,8 @@ adminMetaTagRouter.put(
         return;
       }
 
-      const updated = await metaTagRepository.updateCustomOverrides(channelId, {
-        customTitle: customTitle ?? null,
-        customDescription: customDescription ?? null,
-        customOgImage: customOgImage ?? null,
-      });
+      // Route through service: sanitizes HTML/PII, HTML-encodes text, invalidates cache (AC-8/§12.3)
+      const updated = await metaTagService.setCustomOverrides(channelId, overrides);
 
       res.json(buildPreview(updated));
     } catch (err) {
@@ -225,13 +233,19 @@ adminMetaTagRouter.post(
     const idempotencyHeader = req.headers['idempotency-key'] as string | undefined;
 
     try {
-      // Idempotency deduplication (AC-6)
+      const jobId = randomUUID();
+      const now = new Date().toISOString();
+
+      // Atomic idempotency deduplication (AC-6).
+      // SET NX ensures only one concurrent request wins the key; the loser reads back the winner's jobId.
       if (idempotencyHeader) {
-        const existingJobId = await getIdempotentJobId(channelId, idempotencyHeader);
-        if (existingJobId) {
-          const pollUrl = `${BASE_URL}/api/admin/channels/${channelId}/meta-tags/jobs/${existingJobId}`;
+        const iKey = idempotencyKey(channelId, idempotencyHeader);
+        const acquired = await redis.set(iKey, jobId, 'EX', IDEMPOTENCY_TTL_SECONDS, 'NX');
+        if (acquired === null) {
+          const existingJobId = await redis.get(iKey);
+          const pollUrl = `${BASE_URL}/api/admin/channels/${channelId}/meta-tags/jobs/${existingJobId ?? jobId}`;
           res.status(202).json({
-            jobId: existingJobId,
+            jobId: existingJobId ?? jobId,
             status: 'deduplicated',
             idempotencyKey: idempotencyHeader,
             pollUrl,
@@ -239,9 +253,6 @@ adminMetaTagRouter.post(
           return;
         }
       }
-
-      const jobId = randomUUID();
-      const now = new Date().toISOString();
 
       const job: MetaTagJobStatus = {
         jobId,
@@ -255,10 +266,6 @@ adminMetaTagRouter.post(
       };
 
       await storeJob(job);
-
-      if (idempotencyHeader) {
-        await storeIdempotentJobId(channelId, idempotencyHeader, jobId);
-      }
 
       logger.info({ jobId, channelId, idempotencyKey: idempotencyHeader }, 'Meta tag job queued');
 

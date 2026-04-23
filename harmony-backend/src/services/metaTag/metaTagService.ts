@@ -4,6 +4,7 @@ import { DescriptionGenerator } from './descriptionGenerator';
 import { OpenGraphGenerator } from './openGraphGenerator';
 import { StructuredDataGenerator } from './structuredDataGenerator';
 import { MetaTagCache } from './metaTagCache';
+import { metaTagRepository } from '../../repositories/metaTag.repository';
 import type {
   MetaTagSet,
   ChannelContext,
@@ -18,6 +19,21 @@ import { createLogger } from '../../lib/logger';
 const logger = createLogger({ component: 'meta-tag-service' });
 
 const BASE_URL = process.env.BASE_URL ?? 'https://harmony.chat';
+
+// Strip HTML, redact PII (emails, @mentions), and HTML-encode remaining special chars.
+// Applied to free-text custom overrides (title, description) before DB storage (AC-8 / §12.3).
+function sanitizeOverrideText(text: string): string {
+  return text
+    .replace(/<[^>]*>/g, '') // strip HTML tags
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[email]') // redact emails
+    .replace(/@\w+/g, '[mention]') // redact @mentions
+    .replace(/&/g, '&amp;') // HTML-encode (ampersand first to avoid double-encoding)
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 // Spec §9.1.1 visibility → robots mapping
 function getRobotsDirective(visibility: ChannelVisibility | undefined): string {
@@ -63,11 +79,17 @@ export const metaTagService = {
    * Generate meta tags from pre-resolved context (used internally and in unit tests).
    * Production callers should prefer the spec-aligned generateMetaTags(channelId, options?).
    */
-  async generateMetaTagsFromContext(channel: ChannelContext, messages: MessageContext[]): Promise<MetaTagSet> {
+  async generateMetaTagsFromContext(
+    channel: ChannelContext,
+    messages: MessageContext[],
+  ): Promise<MetaTagSet> {
     try {
       const title = TitleGenerator.generateFromThread(messages, channel);
       const description = DescriptionGenerator.generateFromMessages(messages, channel);
-      const keywords = DescriptionGenerator.extractKeyPhrases(messages.map((m) => m.content).join(' '), 5);
+      const keywords = DescriptionGenerator.extractKeyPhrases(
+        messages.map((m) => m.content).join(' '),
+        5,
+      );
       const analysis: ContentAnalysis = {
         keywords,
         topics: [title],
@@ -132,11 +154,45 @@ export const metaTagService = {
    * Full implementation wired by M4 (MetaTagUpdateWorker, issue #356).
    */
   async getOrGenerateCached(_channelId: string): Promise<MetaTagSet> {
-    throw new Error('getOrGenerateCached(channelId) not yet implemented — wired by M4 (issue #356)');
+    throw new Error(
+      'getOrGenerateCached(channelId) not yet implemented — wired by M4 (issue #356)',
+    );
   },
 
   async invalidateCache(channelId: string): Promise<void> {
     await MetaTagCache.invalidate(channelId);
+  },
+
+  /**
+   * Sanitize and persist admin custom overrides (AC-8 / §12.3).
+   * Strips HTML, redacts PII, HTML-encodes text fields, then invalidates the meta cache.
+   * Only fields present in `overrides` are written — absent fields are left unchanged.
+   */
+  async setCustomOverrides(
+    channelId: string,
+    overrides: {
+      customTitle?: string | null;
+      customDescription?: string | null;
+      customOgImage?: string | null;
+    },
+  ) {
+    const sanitized: typeof overrides = {};
+    if (overrides.customTitle !== undefined) {
+      sanitized.customTitle =
+        overrides.customTitle !== null ? sanitizeOverrideText(overrides.customTitle) : null;
+    }
+    if (overrides.customDescription !== undefined) {
+      sanitized.customDescription =
+        overrides.customDescription !== null
+          ? sanitizeOverrideText(overrides.customDescription)
+          : null;
+    }
+    if (overrides.customOgImage !== undefined) {
+      sanitized.customOgImage = overrides.customOgImage; // URL already validated by Zod; no text sanitization
+    }
+    const updated = await metaTagRepository.updateCustomOverrides(channelId, sanitized);
+    await MetaTagCache.invalidate(channelId);
+    return updated;
   },
 
   // scheduleRegeneration and getRegenerationJobStatus are stubs —
@@ -153,15 +209,14 @@ export const metaTagService = {
     };
   },
 
-  async getRegenerationJobStatus(
-    _channelId: string,
-    _jobId: string,
-  ): Promise<MetaTagJobStatus> {
+  async getRegenerationJobStatus(_channelId: string, _jobId: string): Promise<MetaTagJobStatus> {
     throw new Error('getRegenerationJobStatus not yet implemented — wired by M4 (issue #356)');
   },
 
   async getMetaTagsForPreview(_channelId: string): Promise<MetaTagPreview> {
-    throw new Error('getMetaTagsForPreview(channelId) not yet implemented — wired by M4 (issue #356)');
+    throw new Error(
+      'getMetaTagsForPreview(channelId) not yet implemented — wired by M4 (issue #356)',
+    );
   },
 
   buildCanonicalUrl(serverSlug: string, channelSlug: string): string {
