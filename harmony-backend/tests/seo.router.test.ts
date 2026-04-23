@@ -49,9 +49,10 @@ describe('seoRouter', () => {
 
   it('includes the frontend sitemap entrypoint in robots.txt', async () => {
     const res = await request(app).get('/robots.txt');
+    const expectedBaseUrl = process.env.BASE_URL ?? 'https://harmony.chat';
 
     expect(res.status).toBe(200);
     expect(res.text).toContain('User-agent: *');
-    expect(res.text).toContain('Sitemap: https://harmony.chat/sitemap.xml');
+    expect(res.text).toContain(`Sitemap: ${expectedBaseUrl}/sitemap.xml`);
   });
 });

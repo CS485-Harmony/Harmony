@@ -121,10 +121,10 @@ npm run dev:e2e:worker
 `npm run dev:e2e:worker` keeps the worker health server on port `4100`, matching the CI split between API and worker processes.
 
 ```bash
-# Terminal 3: frontend
+# Terminal 3: frontend (LOCAL-ONLY — hardcodes localhost:4000/3000, do not use in CI or deploy pipelines)
 cd harmony-frontend
-npm run build:e2e
-npm run start:e2e
+npm run build:local-e2e
+npm run start:local-e2e
 ```
 
 This CI-faithful path matters because `NODE_ENV=e2e` raises the backend auth rate limits used by the full local integration suite.
@@ -169,7 +169,7 @@ Local target:
 ```bash
 # After starting the backend via `npm run dev:e2e`,
 # the worker via `npm run dev:e2e:worker`,
-# and the frontend via `npm run build:e2e` + `npm run start:e2e`
+# and the frontend via `npm run build:local-e2e` + `npm run start:local-e2e`
 npm run test:integration
 ```
 

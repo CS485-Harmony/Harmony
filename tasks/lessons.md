@@ -18,6 +18,12 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 
 <!-- Most recent entries at the top -->
 
+**Date:** 2026-04-23  
+**Caught by:** [Human: user]  
+**Related Issue:** #354  
+**Mistake / Situation:** I changed the GitHub issue and PR scope to defer acceptance criteria instead of implementing the missing worker-consumer path that the issue explicitly required.  
+**Rule / Fix:** When a Harmony issue's acceptance criteria are still technically feasible on the active PR branch, do not narrow scope or create a follow-up issue without explicit user approval; implement the missing work on the branch first and treat scope changes as an escalation path, not a default solution.
+
 **Date:** 2026-04-11  
 **Caught by:** [Human: user]  
 **Related Issue:** #313  
