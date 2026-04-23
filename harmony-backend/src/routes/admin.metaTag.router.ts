@@ -13,7 +13,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
-import { Prisma } from '@prisma/client';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.middleware';
 import { metaTagRepository } from '../repositories/metaTag.repository';
 import { metaTagService } from '../services/metaTag/metaTagService';
@@ -21,13 +20,7 @@ import { permissionService } from '../services/permission.service';
 import { prisma } from '../db/prisma';
 import { redis } from '../db/redis';
 import { createLogger } from '../lib/logger';
-import type {
-  MetaTagPreview,
-  MetaTagJobStatus,
-  ChannelContext,
-  ChannelVisibility as ServiceChannelVisibility,
-  MessageContext,
-} from '../services/metaTag/types';
+import type { MetaTagPreview } from '../services/metaTag/types';
 
 const logger = createLogger({ component: 'admin-meta-tag-router' });
 
@@ -41,133 +34,12 @@ const metaTagOverrideSchema = z.object({
   customOgImage: z.string().url().max(500).optional().nullable(),
 });
 
-// ─── Redis job helpers ────────────────────────────────────────────────────────
+// ─── Redis idempotency helpers ────────────────────────────────────────────────
 
-const JOB_TTL_SECONDS = 86400; // 24 hours
 const IDEMPOTENCY_TTL_SECONDS = 60;
-
-function jobKey(jobId: string): string {
-  return `meta-tag:job:${jobId}`;
-}
 
 function idempotencyKey(channelId: string, key: string): string {
   return `meta-tag:idempotency:${channelId}:${key}`;
-}
-
-async function storeJob(job: MetaTagJobStatus): Promise<void> {
-  await redis.set(jobKey(job.jobId), JSON.stringify(job), 'EX', JOB_TTL_SECONDS);
-}
-
-async function getJob(jobId: string): Promise<MetaTagJobStatus | null> {
-  const raw = await redis.get(jobKey(jobId));
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as MetaTagJobStatus;
-  } catch {
-    logger.warn(
-      { jobId, key: jobKey(jobId) },
-      'Failed to parse meta-tag job from Redis — treating as not found',
-    );
-    return null;
-  }
-}
-
-// ─── Background regeneration ──────────────────────────────────────────────────
-
-/**
- * Runs meta tag regeneration for a job that was previously stored in Redis as `queued`.
- * Transitions the job through `processing` → `succeeded` | `failed`.
- * Exported for direct use in tests.
- */
-export async function processRegenerationJob(channelId: string, jobId: string): Promise<void> {
-  const startedAt = new Date().toISOString();
-
-  try {
-    await storeJob({
-      jobId,
-      channelId,
-      status: 'processing',
-      attempts: 1,
-      startedAt,
-      completedAt: null,
-      errorCode: null,
-      errorMessage: null,
-    });
-
-    const channel = await prisma.channel.findUnique({
-      where: { id: channelId },
-      include: { server: { select: { name: true, slug: true } } },
-    });
-
-    if (!channel) throw new Error('Channel not found during regeneration');
-
-    const rawMessages = await prisma.message.findMany({
-      where: { channelId, isDeleted: false },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      include: { author: { select: { displayName: true } } },
-    });
-
-    const channelCtx: ChannelContext = {
-      id: channel.id,
-      name: channel.name,
-      slug: channel.slug,
-      topic: channel.topic,
-      serverName: channel.server.name,
-      serverSlug: channel.server.slug,
-      canonicalUrl: metaTagService.buildCanonicalUrl(channel.server.slug, channel.slug),
-      visibility: channel.visibility as unknown as ServiceChannelVisibility,
-    };
-
-    const msgCtxs: MessageContext[] = rawMessages.map((m) => ({
-      content: m.content,
-      createdAt: m.createdAt,
-      authorDisplayName: m.author.displayName,
-    }));
-
-    const tags = await metaTagService.generateMetaTagsFromContext(channelCtx, msgCtxs);
-
-    await metaTagRepository.saveGeneratedFields(channelId, {
-      title: tags.title,
-      description: tags.description,
-      ogTitle: tags.openGraph.ogTitle,
-      ogDescription: tags.openGraph.ogDescription,
-      ogImage: tags.openGraph.ogImage,
-      twitterCard: tags.twitter.card,
-      keywords: tags.keywords.join(','),
-      structuredData: tags.structuredData as unknown as Prisma.InputJsonValue,
-      contentHash: randomUUID(),
-      needsRegeneration: tags.needsRegeneration ?? false,
-      generatedAt: new Date(),
-    });
-
-    await storeJob({
-      jobId,
-      channelId,
-      status: 'succeeded',
-      attempts: 1,
-      startedAt,
-      completedAt: new Date().toISOString(),
-      errorCode: null,
-      errorMessage: null,
-    });
-
-    logger.info({ jobId, channelId }, 'Meta tag regeneration succeeded');
-  } catch (err) {
-    logger.error({ err, jobId, channelId }, 'Meta tag regeneration failed');
-    await storeJob({
-      jobId,
-      channelId,
-      status: 'failed',
-      attempts: 1,
-      startedAt,
-      completedAt: new Date().toISOString(),
-      errorCode: 'REGEN_FAILED',
-      errorMessage: err instanceof Error ? err.message : 'Unknown error',
-    }).catch((storeErr) =>
-      logger.error({ err: storeErr, jobId }, 'Failed to store failed job status'),
-    );
-  }
 }
 
 // ─── Admin authorization middleware ──────────────────────────────────────────
@@ -363,19 +235,7 @@ adminMetaTagRouter.post(
         }
       }
 
-      const job: MetaTagJobStatus = {
-        jobId,
-        channelId,
-        status: 'queued',
-        attempts: 0,
-        startedAt: null,
-        completedAt: null,
-        errorCode: null,
-        errorMessage: null,
-      };
-
-      await storeJob(job);
-      setImmediate(() => void processRegenerationJob(channelId, jobId));
+      await metaTagService.enqueueAdminJob(channelId, jobId);
 
       logger.info({ jobId, channelId, idempotencyKey: idempotencyHeader }, 'Meta tag job queued');
 
@@ -405,7 +265,7 @@ adminMetaTagRouter.get(
     const { channelId, jobId } = req.params;
 
     try {
-      const job = await getJob(jobId);
+      const job = await metaTagService.getAdminJobStatus(channelId, jobId);
 
       if (!job || job.channelId !== channelId) {
         res.status(404).json({ error: 'Job not found' });
