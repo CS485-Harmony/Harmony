@@ -319,14 +319,15 @@ localOnlyDescribe('Visibility Change Impact (local-only)', () => {
 
       expect((await setVisibility('PUBLIC_INDEXABLE')).ok).toBe(true);
 
-      // Poll until index, follow is restored
+      // Poll until index, follow is restored (require absence of noindex to avoid false positive)
       for (let i = 0; i < 6; i++) {
         const res = await fetch(`${FRONTEND_URL}${channelPath}`);
         html = await res.text();
-        if (/index,\s*follow/i.test(html)) break;
+        if (/index,\s*follow/i.test(html) && !/noindex/i.test(html)) break;
         await new Promise((r) => setTimeout(r, 1000));
       }
       expect(html).toMatch(/index,\s*follow/i);
+      expect(html).not.toMatch(/noindex/i);
     },
     20000,
   );
