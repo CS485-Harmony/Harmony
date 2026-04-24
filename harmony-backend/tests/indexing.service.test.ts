@@ -151,7 +151,7 @@ describe('indexingService.onVisibilityChanged', () => {
     expect(invalidateSpy).toHaveBeenCalledWith(expect.stringContaining('sitemap:'));
   });
 
-  it('invalidates sitemap cache when channel leaves PUBLIC_INDEXABLE', async () => {
+  it('invalidates sitemap cache when channel leaves PUBLIC_INDEXABLE → PRIVATE', async () => {
     await indexingService.generateSitemap(serverSlug);
 
     await indexingService.onVisibilityChanged({
@@ -163,7 +163,19 @@ describe('indexingService.onVisibilityChanged', () => {
     expect(invalidateSpy).toHaveBeenCalledWith(expect.stringContaining('sitemap:'));
   });
 
-  it('does not invalidate cache when visibility change does not involve PUBLIC_INDEXABLE', async () => {
+  it('invalidates sitemap cache when channel leaves PUBLIC_INDEXABLE → PUBLIC_NO_INDEX', async () => {
+    await indexingService.generateSitemap(serverSlug);
+
+    await indexingService.onVisibilityChanged({
+      channelId: indexableChannelId,
+      oldVisibility: 'PUBLIC_INDEXABLE',
+      newVisibility: 'PUBLIC_NO_INDEX',
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(expect.stringContaining('sitemap:'));
+  });
+
+  it('does not invalidate sitemap cache for PRIVATE → PUBLIC_NO_INDEX (neither state is PUBLIC_INDEXABLE)', async () => {
     await indexingService.onVisibilityChanged({
       channelId: privateChannelId,
       oldVisibility: 'PRIVATE',

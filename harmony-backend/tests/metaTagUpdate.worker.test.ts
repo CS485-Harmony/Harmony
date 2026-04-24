@@ -75,4 +75,61 @@ describe('EventListener', () => {
       }),
     );
   });
+
+  describe('onVisibilityChanged — three F8 branches (B12/B16/B17)', () => {
+    type Visibility = 'PUBLIC_INDEXABLE' | 'PUBLIC_NO_INDEX' | 'PRIVATE';
+
+    function makeEvent(oldVisibility: Visibility, newVisibility: Visibility) {
+      return {
+        channelId: 'channel-vis',
+        serverId: 'server-1',
+        oldVisibility,
+        newVisibility,
+        actorId: 'user-1',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const highPriorityVisibilityJob = expect.objectContaining({
+      channelId: 'channel-vis',
+      triggeredBy: 'visibility',
+      priority: 'high',
+    });
+
+    it('PUBLIC_INDEXABLE → PRIVATE (B12): schedules high-priority job for DB cleanup', async () => {
+      await listener.onVisibilityChanged(makeEvent('PUBLIC_INDEXABLE', 'PRIVATE'));
+      expect(scheduleUpdateMock).toHaveBeenCalledTimes(1);
+      expect(scheduleUpdateMock).toHaveBeenCalledWith(highPriorityVisibilityJob);
+    });
+
+    it('PUBLIC_NO_INDEX → PRIVATE (B12): schedules high-priority job for DB cleanup', async () => {
+      await listener.onVisibilityChanged(makeEvent('PUBLIC_NO_INDEX', 'PRIVATE'));
+      expect(scheduleUpdateMock).toHaveBeenCalledTimes(1);
+      expect(scheduleUpdateMock).toHaveBeenCalledWith(highPriorityVisibilityJob);
+    });
+
+    it('PUBLIC_INDEXABLE → PUBLIC_NO_INDEX (B16): schedules high-priority regen for noindex', async () => {
+      await listener.onVisibilityChanged(makeEvent('PUBLIC_INDEXABLE', 'PUBLIC_NO_INDEX'));
+      expect(scheduleUpdateMock).toHaveBeenCalledTimes(1);
+      expect(scheduleUpdateMock).toHaveBeenCalledWith(highPriorityVisibilityJob);
+    });
+
+    it('PRIVATE → PUBLIC_NO_INDEX (B16): schedules high-priority regen for noindex', async () => {
+      await listener.onVisibilityChanged(makeEvent('PRIVATE', 'PUBLIC_NO_INDEX'));
+      expect(scheduleUpdateMock).toHaveBeenCalledTimes(1);
+      expect(scheduleUpdateMock).toHaveBeenCalledWith(highPriorityVisibilityJob);
+    });
+
+    it('PRIVATE → PUBLIC_INDEXABLE (B17): schedules high-priority regen for index,follow', async () => {
+      await listener.onVisibilityChanged(makeEvent('PRIVATE', 'PUBLIC_INDEXABLE'));
+      expect(scheduleUpdateMock).toHaveBeenCalledTimes(1);
+      expect(scheduleUpdateMock).toHaveBeenCalledWith(highPriorityVisibilityJob);
+    });
+
+    it('PUBLIC_NO_INDEX → PUBLIC_INDEXABLE (B17): schedules high-priority regen for index,follow', async () => {
+      await listener.onVisibilityChanged(makeEvent('PUBLIC_NO_INDEX', 'PUBLIC_INDEXABLE'));
+      expect(scheduleUpdateMock).toHaveBeenCalledTimes(1);
+      expect(scheduleUpdateMock).toHaveBeenCalledWith(highPriorityVisibilityJob);
+    });
+  });
 });

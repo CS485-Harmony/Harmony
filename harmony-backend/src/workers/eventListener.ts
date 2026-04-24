@@ -33,6 +33,12 @@ export class EventListener {
   }
 
   async onVisibilityChanged(event: VisibilityChangedPayload): Promise<void> {
+    // Three branches per dev-spec-seo §6 flow F8 / B12–B17:
+    // → PRIVATE        (B12): cacheInvalidator already invalidates MetaTagCache and removes
+    //                         from sitemap; schedule high-priority job to purge the DB record.
+    // → PUBLIC_NO_INDEX (B16): high-priority regen so robots=noindex, follow is served promptly.
+    // → PUBLIC_INDEXABLE (B17): high-priority regen so robots=index, follow and canonical URL
+    //                           are warmed in cache before the next crawler visit.
     await metaTagUpdateQueue.scheduleUpdate({
       channelId: event.channelId,
       triggeredBy: 'visibility',
