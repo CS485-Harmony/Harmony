@@ -39,12 +39,19 @@ describe('Visibility Smoke (cloud-read-only)', () => {
     expect(body).toMatch(/Allow:\s*\/c\//i);
   });
 
-  test('VIS-SMOKE-3: frontend apex sitemap index resolves and returns XML', async () => {
+  test('VIS-SMOKE-3: frontend apex sitemap index resolves and returns XML with frontend-host <loc> entries', async () => {
     const res = await fetch(`${FRONTEND_URL}/sitemap.xml`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toMatch(/xml/i);
     const body = await res.text();
     expect(body).toMatch(/<\?xml/i);
+    // Every <loc> must point at the frontend apex host, not the API/backend host
+    const locMatches = body.match(/<loc>([^<]+)<\/loc>/gi) ?? [];
+    expect(locMatches.length).toBeGreaterThan(0);
+    for (const loc of locMatches) {
+      expect(loc).toContain(FRONTEND_URL);
+      expect(loc).not.toContain(BACKEND_URL);
+    }
   });
 
   test('VIS-SMOKE-4: frontend apex robots.txt resolves with correct directives', async () => {
@@ -62,7 +69,11 @@ describe('Visibility Smoke (cloud-read-only)', () => {
   localOnlyTest('VIS-SMOKE-5: seeded PRIVATE channel is excluded from the frontend sitemap', async () => {
     const res = await fetch(`${FRONTEND_URL}/sitemap/${serverSlug}`);
     expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/xml/i);
     const body = await res.text();
+    expect(body).toMatch(/<\?xml/i);
+    expect(body).toMatch(/<urlset\b/i);
+    expect(body).toMatch(/<loc>/i);
     expect(body).not.toContain(LOCAL_SEEDS.channels.private);
   });
 });
