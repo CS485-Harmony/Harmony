@@ -34,10 +34,49 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       type: 'website',
       url: canonicalUrl,
     },
+    twitter: {
+      card: 'summary',
+      title,
+      description,
+    },
   };
 }
 
 export default async function GuestChannelPage({ params }: PageProps) {
   const { serverSlug, channelSlug } = await params;
-  return <GuestChannelView serverSlug={serverSlug} channelSlug={channelSlug} />;
+
+  // Fetch data for JSON-LD; React cache deduplicates these within the same render pass
+  const [server, channelResult] = await Promise.all([
+    fetchPublicServer(serverSlug),
+    fetchPublicChannel(serverSlug, channelSlug),
+  ]);
+
+  const channel = channelResult && !channelResult.isPrivate ? channelResult.channel : null;
+  const isIndexable = channel?.visibility === ChannelVisibility.PUBLIC_INDEXABLE;
+
+  const jsonLd = isIndexable
+    ? {
+        '@context': 'https://schema.org',
+        '@type': 'DiscussionForumPosting',
+        name: `${channel?.name ?? channelSlug} - ${server?.name ?? serverSlug} | Harmony`,
+        url: getChannelUrl(serverSlug, channelSlug),
+        description:
+          channel?.topic ??
+          server?.description ??
+          `Join ${server?.name ?? serverSlug} on Harmony`,
+        ...(channel?.createdAt && { datePublished: channel.createdAt }),
+      }
+    : null;
+
+  return (
+    <>
+      {jsonLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
+      )}
+      <GuestChannelView serverSlug={serverSlug} channelSlug={channelSlug} />
+    </>
+  );
 }

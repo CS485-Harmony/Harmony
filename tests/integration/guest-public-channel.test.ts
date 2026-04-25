@@ -44,6 +44,15 @@ describe('Guest Public Channel — cloud-read-only', () => {
     // canonical link
     expect(html).toMatch(/<link[^>]+rel=["']canonical["']/i);
     expect(html).toContain(`/c/${serverSlug}/${publicIndexableSlug}`);
+    // Open Graph tags
+    expect(html).toMatch(/<meta[^>]+property=["']og:title["']/i);
+    expect(html).toMatch(/<meta[^>]+property=["']og:url["']/i);
+    // Twitter card tags
+    expect(html).toMatch(/twitter:card/i);
+    expect(html).toMatch(/twitter:title/i);
+    // JSON-LD structured data
+    expect(html).toMatch(/<script[^>]+type=["']application\/ld\+json["']/i);
+    expect(html).toContain('DiscussionForumPosting');
   });
 
   test('GPC-3: PUBLIC_NO_INDEX channel renders with HTTP 200 and noindex meta', async () => {

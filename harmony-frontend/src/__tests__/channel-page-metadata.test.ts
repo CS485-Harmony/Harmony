@@ -1,0 +1,182 @@
+/**
+ * Unit tests for generateMetadata in the public channel page.
+ * Issue #357 — Sprint 5 (M1 PublicChannelPage + generateMetadata integration)
+ */
+
+const mockCache = jest.fn(<T extends (...args: never[]) => unknown>(fn: T): T => fn);
+jest.mock('react', () => ({ cache: mockCache }));
+
+jest.mock('@/services/publicApiService', () => ({
+  fetchPublicServer: jest.fn(),
+  fetchPublicChannel: jest.fn(),
+}));
+
+jest.mock('@/components/channel/GuestChannelView', () => ({
+  GuestChannelView: () => null,
+}));
+
+import { generateMetadata } from '@/app/c/[serverSlug]/[channelSlug]/page';
+import { fetchPublicServer, fetchPublicChannel } from '@/services/publicApiService';
+import { ChannelType, ChannelVisibility } from '@/types';
+
+const mockFetchPublicServer = fetchPublicServer as jest.Mock;
+const mockFetchPublicChannel = fetchPublicChannel as jest.Mock;
+
+const originalEnv = process.env;
+
+function makeParams(
+  serverSlug = 'harmony-hq',
+  channelSlug = 'general',
+): { params: Promise<{ serverSlug: string; channelSlug: string }> } {
+  return { params: Promise.resolve({ serverSlug, channelSlug }) };
+}
+
+function makeServer(overrides = {}) {
+  return {
+    id: 'srv-1',
+    name: 'Harmony HQ',
+    slug: 'harmony-hq',
+    description: 'A public server',
+    memberCount: 10,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function makeChannel(visibility: ChannelVisibility, overrides = {}) {
+  return {
+    id: 'ch-1',
+    name: 'general',
+    slug: 'general',
+    serverId: 'srv-1',
+    type: ChannelType.TEXT,
+    visibility,
+    topic: 'Welcome to general',
+    position: 0,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  process.env = { ...originalEnv, NEXT_PUBLIC_BASE_URL: 'https://harmony.chat' };
+  jest.resetAllMocks();
+});
+
+afterAll(() => {
+  process.env = originalEnv;
+});
+
+describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
+  beforeEach(() => {
+    mockFetchPublicServer.mockResolvedValue(makeServer());
+    mockFetchPublicChannel.mockResolvedValue({
+      channel: makeChannel(ChannelVisibility.PUBLIC_INDEXABLE),
+      isPrivate: false,
+    });
+  });
+
+  it('sets title and description from channel and server data', async () => {
+    const meta = await generateMetadata(makeParams());
+    expect(meta.title).toBe('general - Harmony HQ | Harmony');
+    expect(meta.description).toBe('Welcome to general');
+  });
+
+  it('sets robots to index, follow', async () => {
+    const meta = await generateMetadata(makeParams());
+    expect(meta.robots).toEqual({ index: true, follow: true });
+  });
+
+  it('sets canonical URL using the frontend domain', async () => {
+    const meta = await generateMetadata(makeParams());
+    expect(meta.alternates?.canonical).toBe('https://harmony.chat/c/harmony-hq/general');
+  });
+
+  it('includes Open Graph tags', async () => {
+    const meta = await generateMetadata(makeParams());
+    expect(meta).toMatchObject({
+      openGraph: {
+        title: 'general - Harmony HQ | Harmony',
+        type: 'website',
+        url: 'https://harmony.chat/c/harmony-hq/general',
+      },
+    });
+  });
+
+  it('includes Twitter card tags', async () => {
+    const meta = await generateMetadata(makeParams());
+    expect(meta).toMatchObject({
+      twitter: {
+        card: 'summary',
+        title: 'general - Harmony HQ | Harmony',
+        description: 'Welcome to general',
+      },
+    });
+  });
+});
+
+describe('generateMetadata — PUBLIC_NO_INDEX channel', () => {
+  beforeEach(() => {
+    mockFetchPublicServer.mockResolvedValue(makeServer());
+    mockFetchPublicChannel.mockResolvedValue({
+      channel: makeChannel(ChannelVisibility.PUBLIC_NO_INDEX, { topic: 'Staff updates' }),
+      isPrivate: false,
+    });
+  });
+
+  it('sets robots to noindex, follow', async () => {
+    const meta = await generateMetadata(makeParams('harmony-hq', 'staff'));
+    expect(meta.robots).toEqual({ index: false, follow: true });
+  });
+
+  it('still includes Twitter card tags', async () => {
+    const meta = await generateMetadata(makeParams('harmony-hq', 'staff'));
+    expect(meta).toMatchObject({ twitter: { card: 'summary' } });
+    expect(meta.twitter?.title).toBeTruthy();
+  });
+});
+
+describe('generateMetadata — PRIVATE channel', () => {
+  beforeEach(() => {
+    mockFetchPublicServer.mockResolvedValue(makeServer());
+    mockFetchPublicChannel.mockResolvedValue({ isPrivate: true });
+  });
+
+  it('sets robots to noindex, follow', async () => {
+    const meta = await generateMetadata(makeParams('harmony-hq', 'secret'));
+    expect(meta.robots).toEqual({ index: false, follow: true });
+  });
+
+  it('falls back to the slug for title when channel data is unavailable', async () => {
+    const meta = await generateMetadata(makeParams('harmony-hq', 'secret'));
+    expect(meta.title).toContain('secret');
+  });
+});
+
+describe('generateMetadata — API fallback (both fetches return null)', () => {
+  beforeEach(() => {
+    mockFetchPublicServer.mockResolvedValue(null);
+    mockFetchPublicChannel.mockResolvedValue(null);
+  });
+
+  it('falls back to slugs for title', async () => {
+    const meta = await generateMetadata(makeParams('my-server', 'my-channel'));
+    expect(meta.title).toBe('my-channel - my-server | Harmony');
+  });
+
+  it('falls back to a template description', async () => {
+    const meta = await generateMetadata(makeParams('my-server', 'my-channel'));
+    expect(meta.description).toBe('Join my-server on Harmony');
+  });
+
+  it('still sets canonical URL and Twitter card', async () => {
+    const meta = await generateMetadata(makeParams('my-server', 'my-channel'));
+    expect(meta.alternates?.canonical).toBe('https://harmony.chat/c/my-server/my-channel');
+    expect(meta).toMatchObject({ twitter: { card: 'summary' } });
+  });
+
+  it('sets robots to noindex when channel is unknown', async () => {
+    const meta = await generateMetadata(makeParams('my-server', 'my-channel'));
+    expect(meta.robots).toEqual({ index: false, follow: true });
+  });
+});
