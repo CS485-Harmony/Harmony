@@ -12,6 +12,31 @@ interface PageProps {
   params: Promise<{ serverSlug: string; channelSlug: string }>;
 }
 
+function getSeoContent(
+  serverSlug: string,
+  channelSlug: string,
+  server: Awaited<ReturnType<typeof fetchPublicServer>>,
+  channelResult: Awaited<ReturnType<typeof fetchPublicChannel>>,
+  publicMetaTags: Awaited<ReturnType<typeof fetchPublicMetaTags>>,
+) {
+  const channel = channelResult && !channelResult.isPrivate ? channelResult.channel : null;
+  const channelName = channel?.name ?? channelSlug;
+  const serverName = server?.name ?? serverSlug;
+  const title = publicMetaTags?.title ?? `${channelName} - ${serverName} | Harmony`;
+  const description =
+    publicMetaTags?.description ??
+    channel?.topic ??
+    server?.description ??
+    `Join ${serverName} on Harmony`;
+
+  return {
+    channel,
+    serverName,
+    title,
+    description,
+  };
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { serverSlug, channelSlug } = await params;
   const [server, channelResult, publicMetaTags] = await Promise.all([
@@ -20,16 +45,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     fetchPublicMetaTags(serverSlug, channelSlug),
   ]);
 
-  const channel = channelResult && !channelResult.isPrivate ? channelResult.channel : null;
-  const channelName = channel?.name ?? channelSlug;
-  const serverName = server?.name ?? serverSlug;
+  const { channel, title, description } = getSeoContent(
+    serverSlug,
+    channelSlug,
+    server,
+    channelResult,
+    publicMetaTags,
+  );
   const isIndexable = channel?.visibility === ChannelVisibility.PUBLIC_INDEXABLE;
-  const description =
-    publicMetaTags?.description ??
-    channel?.topic ??
-    server?.description ??
-    `Join ${serverName} on Harmony`;
-  const title = publicMetaTags?.title ?? `${channelName} - ${serverName} | Harmony`;
   const canonicalUrl = getChannelUrl(serverSlug, channelSlug);
 
   return {
@@ -62,16 +85,14 @@ export default async function GuestChannelPage({ params }: PageProps) {
     fetchPublicMetaTags(serverSlug, channelSlug),
   ]);
 
-  const channel = channelResult && !channelResult.isPrivate ? channelResult.channel : null;
+  const { channel, serverName, title, description } = getSeoContent(
+    serverSlug,
+    channelSlug,
+    server,
+    channelResult,
+    publicMetaTags,
+  );
   const isIndexable = channel?.visibility === ChannelVisibility.PUBLIC_INDEXABLE;
-  const channelName = channel?.name ?? channelSlug;
-  const serverName = server?.name ?? serverSlug;
-  const title = publicMetaTags?.title ?? `${channelName} - ${serverName} | Harmony`;
-  const text =
-    publicMetaTags?.description ??
-    channel?.topic ??
-    server?.description ??
-    `Join ${serverName} on Harmony`;
 
   const jsonLd = isIndexable
     ? {
@@ -80,11 +101,11 @@ export default async function GuestChannelPage({ params }: PageProps) {
         'name': title,
         'headline': title,
         'url': getChannelUrl(serverSlug, channelSlug),
-        'description': text,
-        text,
+        'description': description,
+        'text': description,
         'author': {
           '@type': 'Organization',
-          'name': server?.name ?? 'Harmony',
+          'name': serverName,
         },
         ...(channel?.createdAt && { datePublished: channel.createdAt }),
       }

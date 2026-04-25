@@ -171,6 +171,27 @@ describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
       text: 'Custom SEO Description',
     });
   });
+
+  it('uses the same server-name fallback for JSON-LD author as the page metadata', async () => {
+    mockFetchPublicServer.mockResolvedValue(null);
+
+    const page = await GuestChannelPage(makeParams('fallback-server', 'general'));
+    const html = renderToStaticMarkup(page);
+    const ldMatch = html.match(/<script[^>]+type="application\/ld\+json">([\s\S]*?)<\/script>/i);
+
+    expect(ldMatch).not.toBeNull();
+    const jsonLd = JSON.parse(ldMatch![1]);
+    expect(jsonLd).toMatchObject({
+      name: 'general - fallback-server | Harmony',
+      headline: 'general - fallback-server | Harmony',
+      description: 'Welcome to general',
+      text: 'Welcome to general',
+      author: {
+        '@type': 'Organization',
+        'name': 'fallback-server',
+      },
+    });
+  });
 });
 
 describe('generateMetadata — PUBLIC_NO_INDEX channel', () => {
