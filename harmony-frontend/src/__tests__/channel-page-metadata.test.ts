@@ -9,6 +9,7 @@ jest.mock('react', () => ({ cache: mockCache }));
 jest.mock('@/services/publicApiService', () => ({
   fetchPublicServer: jest.fn(),
   fetchPublicChannel: jest.fn(),
+  fetchPublicMetaTags: jest.fn().mockResolvedValue(null),
 }));
 
 jest.mock('@/components/channel/GuestChannelView', () => ({

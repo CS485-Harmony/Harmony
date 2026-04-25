@@ -69,6 +69,7 @@ export const LOCAL_SEEDS = {
   },
   channels: {
     publicIndexable: 'general', // visibility=PUBLIC_INDEXABLE
+    publicIndexableAll: ['general', 'announcements', 'dev-updates'] as const, // 3 channels for AC #357
     publicNoIndex: 'introductions', // visibility=PUBLIC_NO_INDEX
     private: 'staff-only', // visibility=PRIVATE
   },
