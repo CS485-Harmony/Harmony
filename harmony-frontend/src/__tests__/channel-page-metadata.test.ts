@@ -4,7 +4,10 @@
  */
 
 const mockCache = jest.fn(<T extends (...args: never[]) => unknown>(fn: T): T => fn);
-jest.mock('react', () => ({ cache: mockCache }));
+jest.mock('react', () => {
+  const actualReact = jest.requireActual('react');
+  return { ...actualReact, cache: mockCache };
+});
 
 jest.mock('@/services/publicApiService', () => ({
   fetchPublicServer: jest.fn(),
@@ -16,12 +19,18 @@ jest.mock('@/components/channel/GuestChannelView', () => ({
   GuestChannelView: () => null,
 }));
 
-import { generateMetadata } from '@/app/c/[serverSlug]/[channelSlug]/page';
-import { fetchPublicServer, fetchPublicChannel } from '@/services/publicApiService';
+import { renderToStaticMarkup } from 'react-dom/server';
+import GuestChannelPage, { generateMetadata } from '@/app/c/[serverSlug]/[channelSlug]/page';
+import {
+  fetchPublicServer,
+  fetchPublicChannel,
+  fetchPublicMetaTags,
+} from '@/services/publicApiService';
 import { ChannelType, ChannelVisibility } from '@/types';
 
 const mockFetchPublicServer = fetchPublicServer as jest.Mock;
 const mockFetchPublicChannel = fetchPublicChannel as jest.Mock;
+const mockFetchPublicMetaTags = fetchPublicMetaTags as jest.Mock;
 
 const originalEnv = process.env;
 
@@ -112,6 +121,54 @@ describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
         title: 'general - Harmony HQ | Harmony',
         description: 'Welcome to general',
       },
+    });
+  });
+
+  it('renders JSON-LD with author, text, and headline for rich results', async () => {
+    const page = await GuestChannelPage(makeParams());
+    const html = renderToStaticMarkup(page);
+    const ldMatch = html.match(/<script[^>]+type="application\/ld\+json">([\s\S]*?)<\/script>/i);
+
+    expect(ldMatch).not.toBeNull();
+    const jsonLd = JSON.parse(ldMatch![1]);
+    expect(jsonLd).toMatchObject({
+      '@context': 'https://schema.org',
+      '@type': 'DiscussionForumPosting',
+      'name': 'general - Harmony HQ | Harmony',
+      'headline': 'general - Harmony HQ | Harmony',
+      'description': 'Welcome to general',
+      'text': 'Welcome to general',
+      'author': {
+        '@type': 'Organization',
+        'name': 'Harmony HQ',
+      },
+      'url': 'https://harmony.chat/c/harmony-hq/general',
+      'datePublished': '2026-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('reuses persisted SEO metadata in JSON-LD when present', async () => {
+    mockFetchPublicMetaTags.mockResolvedValue({
+      title: 'Custom SEO Title',
+      description: 'Custom SEO Description',
+      ogTitle: 'Custom OG Title',
+      ogDescription: 'Custom OG Description',
+      ogImage: 'https://example.com/custom.png',
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      visibility: 'PUBLIC_INDEXABLE',
+    });
+
+    const page = await GuestChannelPage(makeParams());
+    const html = renderToStaticMarkup(page);
+    const ldMatch = html.match(/<script[^>]+type="application\/ld\+json">([\s\S]*?)<\/script>/i);
+
+    expect(ldMatch).not.toBeNull();
+    const jsonLd = JSON.parse(ldMatch![1]);
+    expect(jsonLd).toMatchObject({
+      name: 'Custom SEO Title',
+      headline: 'Custom SEO Title',
+      description: 'Custom SEO Description',
+      text: 'Custom SEO Description',
     });
   });
 });

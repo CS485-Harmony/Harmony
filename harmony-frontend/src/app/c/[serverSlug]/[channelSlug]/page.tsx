@@ -56,24 +56,36 @@ export default async function GuestChannelPage({ params }: PageProps) {
   const { serverSlug, channelSlug } = await params;
 
   // Fetch data for JSON-LD; React cache deduplicates these within the same render pass
-  const [server, channelResult] = await Promise.all([
+  const [server, channelResult, publicMetaTags] = await Promise.all([
     fetchPublicServer(serverSlug),
     fetchPublicChannel(serverSlug, channelSlug),
+    fetchPublicMetaTags(serverSlug, channelSlug),
   ]);
 
   const channel = channelResult && !channelResult.isPrivate ? channelResult.channel : null;
   const isIndexable = channel?.visibility === ChannelVisibility.PUBLIC_INDEXABLE;
+  const channelName = channel?.name ?? channelSlug;
+  const serverName = server?.name ?? serverSlug;
+  const title = publicMetaTags?.title ?? `${channelName} - ${serverName} | Harmony`;
+  const text =
+    publicMetaTags?.description ??
+    channel?.topic ??
+    server?.description ??
+    `Join ${serverName} on Harmony`;
 
   const jsonLd = isIndexable
     ? {
         '@context': 'https://schema.org',
         '@type': 'DiscussionForumPosting',
-        name: `${channel?.name ?? channelSlug} - ${server?.name ?? serverSlug} | Harmony`,
-        url: getChannelUrl(serverSlug, channelSlug),
-        description:
-          channel?.topic ??
-          server?.description ??
-          `Join ${server?.name ?? serverSlug} on Harmony`,
+        'name': title,
+        'headline': title,
+        'url': getChannelUrl(serverSlug, channelSlug),
+        'description': text,
+        text,
+        'author': {
+          '@type': 'Organization',
+          'name': server?.name ?? 'Harmony',
+        },
         ...(channel?.createdAt && { datePublished: channel.createdAt }),
       }
     : null;
@@ -82,7 +94,7 @@ export default async function GuestChannelPage({ params }: PageProps) {
     <>
       {jsonLd && (
         <script
-          type="application/ld+json"
+          type='application/ld+json'
           // Escape </script> breakout sequences per OWASP JSON-LD injection guidance
           dangerouslySetInnerHTML={{
             __html: JSON.stringify(jsonLd)
