@@ -2,11 +2,13 @@
  * VIS-1 through VIS-7: Visibility Change Impact on Public Indexing
  * Classification: local-only (write path)
  *
- * VIS-SMOKE-1, VIS-SMOKE-2: Sitemap and robots.txt reachability
- * Classification: cloud-read-only
+ * VIS-SMOKE-1, VIS-SMOKE-2: Backend sitemap and robots.txt reachability
+ * VIS-SMOKE-3, VIS-SMOKE-4: Frontend apex domain sitemap and robots.txt reachability
+ * VIS-SMOKE-5: Private channel exclusion from sitemap (local-only, requires mock seed)
+ * Classification: cloud-read-only (except VIS-SMOKE-5)
  */
 
-import { BACKEND_URL, FRONTEND_URL, LOCAL_SEEDS, isCloud, localOnlyDescribe, getCloudFixture } from './env';
+import { BACKEND_URL, FRONTEND_URL, LOCAL_SEEDS, isCloud, localOnlyDescribe, localOnlyTest, getCloudFixture } from './env';
 import { login } from './helpers/auth';
 
 const serverSlug = LOCAL_SEEDS.server.slug;
@@ -35,6 +37,44 @@ describe('Visibility Smoke (cloud-read-only)', () => {
     expect(res.headers.get('content-type')).toMatch(/text\/plain/i);
     const body = await res.text();
     expect(body).toMatch(/Allow:\s*\/c\//i);
+  });
+
+  test('VIS-SMOKE-3: frontend apex sitemap index resolves and returns XML with frontend-host <loc> entries', async () => {
+    const res = await fetch(`${FRONTEND_URL}/sitemap.xml`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/xml/i);
+    const body = await res.text();
+    expect(body).toMatch(/<\?xml/i);
+    // Every <loc> must point at the frontend apex host, not the API/backend host
+    const locMatches = body.match(/<loc>([^<]+)<\/loc>/gi) ?? [];
+    expect(locMatches.length).toBeGreaterThan(0);
+    for (const loc of locMatches) {
+      expect(loc).toContain(FRONTEND_URL);
+      expect(loc).not.toContain(BACKEND_URL);
+    }
+  });
+
+  test('VIS-SMOKE-4: frontend apex robots.txt resolves with correct directives', async () => {
+    const res = await fetch(`${FRONTEND_URL}/robots.txt`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/text\/plain/i);
+    const body = await res.text();
+    expect(body).toMatch(/Allow:\s*\/c\//i);
+    expect(body).toMatch(/Disallow:\s*\/api\//i);
+    expect(body).toMatch(/Sitemap:/i);
+  });
+
+  // VIS-SMOKE-5 is local-only because staff-only is a fixture private channel
+  // present only in the mock seed (harmony-backend/src/dev/mock-seed-data.json).
+  localOnlyTest('VIS-SMOKE-5: seeded PRIVATE channel is excluded from the frontend sitemap', async () => {
+    const res = await fetch(`${FRONTEND_URL}/sitemap/${serverSlug}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/xml/i);
+    const body = await res.text();
+    expect(body).toMatch(/<\?xml/i);
+    expect(body).toMatch(/<urlset\b/i);
+    expect(body).toMatch(/<loc>/i);
+    expect(body).not.toContain(LOCAL_SEEDS.channels.private);
   });
 });
 
