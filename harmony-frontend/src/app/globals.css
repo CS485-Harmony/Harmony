@@ -4,6 +4,7 @@
 :root {
   --background: #36393f;
   --foreground: #dcddde;
+  --font-inter: 'Inter', 'Open Sans', Arial, Helvetica, sans-serif;
 }
 
 @theme inline {

@@ -1,6 +1,6 @@
-import { proxySitemapXml, SITEMAP_REVALIDATE_SECONDS } from '@/lib/sitemap-response';
+import { proxySitemapXml } from '@/lib/sitemap-response';
 
-export const revalidate = SITEMAP_REVALIDATE_SECONDS;
+export const revalidate = 300;
 
 /**
  * The crawler-facing sitemap index lives on the frontend apex host. The XML is
