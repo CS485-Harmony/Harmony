@@ -189,6 +189,37 @@ describe('channelService.getChannelBySlug', () => {
   });
 });
 
+// ─── CS-5a, CS-5b, CS-5c: getChannelByServerId ───────────────────────────────
+// Verifies the fix for issue #463: authorization scope and resource lookup are
+// bound to the same server (no cross-server bypass via slug).
+
+describe('channelService.getChannelByServerId', () => {
+  it('CS-5a: returns channel when serverId and channelSlug match', async () => {
+    const result = await channelService.getChannelByServerId(serverId, channelSlug);
+
+    expect(result.id).toBe(channelId);
+    expect(result.serverId).toBe(serverId);
+  });
+
+  it('CS-5b: throws NOT_FOUND when channelSlug does not exist in the given server', async () => {
+    await expect(
+      channelService.getChannelByServerId(serverId, 'no-such-channel'),
+    ).rejects.toThrow(
+      expect.objectContaining({ code: 'NOT_FOUND', message: 'Channel not found' }),
+    );
+  });
+
+  it('CS-5c: throws NOT_FOUND when serverId does not own the channel (cross-server guard)', async () => {
+    // channelSlug belongs to `serverId`, but we pass `emptyServerId` as the authorized server.
+    // This simulates an attacker supplying a different serverId than the one that owns the channel.
+    await expect(
+      channelService.getChannelByServerId(emptyServerId, channelSlug),
+    ).rejects.toThrow(
+      expect.objectContaining({ code: 'NOT_FOUND', message: 'Channel not found' }),
+    );
+  });
+});
+
 // ─── CS-6 through CS-13: createChannel ───────────────────────────────────────
 
 describe('channelService.createChannel', () => {
