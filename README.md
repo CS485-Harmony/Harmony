@@ -158,6 +158,37 @@ curl -L https://<your-frontend-host>/sitemap.xml
 curl -s https://<your-frontend-host>/c/<serverSlug>/<channelSlug> | rg '<title|meta name="description"|link rel="canonical"|application/ld\\+json'
 ```
 
+### 3d. Register the deployed site in Google Search Console
+
+Harmony exposes the technical SEO surface automatically, but the deployer still
+has to register the public frontend host with Google.
+
+For the current deployment, use the frontend URL:
+
+- `https://harmony-dun-omega.vercel.app`
+
+Step-by-step:
+
+1. Open Google Search Console: `https://search.google.com/search-console/about`
+2. Add a new property.
+3. For the current Vercel deployment, choose `URL-prefix` and enter:
+   - `https://harmony-dun-omega.vercel.app`
+4. Complete ownership verification in Search Console.
+   - The most practical option for a deployed web app is usually the `HTML tag`
+     method, which gives you a `google-site-verification` meta tag to place in
+     the frontend `<head>`.
+5. After verification succeeds, open the `Sitemaps` section in Search Console.
+6. Submit:
+   - `https://harmony-dun-omega.vercel.app/sitemap.xml`
+7. Confirm Google can fetch it successfully.
+8. Optionally inspect a known public channel URL, such as:
+   - `https://harmony-dun-omega.vercel.app/c/harmony-hq/general`
+9. If the page is eligible, use `Request indexing`.
+
+If the project later moves to a custom domain such as `harmony.chat`, register
+that host separately in Search Console and submit that domain's sitemap URL
+instead of the temporary `vercel.app` host.
+
 ### 3b. Server-admin override and regeneration flow
 
 Use the seeded admin account above, then open:
