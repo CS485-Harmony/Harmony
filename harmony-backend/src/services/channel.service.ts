@@ -43,6 +43,16 @@ export const channelService = {
     return channel;
   },
 
+  // Resolves by the authorized serverId directly — used by the authed tRPC endpoint
+  // so the authorization scope and resource lookup are bound to the same server.
+  async getChannelByServerId(serverId: string, channelSlug: string) {
+    const channel = await channelRepository.findByServerAndSlug(serverId, channelSlug);
+    if (!channel) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found' });
+    }
+    return channel;
+  },
+
   async createChannel(input: CreateChannelInput, tx?: Prisma.TransactionClient) {
     const { serverId, name, slug, type, visibility, topic, position = 0 } = input;
 
