@@ -117,7 +117,7 @@ function buildSitemapIndexXml(serverSlugs: string[]): string {
   const sitemaps = serverSlugs
     .map(
       (serverSlug) =>
-        `  <sitemap>\n    <loc>${escapeXml(BASE_URL)}/sitemap/${encodeURIComponent(serverSlug)}</loc>\n  </sitemap>`,
+        `  <sitemap>\n    <loc>${escapeXml(BASE_URL)}/sitemap/${encodeURIComponent(serverSlug)}.xml</loc>\n  </sitemap>`,
     )
     .join('\n');
 

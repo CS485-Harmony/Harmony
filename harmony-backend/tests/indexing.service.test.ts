@@ -86,7 +86,7 @@ describe('indexingService.generateSitemap', () => {
     expect(xml).not.toBeNull();
     expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
     expect(xml).toContain('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
-    expect(xml).toContain(`/sitemap/${serverSlug}`);
+    expect(xml).toContain(`/sitemap/${serverSlug}.xml`);
   });
 
   it('returns null for non-existent server', async () => {
@@ -207,7 +207,7 @@ describe('GET /sitemap-index.xml', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/application\/xml/);
-    expect(res.text).toContain(`/sitemap/${serverSlug}`);
+    expect(res.text).toContain(`/sitemap/${serverSlug}.xml`);
   });
 });
 
