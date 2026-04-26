@@ -123,6 +123,20 @@ Or open the page in a browser and use View Source / Elements to inspect:
 - Open Graph tags such as `og:title`, `og:description`, and `og:image`
 - JSON-LD structured data on `PUBLIC_INDEXABLE` channels
 
+### 3b. Server-admin override and regeneration flow
+
+Use the seeded admin account above, then open:
+
+- `http://localhost:3000/settings/harmony-hq/general`
+
+In the channel settings sidebar, open `SEO Preview`.
+
+- Server admins can review the generated title/description/image, set custom overrides, and save them.
+- Overrides take effect on the public page after save because the settings action revalidates `/c/harmony-hq/general`.
+- The `Regenerate Metadata` button queues an admin regeneration job on the backend, then the UI polls job status until it reaches `succeeded` or `failed`.
+- Regeneration updates the generated fields but preserves any saved custom overrides.
+- Non-admin users do not get the SEO override UI.
+
 ### 3c. How Google indexing works for Harmony
 
 Harmony already exposes the crawler-facing pieces Google expects on the public frontend host:
@@ -188,20 +202,6 @@ Step-by-step:
 If the project later moves to a custom domain such as `harmony.chat`, register
 that host separately in Search Console and submit that domain's sitemap URL
 instead of the temporary `vercel.app` host.
-
-### 3b. Server-admin override and regeneration flow
-
-Use the seeded admin account above, then open:
-
-- `http://localhost:3000/settings/harmony-hq/general`
-
-In the channel settings sidebar, open `SEO Preview`.
-
-- Server admins can review the generated title/description/image, set custom overrides, and save them.
-- Overrides take effect on the public page after save because the settings action revalidates `/c/harmony-hq/general`.
-- The `Regenerate Metadata` button queues an admin regeneration job on the backend, then the UI polls job status until it reaches `succeeded` or `failed`.
-- Regeneration updates the generated fields but preserves any saved custom overrides.
-- Non-admin users do not get the SEO override UI.
 
 ### 4. Start the app for local integration testing
 
