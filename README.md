@@ -123,6 +123,41 @@ Or open the page in a browser and use View Source / Elements to inspect:
 - Open Graph tags such as `og:title`, `og:description`, and `og:image`
 - JSON-LD structured data on `PUBLIC_INDEXABLE` channels
 
+### 3c. How Google indexing works for Harmony
+
+Harmony already exposes the crawler-facing pieces Google expects on the public frontend host:
+
+- Public channel pages are server-rendered at `/c/:serverSlug/:channelSlug`.
+- `generateMetadata` on the frontend page emits the page title, description, canonical URL, Open Graph tags, Twitter card metadata, and JSON-LD structured data.
+- `robots.txt` is served from the frontend host and advertises the sitemap at `/sitemap.xml`.
+- `sitemap.xml` and per-server sitemap routes stay on the frontend host and only include `PUBLIC_INDEXABLE` channels.
+- `PUBLIC_NO_INDEX` and `PRIVATE` channels are intentionally excluded from the indexable sitemap surface, and non-indexable pages emit `noindex` metadata instead of the normal indexable path.
+
+What Harmony does **not** do automatically is submit your site to Google on your behalf. For a real deployment, the deployer should still:
+
+1. Deploy the frontend on the final public host and set `NEXT_PUBLIC_BASE_URL` / backend `BASE_URL` to that exact host.
+2. Confirm these URLs work on the deployed frontend:
+   - `https://<your-frontend-host>/robots.txt`
+   - `https://<your-frontend-host>/sitemap.xml`
+   - `https://<your-frontend-host>/c/<serverSlug>/<channelSlug>` for at least one `PUBLIC_INDEXABLE` channel
+3. Verify that frontend host in Google Search Console.
+4. Submit `https://<your-frontend-host>/sitemap.xml` in Google Search Console's Sitemaps report.
+5. Optionally use URL Inspection / Request Indexing for important public channel pages after launch or major content changes.
+
+Important behavior notes:
+
+- A sitemap helps Google discover URLs faster, but it does not guarantee indexing.
+- Google indexes the frontend host, not the Railway API host, so canonical URLs and sitemap URLs must point at the frontend deployment.
+- `robots.txt` is not the mechanism Harmony uses to keep a page out of search results. `PUBLIC_NO_INDEX` / `PRIVATE` behavior depends on page-level `noindex` metadata and sitemap exclusion.
+
+Quick deploy-time smoke check:
+
+```bash
+curl -L https://<your-frontend-host>/robots.txt
+curl -L https://<your-frontend-host>/sitemap.xml
+curl -s https://<your-frontend-host>/c/<serverSlug>/<channelSlug> | rg '<title|meta name="description"|link rel="canonical"|application/ld\\+json'
+```
+
 ### 3b. Server-admin override and regeneration flow
 
 Use the seeded admin account above, then open:
