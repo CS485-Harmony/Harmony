@@ -8,8 +8,8 @@ interface RouteContext {
 
 /**
  * Per-server sitemap entrypoints stay on the frontend host and proxy the
- * backend XML generator at request time so crawlers never need the API domain
- * as the primary SEO surface.
+ * backend XML generator through a revalidated frontend cache so crawlers never
+ * need the API domain as the primary SEO surface.
  */
 export async function GET(request: Request, context?: RouteContext) {
   const params = await context?.params;
