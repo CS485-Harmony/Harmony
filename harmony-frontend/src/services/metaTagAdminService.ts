@@ -97,7 +97,7 @@ export async function updateMetaTagOverrides(
 
 export async function triggerMetaTagRegeneration(channelId: string): Promise<MetaTagJobAccepted> {
   return requestJson<MetaTagJobAccepted>(
-    `/api/admin/channels/${encodeURIComponent(channelId)}/meta-tags`,
+    `/api/admin/channels/${encodeURIComponent(channelId)}/meta-tags/jobs`,
     {
       method: 'POST',
     },
