@@ -67,7 +67,7 @@ describe('Visibility Smoke (cloud-read-only)', () => {
   // VIS-SMOKE-5 is local-only because staff-only is a fixture private channel
   // present only in the mock seed (harmony-backend/src/dev/mock-seed-data.json).
   localOnlyTest('VIS-SMOKE-5: seeded PRIVATE channel is excluded from the frontend sitemap', async () => {
-    const res = await fetch(`${FRONTEND_URL}/sitemap/${serverSlug}`);
+    const res = await fetch(`${FRONTEND_URL}/sitemap/${serverSlug}.xml`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toMatch(/xml/i);
     const body = await res.text();
