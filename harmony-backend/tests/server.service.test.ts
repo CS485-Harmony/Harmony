@@ -25,6 +25,7 @@ jest.mock('../src/db/prisma', () => {
     },
     serverMember: {
       findMany: jest.fn(),
+      findUnique: jest.fn(),
     },
   };
   return {
@@ -74,6 +75,7 @@ const mockServer = prisma.server as unknown as {
 
 const mockServerMember = prisma.serverMember as unknown as {
   findMany: jest.Mock;
+  findUnique: jest.Mock;
 };
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
@@ -284,17 +286,48 @@ describe('serverService.getMemberServers', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('serverService.getServer', () => {
-  it('returns the matching server for a known slug', async () => {
-    const server = makeServer();
-    mockServer.findUnique.mockResolvedValue(server);
-    const result = await serverService.getServer('test-server');
-    expect(result).toEqual(server);
-    expect(mockServer.findUnique).toHaveBeenCalledWith({ where: { slug: 'test-server' } });
+  beforeEach(() => {
+    (isSystemAdmin as jest.Mock).mockResolvedValue(false);
+    mockServerMember.findUnique.mockResolvedValue(null);
   });
 
-  it('returns null for an unknown slug', async () => {
+  it('returns the server when public (non-member)', async () => {
+    const server = makeServer({ isPublic: true });
+    mockServer.findUnique.mockResolvedValue(server);
+    const result = await serverService.getServer('test-server', 'stranger-1');
+    expect(result).toEqual(server);
+  });
+
+  it('returns the server when private and user is a member', async () => {
+    const server = makeServer({ isPublic: false });
+    mockServer.findUnique.mockResolvedValue(server);
+    mockServerMember.findUnique.mockResolvedValue({ role: 'MEMBER' });
+    const result = await serverService.getServer('test-server', 'member-1');
+    expect(result).toEqual(server);
+  });
+
+  it('returns the server when private and user is a system admin', async () => {
+    const server = makeServer({ isPublic: false });
+    mockServer.findUnique.mockResolvedValue(server);
+    (isSystemAdmin as jest.Mock).mockResolvedValue(true);
+    const result = await serverService.getServer('test-server', 'admin-1');
+    expect(result).toEqual(server);
+  });
+
+  it('throws NOT_FOUND when private and user is not a member', async () => {
+    const server = makeServer({ isPublic: false });
+    mockServer.findUnique.mockResolvedValue(server);
+    mockServerMember.findUnique.mockResolvedValue(null);
+    await expect(serverService.getServer('test-server', 'stranger-1')).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('throws NOT_FOUND for an unknown slug', async () => {
     mockServer.findUnique.mockResolvedValue(null);
-    expect(await serverService.getServer('nonexistent')).toBeNull();
+    await expect(serverService.getServer('nonexistent', 'user-1')).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
   });
 });
 

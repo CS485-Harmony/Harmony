@@ -122,15 +122,49 @@ describe('serverService (integration)', () => {
   });
 
   describe('serverService.getServer', () => {
-    it('returns the server by slug', async () => {
-      const server = await serverService.getServer('my-test-server');
-      expect(server).not.toBeNull();
-      expect(server!.id).toBe(createdServerId);
+    it('returns the server by slug for a member', async () => {
+      const server = await serverService.getServer('my-test-server', ownerUserId);
+      expect(server.id).toBe(createdServerId);
     });
 
-    it('returns null for unknown slug', async () => {
-      const server = await serverService.getServer('no-such-server-xyz');
-      expect(server).toBeNull();
+    it('returns the server by slug for a non-member when public', async () => {
+      const server = await serverService.getServer('my-test-server', otherUserId);
+      expect(server.id).toBe(createdServerId);
+    });
+
+    it('throws NOT_FOUND for unknown slug', async () => {
+      await expect(serverService.getServer('no-such-server-xyz', ownerUserId)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+    });
+
+    it('throws NOT_FOUND for private server when non-member requests it', async () => {
+      const privateServer = await serverService.createServer({
+        name: `Private ${Date.now()}`,
+        ownerId: ownerUserId,
+        isPublic: false,
+      });
+      try {
+        await expect(
+          serverService.getServer(privateServer.slug, otherUserId),
+        ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      } finally {
+        await prisma.server.delete({ where: { id: privateServer.id } }).catch(() => {});
+      }
+    });
+
+    it('returns private server data when the requester is a member', async () => {
+      const privateServer = await serverService.createServer({
+        name: `PrivateMember ${Date.now()}`,
+        ownerId: ownerUserId,
+        isPublic: false,
+      });
+      try {
+        const result = await serverService.getServer(privateServer.slug, ownerUserId);
+        expect(result.id).toBe(privateServer.id);
+      } finally {
+        await prisma.server.delete({ where: { id: privateServer.id } }).catch(() => {});
+      }
     });
   });
 
@@ -243,6 +277,42 @@ describe('server tRPC router', () => {
       '/trpc/server.getServer?input=%7B%22slug%22%3A%22some-server%22%7D',
     );
     expect(res.status).toBe(401);
+  });
+
+  it('server.getServer returns NOT_FOUND for private server when requester is not a member', async () => {
+    const prismaLocal = new PrismaClient();
+    const ts = Date.now();
+    const { accessToken } = await authService.register(
+      `getserver-nonmember-${ts}@example.com`,
+      `gs_nonmember_${ts}`,
+      TEST_PASSWORD_SALT,
+      derivePasswordVerifier('password123'),
+    );
+    const owner = await prismaLocal.user.create({
+      data: {
+        email: `getserver-owner-${ts}@example.com`,
+        username: `gs_owner_${ts}`,
+        passwordHash: '$2a$12$placeholderHashForTestingOnly000000000000000000000000000',
+        displayName: 'GS Owner',
+      },
+    });
+    const privateServer = await prismaLocal.server.create({
+      data: { name: `Private ${ts}`, slug: `private-${ts}`, ownerId: owner.id, isPublic: false },
+    });
+
+    const input = encodeURIComponent(JSON.stringify({ slug: privateServer.slug }));
+    const res = await request(app)
+      .get(`/trpc/server.getServer?input=${input}`)
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(res.status).toBe(404);
+
+    await prismaLocal.server.delete({ where: { id: privateServer.id } }).catch(() => {});
+    const nonMember = await prismaLocal.user.findUnique({
+      where: { email: `getserver-nonmember-${ts}@example.com` },
+    });
+    if (nonMember) await prismaLocal.user.delete({ where: { id: nonMember.id } }).catch(() => {});
+    await prismaLocal.user.delete({ where: { id: owner.id } }).catch(() => {});
+    await prismaLocal.$disconnect();
   });
 
   it('server.getServers requires authentication', async () => {

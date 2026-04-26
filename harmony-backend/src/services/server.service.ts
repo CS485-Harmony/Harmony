@@ -100,8 +100,16 @@ export const serverService = {
     return memberships.map((m) => m.server);
   },
 
-  async getServer(slug: string): Promise<Server | null> {
-    return serverRepository.findBySlug(slug);
+  async getServer(slug: string, userId: string): Promise<Server> {
+    const server = await serverRepository.findBySlug(slug);
+    if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
+
+    if (!server.isPublic && !(await isSystemAdmin(userId))) {
+      const membership = await serverMemberRepository.findByUserAndServerSelect(userId, server.id);
+      if (!membership) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
+    }
+
+    return server;
   },
 
   async createServer(input: {

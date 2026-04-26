@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, withPermission } from '../init';
 import { serverService } from '../../services/server.service';
 import { isSystemAdmin } from '../../lib/admin.utils';
@@ -16,10 +15,8 @@ export const serverRouter = router({
 
   getServer: authedProcedure
     .input(z.object({ slug: z.string().min(1) }))
-    .query(async ({ input }) => {
-      const server = await serverService.getServer(input.slug);
-      if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
-      return server;
+    .query(async ({ input, ctx }) => {
+      return serverService.getServer(input.slug, ctx.userId);
     }),
 
   createServer: authedProcedure
