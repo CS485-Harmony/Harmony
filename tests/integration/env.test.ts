@@ -37,6 +37,7 @@ describe('getCloudFixture cache behavior', () => {
       serverId: 'server-1',
       serverSlug: 'harmony-hq',
       publicChannel: 'general',
+      publicChannels: ['general'],
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -73,13 +74,48 @@ describe('getCloudFixture cache behavior', () => {
         serverId: 'server-1',
         serverSlug: 'harmony-hq',
         publicChannel: 'general',
+        publicChannels: ['general'],
       },
       {
         serverId: 'server-1',
         serverSlug: 'harmony-hq',
         publicChannel: 'general',
+        publicChannels: ['general'],
       },
     ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('discovers up to 3 channels and populates publicChannels', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: 'server-1', slug: 'harmony-hq' }]), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            channels: [
+              { slug: 'general' },
+              { slug: 'announcements' },
+              { slug: 'dev-updates' },
+              { slug: 'fourth-channel' }, // should be truncated to 3
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+    global.fetch = fetchMock;
+
+    const { getCloudFixture } = await loadCloudEnvModule();
+
+    await expect(getCloudFixture()).resolves.toEqual({
+      serverId: 'server-1',
+      serverSlug: 'harmony-hq',
+      publicChannel: 'general',
+      publicChannels: ['general', 'announcements', 'dev-updates'],
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
