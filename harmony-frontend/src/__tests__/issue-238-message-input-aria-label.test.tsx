@@ -99,4 +99,21 @@ describe('Issue #238 — MessageInput: textarea aria-label accessibility', () =>
       expect(textarea).toHaveFocus();
     });
   });
+
+  it('restores textarea focus after send failure', async () => {
+    mockSendMessageAction.mockRejectedValueOnce(new Error('network failure'));
+
+    render(<MessageInput {...defaultProps} />);
+
+    const textarea = screen.getByRole('textbox', { name: 'Message #general' });
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: 'hello world' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => {
+      expect(mockSendMessageAction).toHaveBeenCalledTimes(1);
+      expect(textarea).toHaveFocus();
+      expect(screen.getByRole('alert')).toHaveTextContent(/failed to send message/i);
+    });
+  });
 });

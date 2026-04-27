@@ -72,6 +72,7 @@ export function MessageInput({
     setSendError(null);
     setPendingAttachments([]);
     setShowEmojiPicker(false);
+    shouldRefocusTextareaRef.current = false;
     textareaRef.current?.focus();
   }, [channelId]);
 
@@ -116,6 +117,7 @@ export function MessageInput({
 
     setIsUploading(true);
     setSendError(null);
+    shouldRefocusTextareaRef.current = true;
 
     try {
       const formData = new FormData();
@@ -146,7 +148,6 @@ export function MessageInput({
       setSendError('Upload failed. Please try again.');
     } finally {
       setIsUploading(false);
-      textareaRef.current?.focus();
     }
   }, []);
 
