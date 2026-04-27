@@ -118,6 +118,22 @@ export async function sendMessage(
 }
 
 /**
+ * Edits a message's content via tRPC. Returns the updated message.
+ */
+export async function editMessage(
+  messageId: string,
+  serverId: string,
+  content: string,
+): Promise<Message> {
+  const data = await trpcMutate<Record<string, unknown>>('message.editMessage', {
+    serverId,
+    messageId,
+    content,
+  });
+  return toFrontendMessage(data);
+}
+
+/**
  * Deletes a message by ID via tRPC. Returns true if deleted.
  */
 export async function deleteMessage(id: string, serverId?: string): Promise<boolean> {
