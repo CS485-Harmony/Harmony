@@ -320,6 +320,14 @@ export function HarmonyShell({
     [],
   );
 
+  const handleOwnPresenceChanged = useCallback(
+    (status: Extract<UserStatus, 'online' | 'idle'>) => {
+      if (!authUser?.id) return;
+      setLocalMembers(prev => prev.map(m => (m.id === authUser.id ? { ...m, status } : m)));
+    },
+    [authUser],
+  );
+
   // ── Real-time visibility changes ──────────────────────────────────────────
 
   const handleChannelVisibilityChanged = useCallback(
@@ -383,7 +391,7 @@ export function HarmonyShell({
     enabled: isAuthenticated,
   });
 
-  usePresenceTracker(isAuthenticated);
+  usePresenceTracker(isAuthenticated, handleOwnPresenceChanged);
 
   // #c10/#c23: single global Ctrl+K / Cmd+K handler — SearchModal no longer needs its own
   useEffect(() => {

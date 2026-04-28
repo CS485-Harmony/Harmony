@@ -114,4 +114,19 @@ describe('usePresenceTracker', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
+
+  it('reports local status changes immediately for optimistic UI updates', () => {
+    const onStatusChanged = jest.fn();
+
+    renderHook(() => usePresenceTracker(true, onStatusChanged));
+
+    act(() => {
+      jest.advanceTimersByTime(5 * 60 * 1000);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }));
+    });
+
+    expect(onStatusChanged).toHaveBeenNthCalledWith(1, 'online');
+    expect(onStatusChanged).toHaveBeenNthCalledWith(2, 'idle');
+    expect(onStatusChanged).toHaveBeenNthCalledWith(3, 'online');
+  });
 });
