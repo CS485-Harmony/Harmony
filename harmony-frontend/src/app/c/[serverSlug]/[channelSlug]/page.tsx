@@ -12,6 +12,18 @@ interface PageProps {
   params: Promise<{ serverSlug: string; channelSlug: string }>;
 }
 
+function sanitizeMetadataLabel(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map(segment => segment.trim())
+    .filter(segment => segment.length > 0 && segment !== '.' && segment !== '..')
+    .join(' / ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function getSeoContent(
   serverSlug: string,
   channelSlug: string,
@@ -20,8 +32,10 @@ function getSeoContent(
   publicMetaTags: Awaited<ReturnType<typeof fetchPublicMetaTags>>,
 ) {
   const channel = channelResult && !channelResult.isPrivate ? channelResult.channel : null;
-  const channelName = channel?.name ?? channelSlug;
-  const serverName = server?.name ?? serverSlug;
+  const channelName =
+    sanitizeMetadataLabel(channel?.name ?? '') || sanitizeMetadataLabel(channelSlug) || 'channel';
+  const serverName =
+    sanitizeMetadataLabel(server?.name ?? '') || sanitizeMetadataLabel(serverSlug) || 'server';
   const title = publicMetaTags?.title ?? `${channelName} - ${serverName} | Harmony`;
   const description =
     publicMetaTags?.description ??

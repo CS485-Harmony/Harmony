@@ -192,6 +192,31 @@ describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
       },
     });
   });
+
+  it('sanitizes path-like server names before building fallback metadata', async () => {
+    mockFetchPublicServer.mockResolvedValue(
+      makeServer({
+        name: '../../../admin',
+      }),
+    );
+
+    const meta = await generateMetadata(makeParams('admin', 'general'));
+    const page = await GuestChannelPage(makeParams('admin', 'general'));
+    const html = renderToStaticMarkup(page);
+    const ldMatch = html.match(/<script[^>]+type="application\/ld\+json">([\s\S]*?)<\/script>/i);
+
+    expect(meta.title).toBe('general - admin | Harmony');
+    expect(meta.description).toBe('Welcome to general');
+    expect(ldMatch).not.toBeNull();
+    expect(JSON.parse(ldMatch![1])).toMatchObject({
+      author: {
+        '@type': 'Organization',
+        'name': 'admin',
+      },
+      name: 'general - admin | Harmony',
+      headline: 'general - admin | Harmony',
+    });
+  });
 });
 
 describe('generateMetadata — PUBLIC_NO_INDEX channel', () => {

@@ -97,6 +97,11 @@ describe('TitleGenerator', () => {
     expect(result).toBe('foo bar baz');
   });
 
+  it('sanitizeForTitle removes dot-segment path prefixes', () => {
+    const result = TitleGenerator.sanitizeForTitle('../../../admin');
+    expect(result).toBe('admin');
+  });
+
   it('applyTemplate replaces template variables', () => {
     const result = TitleGenerator.applyTemplate('{channelName} on {serverName}', {
       channelName: 'general',
