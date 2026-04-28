@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
+import { sanitizeDisplayLabel } from '@/lib/utils';
 import type { Server } from '@/types';
 
 type PublicServer = Omit<Server, 'ownerId'>;
@@ -11,6 +12,7 @@ export function GuestHeader({ server }: { server: PublicServer }) {
   const { isAuthenticated } = useAuth();
   const pathname = usePathname();
   const returnUrl = encodeURIComponent(pathname);
+  const safeServerName = sanitizeDisplayLabel(server.name) || 'Server';
 
   return (
     <header className='flex h-14 shrink-0 items-center gap-3 border-b border-black/20 bg-[#2f3136] px-4'>
@@ -23,7 +25,9 @@ export function GuestHeader({ server }: { server: PublicServer }) {
       </span>
 
       {/* Server name — min-w-0 flex-1 prevents overflow when CTAs are present */}
-      <span className='min-w-0 flex-1 truncate text-sm font-semibold text-white'>{server.name}</span>
+      <span className='min-w-0 flex-1 truncate text-sm font-semibold text-white'>
+        {safeServerName}
+      </span>
 
       {/* Auth CTAs — hidden for authenticated users (e.g. non-member 403 path) */}
       {!isAuthenticated && (

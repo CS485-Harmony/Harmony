@@ -7,6 +7,7 @@ import {
   formatTimeOnly,
   getChannelUrl,
   getUserErrorMessage,
+  sanitizeDisplayLabel,
   truncate,
 } from '../lib/utils';
 
@@ -155,6 +156,20 @@ describe('utils', () => {
 
     it('adds an ellipsis when the text exceeds the limit', () => {
       expect(truncate('hello world', 5)).toBe('hello...');
+    });
+  });
+
+  describe('sanitizeDisplayLabel', () => {
+    it('removes dot-segment path prefixes', () => {
+      expect(sanitizeDisplayLabel('../../../admin')).toBe('admin');
+    });
+
+    it('normalizes slash-separated names without preserving traversal segments', () => {
+      expect(sanitizeDisplayLabel(' ../ community // general ')).toBe('community / general');
+    });
+
+    it('strips HTML and collapses whitespace', () => {
+      expect(sanitizeDisplayLabel('<b>Game</b>   Dev\nHub')).toBe('Game Dev Hub');
     });
   });
 

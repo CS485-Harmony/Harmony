@@ -43,7 +43,12 @@ export const TitleGenerator: IMetaTagGenerator & {
 
   sanitizeForTitle(text: string): string {
     return text
-      .replace(/<[^>]*>/g, '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\\/g, '/')
+      .split('/')
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+      .join(' / ')
       .replace(/\s+/g, ' ')
       .trim();
   },
