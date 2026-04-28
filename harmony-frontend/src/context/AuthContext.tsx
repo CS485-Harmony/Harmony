@@ -6,6 +6,7 @@ import type { User } from '@/types';
 import * as authService from '@/services/authService';
 import { getAccessToken } from '@/lib/api-client';
 import { setSessionCookie, clearSessionCookie } from '@/app/actions/session';
+import { usePresenceTracker } from '@/hooks/usePresenceTracker';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setLocalUserStatus = useCallback((status: User['status']) => {
     setUser(prev => (prev ? { ...prev, status } : prev));
   }, []);
+
+  // Keep presence tracking mounted for every authenticated view, including
+  // settings pages that render outside HarmonyShell. This lets active sessions
+  // establish ONLINE/IDLE state without fabricating it from persisted OFFLINE.
+  usePresenceTracker(authService.shouldEnablePresenceTracking(user), setLocalUserStatus);
 
   const isAdmin = useCallback(
     (serverOwnerId?: string) => {

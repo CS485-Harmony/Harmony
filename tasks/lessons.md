@@ -21,6 +21,12 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 **Date:** 2026-04-28  
 **Caught by:** [Human: user]  
 **Related Issue:** N/A  
+**Mistake / Situation:** I fixed the current user's status mismatch by coercing backend `offline` to `online`, which hid the real difference between an active session and an expired presence lease.  
+**Rule / Fix:** In Harmony, do not fake `online` from a persisted backend `offline` value; establish live presence from a mounted authenticated-session tracker, and let expired leases stay `offline` in member lists.
+
+**Date:** 2026-04-28  
+**Caught by:** [Human: user]  
+**Related Issue:** N/A  
 **Mistake / Situation:** I let the current user's manual status shown in settings diverge from the sidebar presence state, and I treated the backend's default `OFFLINE` value as a real user choice.  
 **Rule / Fix:** In Harmony, the signed-in user's settings view and sidebar row must share the same effective status source; treat the database default `OFFLINE` status as `ONLINE` for the active session unless the user explicitly saved a manual override such as `dnd` or `offline`.
 

@@ -16,7 +16,13 @@ jest.mock('@/lib/passwordAuth', () => ({
 
 import { apiClient, getAccessToken, setTokens } from '@/lib/api-client';
 import { derivePasswordVerifier } from '@/lib/passwordAuth';
-import { getCurrentUser, login, register, updateCurrentUser } from '@/services/authService';
+import {
+  getCurrentUser,
+  login,
+  register,
+  shouldEnablePresenceTracking,
+  updateCurrentUser,
+} from '@/services/authService';
 
 const mockedApiClient = jest.mocked(apiClient);
 const mockedGetAccessToken = jest.mocked(getAccessToken);
@@ -102,7 +108,7 @@ describe('authService password transport hardening', () => {
     });
   });
 
-  it('treats the backend default OFFLINE status as ONLINE for the current user', async () => {
+  it('preserves backend OFFLINE until live presence tracking marks the session online', async () => {
     mockedGetAccessToken.mockReturnValue('access');
     mockedApiClient.trpcQuery.mockResolvedValueOnce({
       id: 'user-1',
@@ -118,7 +124,7 @@ describe('authService password transport hardening', () => {
 
     const user = await getCurrentUser();
 
-    expect(user?.status).toBe('online');
+    expect(user?.status).toBe('offline');
   });
 
   it('persists manual offline override when saving settings', async () => {
@@ -158,5 +164,19 @@ describe('authService password transport hardening', () => {
 
     expect(updated.status).toBe('online');
     expect(window.localStorage.getItem('harmony_manual_status:user-1')).toBeNull();
+  });
+
+  it('enables presence tracking for active users even when the backend still says offline', () => {
+    expect(shouldEnablePresenceTracking({ id: 'user-1', status: 'offline' })).toBe(true);
+  });
+
+  it('disables presence tracking when the current browser stored an offline override', () => {
+    window.localStorage.setItem('harmony_manual_status:user-1', 'offline');
+
+    expect(shouldEnablePresenceTracking({ id: 'user-1', status: 'offline' })).toBe(false);
+  });
+
+  it('disables presence tracking for dnd status', () => {
+    expect(shouldEnablePresenceTracking({ id: 'user-1', status: 'dnd' })).toBe(false);
   });
 });
