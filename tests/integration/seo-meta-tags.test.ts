@@ -24,11 +24,9 @@ import { login } from './helpers/auth';
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function extractMetaContent(html: string, name: string): string | null {
-  const m = html.match(
-    new RegExp(`<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']+)["']`, 'i'),
-  ) ?? html.match(
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${name}["']`, 'i'),
-  );
+  const m =
+    html.match(new RegExp(`<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']+)["']`, 'i')) ??
+    html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${name}["']`, 'i'));
   return m?.[1] ?? null;
 }
 
@@ -38,9 +36,7 @@ function extractTitle(html: string): string | null {
 }
 
 function extractJsonLd(html: string): Record<string, unknown> | null {
-  const m = html.match(
-    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i,
-  );
+  const m = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i);
   if (!m) return null;
   try {
     return JSON.parse(m[1]) as Record<string, unknown>;
@@ -72,9 +68,21 @@ const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/;
 const PHONE_RE = /(?:\+?\d[\d\s\-().]{6,}\d)/;
 const MENTION_RE = /@[\w.]+/;
 const PROFANITY_LIST = [
-  'fuck', 'shit', 'ass', 'bitch', 'bastard', 'crap', 'cunt',
-  'dick', 'piss', 'cock', 'pussy', 'asshole', 'bullshit',
-  'damn', 'hell',
+  'fuck',
+  'shit',
+  'ass',
+  'bitch',
+  'bastard',
+  'crap',
+  'cunt',
+  'dick',
+  'piss',
+  'cock',
+  'pussy',
+  'asshole',
+  'bullshit',
+  'damn',
+  'hell',
 ];
 const PROFANITY_RE = new RegExp(`\\b(${PROFANITY_LIST.join('|')})\\b`, 'i');
 
@@ -83,12 +91,18 @@ const PROFANITY_RE = new RegExp(`\\b(${PROFANITY_LIST.join('|')})\\b`, 'i');
 describe('SEO Meta Tags — cloud-read-only', () => {
   let serverSlug: string = LOCAL_SEEDS.server.slug;
   let channels: readonly string[] = LOCAL_SEEDS.channels.publicIndexableAll;
+  let crawlerTargets: ReadonlyArray<{ serverSlug: string; channelSlug: string }> =
+    LOCAL_SEEDS.channels.publicIndexableAll.map((channelSlug) => ({
+      serverSlug: LOCAL_SEEDS.server.slug,
+      channelSlug,
+    }));
 
   beforeAll(async () => {
     if (!isCloud) return;
     const fixture = await getCloudFixture();
     serverSlug = fixture.serverSlug;
     channels = fixture.publicChannels;
+    crawlerTargets = fixture.publicChannelTargets;
   });
 
   /**
@@ -112,22 +126,23 @@ describe('SEO Meta Tags — cloud-read-only', () => {
         expect((desc ?? '').length).toBeGreaterThan(0);
       });
     } else {
-      test.each(
-        LOCAL_SEEDS.channels.publicIndexableAll.map((c) => [c]),
-      )('AC-1: channel "%s" has non-empty <title> and description meta', async (channelSlug) => {
-        const slug = channelSlug as string;
-        const res = await fetch(`${FRONTEND_URL}/c/${serverSlug}/${slug}`);
-        expect(res.status).toBe(200);
-        const html = await res.text();
+      test.each(LOCAL_SEEDS.channels.publicIndexableAll.map((c) => [c]))(
+        'AC-1: channel "%s" has non-empty <title> and description meta',
+        async (channelSlug) => {
+          const slug = channelSlug as string;
+          const res = await fetch(`${FRONTEND_URL}/c/${serverSlug}/${slug}`);
+          expect(res.status).toBe(200);
+          const html = await res.text();
 
-        const title = extractTitle(html);
-        expect(title).not.toBeNull();
-        expect((title ?? '').length).toBeGreaterThan(0);
+          const title = extractTitle(html);
+          expect(title).not.toBeNull();
+          expect((title ?? '').length).toBeGreaterThan(0);
 
-        const desc = extractMetaContent(html, 'description');
-        expect(desc).not.toBeNull();
-        expect((desc ?? '').length).toBeGreaterThan(0);
-      });
+          const desc = extractMetaContent(html, 'description');
+          expect(desc).not.toBeNull();
+          expect((desc ?? '').length).toBeGreaterThan(0);
+        },
+      );
     }
   });
 
@@ -140,11 +155,13 @@ describe('SEO Meta Tags — cloud-read-only', () => {
    * In local mode each seed channel runs as a separate test.each case.
    */
   describe('Crawler-UA: Googlebot sees SEO tags and valid JSON-LD', () => {
-    async function assertCrawlerUa(slug: string): Promise<void> {
-      const res = await fetch(`${FRONTEND_URL}/c/${serverSlug}/${slug}`, {
+    async function assertCrawlerUa(target: {
+      serverSlug: string;
+      channelSlug: string;
+    }): Promise<void> {
+      const res = await fetch(`${FRONTEND_URL}/c/${target.serverSlug}/${target.channelSlug}`, {
         headers: {
-          'User-Agent':
-            'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+          'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
         },
       });
       expect(res.status).toBe(200);
@@ -166,21 +183,22 @@ describe('SEO Meta Tags — cloud-read-only', () => {
     }
 
     if (isCloud) {
-      test(
-        'Crawler-UA: Googlebot fetches ≥3 cloud public channels with SEO tags and JSON-LD',
-        async () => {
-          expect(channels.length).toBeGreaterThanOrEqual(3);
-          for (const slug of channels) {
-            await assertCrawlerUa(slug);
-          }
+      test('Crawler-UA: Googlebot fetches ≥3 cloud public channels with SEO tags and JSON-LD', async () => {
+        expect(crawlerTargets.length).toBeGreaterThanOrEqual(3);
+        for (const target of crawlerTargets) {
+          await assertCrawlerUa(target);
+        }
+      });
+    } else {
+      test.each(LOCAL_SEEDS.channels.publicIndexableAll.map((c) => [c]))(
+        'Googlebot fetch of "%s" returns title, description, and JSON-LD',
+        async (channelSlug) => {
+          await assertCrawlerUa({
+            serverSlug,
+            channelSlug: channelSlug as string,
+          });
         },
       );
-    } else {
-      test.each(
-        LOCAL_SEEDS.channels.publicIndexableAll.map((c) => [c]),
-      )('Googlebot fetch of "%s" returns title, description, and JSON-LD', async (channelSlug) => {
-        await assertCrawlerUa(channelSlug as string);
-      });
     }
   });
 
@@ -272,7 +290,8 @@ localOnlyDescribe('SEO Meta Tags — local-only (write path)', () => {
     accessToken = tokens.accessToken;
 
     const serverRes = await fetch(`${BACKEND_URL}/api/public/servers/${serverSlug}`);
-    if (!serverRes.ok) throw new Error(`Could not fetch server ${serverSlug}: HTTP ${serverRes.status}`);
+    if (!serverRes.ok)
+      throw new Error(`Could not fetch server ${serverSlug}: HTTP ${serverRes.status}`);
     const serverBody = (await serverRes.json()) as { id?: string };
     if (!serverBody.id) throw new Error('Could not resolve serverId for harmony-hq');
     serverId = serverBody.id;
@@ -280,7 +299,10 @@ localOnlyDescribe('SEO Meta Tags — local-only (write path)', () => {
     const channelRes = await fetch(
       `${BACKEND_URL}/api/public/servers/${serverSlug}/channels/${LOCAL_SEEDS.channels.publicIndexable}`,
     );
-    if (!channelRes.ok) throw new Error(`Could not fetch channel ${LOCAL_SEEDS.channels.publicIndexable}: HTTP ${channelRes.status}`);
+    if (!channelRes.ok)
+      throw new Error(
+        `Could not fetch channel ${LOCAL_SEEDS.channels.publicIndexable}: HTTP ${channelRes.status}`,
+      );
     const channelBody = (await channelRes.json()) as { id?: string };
     if (!channelBody.id) throw new Error('Could not resolve channelId for general channel');
     channelId = channelBody.id;
@@ -417,26 +439,21 @@ localOnlyDescribe('SEO Meta Tags — local-only (write path)', () => {
     expect(['queued', 'processing', 'succeeded', 'failed']).toContain(job.status);
   });
 
-  test(
-    'AC-5: job eventually reaches terminal state (succeeded or failed)',
-    async () => {
-      const postRes = await postRegenJob();
-      expect(postRes.status).toBe(202);
-      const { jobId } = (await postRes.json()) as { jobId: string };
+  test('AC-5: job eventually reaches terminal state (succeeded or failed)', async () => {
+    const postRes = await postRegenJob();
+    expect(postRes.status).toBe(202);
+    const { jobId } = (await postRes.json()) as { jobId: string };
 
-      const job = await pollUntil(
-        () =>
-          fetch(
-            `${BACKEND_URL}/api/admin/channels/${channelId}/meta-tags/jobs/${jobId}`,
-            { headers: { Authorization: `Bearer ${accessToken}` } },
-          ).then((r) => r.json() as Promise<{ status?: string }>),
-        (j) => j.status === 'succeeded' || j.status === 'failed',
-        { timeoutMs: 10000 },
-      );
-      expect(['succeeded', 'failed']).toContain(job.status);
-    },
-    15000,
-  );
+    const job = await pollUntil(
+      () =>
+        fetch(`${BACKEND_URL}/api/admin/channels/${channelId}/meta-tags/jobs/${jobId}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }).then((r) => r.json() as Promise<{ status?: string }>),
+      (j) => j.status === 'succeeded' || j.status === 'failed',
+      { timeoutMs: 10000 },
+    );
+    expect(['succeeded', 'failed']).toContain(job.status);
+  }, 15000);
 
   /**
    * AC-6: Idempotency key deduplicates repeated regenerate requests within 60s.
@@ -459,44 +476,38 @@ localOnlyDescribe('SEO Meta Tags — local-only (write path)', () => {
   /**
    * AC-7: Custom overrides are never overwritten by background regeneration.
    */
-  test(
-    'AC-7: custom override persists after a completed background regeneration job',
-    async () => {
-      const markerTitle = 'AC7-Custom-Override-Test';
+  test('AC-7: custom override persists after a completed background regeneration job', async () => {
+    const markerTitle = 'AC7-Custom-Override-Test';
 
-      // Set a custom override
-      const putRes = await putMetaTagOverrides({ customTitle: markerTitle });
-      expect(putRes.status).toBe(200);
+    // Set a custom override
+    const putRes = await putMetaTagOverrides({ customTitle: markerTitle });
+    expect(putRes.status).toBe(200);
 
-      // Trigger regeneration
-      const postRes = await postRegenJob();
-      expect(postRes.status).toBe(202);
-      const { jobId } = (await postRes.json()) as { jobId: string };
+    // Trigger regeneration
+    const postRes = await postRegenJob();
+    expect(postRes.status).toBe(202);
+    const { jobId } = (await postRes.json()) as { jobId: string };
 
-      // Wait for job to reach terminal state
-      await pollUntil(
-        () =>
-          fetch(
-            `${BACKEND_URL}/api/admin/channels/${channelId}/meta-tags/jobs/${jobId}`,
-            { headers: { Authorization: `Bearer ${accessToken}` } },
-          ).then((r) => r.json() as Promise<{ status?: string }>),
-        (j) => j.status === 'succeeded' || j.status === 'failed',
-        { timeoutMs: 10000 },
-      );
+    // Wait for job to reach terminal state
+    await pollUntil(
+      () =>
+        fetch(`${BACKEND_URL}/api/admin/channels/${channelId}/meta-tags/jobs/${jobId}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }).then((r) => r.json() as Promise<{ status?: string }>),
+      (j) => j.status === 'succeeded' || j.status === 'failed',
+      { timeoutMs: 10000 },
+    );
 
-      // Verify custom override is still present
-      const getRes = await fetch(
-        `${BACKEND_URL}/api/admin/channels/${channelId}/meta-tags`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
-      );
-      expect(getRes.status).toBe(200);
-      const meta = (await getRes.json()) as { customTitle?: string | null; title?: string };
-      expect(meta.customTitle).toBe(markerTitle);
-      // The effective title should reflect the override
-      expect(meta.title).toBe(markerTitle);
-    },
-    15000,
-  );
+    // Verify custom override is still present
+    const getRes = await fetch(`${BACKEND_URL}/api/admin/channels/${channelId}/meta-tags`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(getRes.status).toBe(200);
+    const meta = (await getRes.json()) as { customTitle?: string | null; title?: string };
+    expect(meta.customTitle).toBe(markerTitle);
+    // The effective title should reflect the override
+    expect(meta.title).toBe(markerTitle);
+  }, 15000);
 
   /**
    * AC-9: On NLP failure/timeout, fallback tags are returned and
@@ -518,43 +529,38 @@ localOnlyDescribe('SEO Meta Tags — local-only (write path)', () => {
    *
    * Both ACs are verified together via the visibility change integration path.
    */
-  test(
-    'AC-4/AC-10: changing channel to PRIVATE removes it from meta-tags public API and sitemap',
-    async () => {
-      // Ensure the channel starts PUBLIC_INDEXABLE
-      const setRes = await setVisibility('PUBLIC_INDEXABLE');
-      expect(setRes.ok).toBe(true);
+  test('AC-4/AC-10: changing channel to PRIVATE removes it from meta-tags public API and sitemap', async () => {
+    // Ensure the channel starts PUBLIC_INDEXABLE
+    const setRes = await setVisibility('PUBLIC_INDEXABLE');
+    expect(setRes.ok).toBe(true);
 
-      // Confirm meta-tags are accessible while PUBLIC_INDEXABLE
-      const beforeRes = await fetch(
-        `${BACKEND_URL}/api/public/servers/${serverSlug}/channels/${LOCAL_SEEDS.channels.publicIndexable}/meta-tags`,
-      );
-      expect(beforeRes.status).toBe(200);
+    // Confirm meta-tags are accessible while PUBLIC_INDEXABLE
+    const beforeRes = await fetch(
+      `${BACKEND_URL}/api/public/servers/${serverSlug}/channels/${LOCAL_SEEDS.channels.publicIndexable}/meta-tags`,
+    );
+    expect(beforeRes.status).toBe(200);
 
-      // Change to PRIVATE
-      expect((await setVisibility('PRIVATE')).ok).toBe(true);
+    // Change to PRIVATE
+    expect((await setVisibility('PRIVATE')).ok).toBe(true);
 
-      // Public meta-tags endpoint must return 404 after going PRIVATE
-      const metaRes = await pollUntil(
-        () =>
-          fetch(
-            `${BACKEND_URL}/api/public/servers/${serverSlug}/channels/${LOCAL_SEEDS.channels.publicIndexable}/meta-tags`,
-          ),
-        (r) => r.status === 404,
-        { timeoutMs: 4000 },
-      );
-      expect(metaRes.status).toBe(404);
+    // Public meta-tags endpoint must return 404 after going PRIVATE
+    const metaRes = await pollUntil(
+      () =>
+        fetch(
+          `${BACKEND_URL}/api/public/servers/${serverSlug}/channels/${LOCAL_SEEDS.channels.publicIndexable}/meta-tags`,
+        ),
+      (r) => r.status === 404,
+      { timeoutMs: 4000 },
+    );
+    expect(metaRes.status).toBe(404);
 
-      // Sitemap must no longer contain the channel URL (cache invalidation)
-      const sitemapTarget = `/c/${serverSlug}/${LOCAL_SEEDS.channels.publicIndexable}`;
-      const sitemapText = await pollUntil(
-        () =>
-          fetch(`${BACKEND_URL}/sitemap/${serverSlug}.xml`).then((r) => r.text()),
-        (text) => !text.includes(sitemapTarget),
-        { timeoutMs: 4000 },
-      );
-      expect(sitemapText).not.toContain(sitemapTarget);
-    },
-    15000,
-  );
+    // Sitemap must no longer contain the channel URL (cache invalidation)
+    const sitemapTarget = `/c/${serverSlug}/${LOCAL_SEEDS.channels.publicIndexable}`;
+    const sitemapText = await pollUntil(
+      () => fetch(`${BACKEND_URL}/sitemap/${serverSlug}.xml`).then((r) => r.text()),
+      (text) => !text.includes(sitemapTarget),
+      { timeoutMs: 4000 },
+    );
+    expect(sitemapText).not.toContain(sitemapTarget);
+  }, 15000);
 });

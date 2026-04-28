@@ -120,10 +120,7 @@ function buildChannelContext(channel: {
   };
 }
 
-function buildPersistedMetaTagSet(
-  channel: ChannelContext,
-  record: GeneratedMetaTags,
-): MetaTagSet {
+function buildPersistedMetaTagSet(channel: ChannelContext, record: GeneratedMetaTags): MetaTagSet {
   const baseTags: MetaTagSet = {
     title: record.title,
     description: record.description,
@@ -196,7 +193,10 @@ async function getAdminJob(jobId: string): Promise<MetaTagJobStatus | null> {
   try {
     return JSON.parse(raw) as MetaTagJobStatus;
   } catch {
-    logger.warn({ jobId, key: adminJobKey(jobId) }, 'Failed to parse admin meta-tag job from Redis — treating as not found');
+    logger.warn(
+      { jobId, key: adminJobKey(jobId) },
+      'Failed to parse admin meta-tag job from Redis — treating as not found',
+    );
     return null;
   }
 }
@@ -256,6 +256,98 @@ async function loadGenerationInputs(channelId: string): Promise<{
       createdAt: message.createdAt,
       authorDisplayName: message.author.displayName,
     })),
+  };
+}
+
+async function loadPreviewFallbackInputs(channelId: string): Promise<{
+  channel: ChannelContext;
+  messages: MessageContext[];
+}> {
+  // Keep this loader separate from loadGenerationInputs(): the fallback path is
+  // specifically for cases where reading persisted generated_meta_tags may be
+  // the failing step, so it intentionally avoids selecting that relation.
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      topic: true,
+      visibility: true,
+      server: {
+        select: {
+          name: true,
+          slug: true,
+        },
+      },
+    },
+  });
+
+  if (!channel) {
+    throw new Error(`Channel ${channelId} not found`);
+  }
+
+  const messages = await prisma.message.findMany({
+    where: {
+      channelId,
+      isDeleted: false,
+    },
+    take: META_TAG_MESSAGE_LIMIT,
+    orderBy: {
+      createdAt: 'asc',
+    },
+    select: {
+      content: true,
+      createdAt: true,
+      author: {
+        select: {
+          displayName: true,
+        },
+      },
+    },
+  });
+
+  return {
+    channel: buildChannelContext(channel),
+    messages: messages.map((message) => ({
+      content: message.content,
+      createdAt: message.createdAt,
+      authorDisplayName: message.author.displayName,
+    })),
+  };
+}
+
+function buildPreviewFromTags(
+  tags: MetaTagSet,
+  persisted: GeneratedMetaTags | null,
+): MetaTagPreview {
+  return {
+    title: tags.title,
+    description: tags.description,
+    ogTitle: tags.openGraph.ogTitle,
+    ogDescription: tags.openGraph.ogDescription,
+    ogImage: tags.openGraph.ogImage,
+    keywords: tags.keywords,
+    generatedAt: persisted?.generatedAt.toISOString() ?? new Date().toISOString(),
+    isFallbackPreview: persisted === null,
+    isCustom: Boolean(
+      persisted?.customTitle || persisted?.customDescription || persisted?.customOgImage,
+    ),
+    generatedTitle: persisted?.title ?? tags.title,
+    generatedDescription: persisted?.description ?? tags.description,
+    customTitle: persisted?.customTitle ?? null,
+    customDescription: persisted?.customDescription ?? null,
+    customOgImage: persisted?.customOgImage ?? null,
+    searchPreview: {
+      title: tags.title,
+      description: tags.description,
+      url: tags.canonical,
+    },
+    socialPreview: {
+      title: tags.openGraph.ogTitle,
+      description: tags.openGraph.ogDescription,
+      image: tags.openGraph.ogImage,
+    },
   };
 }
 
@@ -442,9 +534,8 @@ export const metaTagService = {
         schemaVersion: META_TAG_SCHEMA_VERSION,
       });
 
-      const record = rowsUpdated > 0
-        ? await metaTagRepository.findByChannelId(channelId)
-        : persisted;
+      const record =
+        rowsUpdated > 0 ? await metaTagRepository.findByChannelId(channelId) : persisted;
       const finalTags = buildPersistedMetaTagSet(channel, record ?? persisted);
 
       if (finalTags.needsRegeneration) {
@@ -575,10 +666,7 @@ export const metaTagService = {
     });
   },
 
-  async getRegenerationJobStatus(
-    channelId: string,
-    jobId: string,
-  ): Promise<MetaTagJobStatus> {
+  async getRegenerationJobStatus(channelId: string, jobId: string): Promise<MetaTagJobStatus> {
     const job = await metaTagUpdateQueue.getJob(jobId);
     if (!job || job.data.channelId !== channelId) {
       throw new Error(`Meta tag regeneration job ${jobId} not found for channel ${channelId}`);
@@ -601,35 +689,13 @@ export const metaTagService = {
     const tags = await metaTagService.getOrGenerateCached(channelId);
     const { persisted } = await loadGenerationInputs(channelId);
 
-    return {
-      title: tags.title,
-      description: tags.description,
-      ogTitle: tags.openGraph.ogTitle,
-      ogDescription: tags.openGraph.ogDescription,
-      ogImage: tags.openGraph.ogImage,
-      keywords: tags.keywords,
-      generatedAt: persisted?.generatedAt.toISOString() ?? new Date().toISOString(),
-      isCustom: Boolean(
-        persisted?.customTitle ||
-        persisted?.customDescription ||
-        persisted?.customOgImage,
-      ),
-      generatedTitle: persisted?.title ?? tags.title,
-      generatedDescription: persisted?.description ?? tags.description,
-      customTitle: persisted?.customTitle ?? null,
-      customDescription: persisted?.customDescription ?? null,
-      customOgImage: persisted?.customOgImage ?? null,
-      searchPreview: {
-        title: tags.title,
-        description: tags.description,
-        url: tags.canonical,
-      },
-      socialPreview: {
-        title: tags.openGraph.ogTitle,
-        description: tags.openGraph.ogDescription,
-        image: tags.openGraph.ogImage,
-      },
-    };
+    return buildPreviewFromTags(tags, persisted);
+  },
+
+  async getFallbackMetaTagsForPreview(channelId: string): Promise<MetaTagPreview> {
+    const { channel, messages } = await loadPreviewFallbackInputs(channelId);
+    const tags = await metaTagService.generateMetaTagsFromContext(channel, messages);
+    return buildPreviewFromTags(tags, null);
   },
 
   buildCanonicalUrl(serverSlug: string, channelSlug: string): string {

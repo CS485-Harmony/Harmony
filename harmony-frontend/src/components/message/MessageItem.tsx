@@ -6,7 +6,8 @@
  *
  * ActionBar: appears on hover/focus. Shows Reply and Add Reaction stubs to
  * authenticated users. Shows a "More" (⋯) dropdown with "Pin/Unpin Message"
- * for users with message:pin permission (MODERATOR, ADMIN, OWNER).
+ * for users with message:pin permission (MODERATOR, ADMIN, OWNER), and
+ * "Edit Message" for the message's own author.
  */
 
 'use client';
@@ -15,7 +16,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import { formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
 import { pinMessageAction, unpinMessageAction } from '@/app/actions/pinMessage';
+import { editMessageAction } from '@/app/actions/editMessage';
 import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/hooks/useToast';
 import type { Message, Reaction } from '@/types';
 
 // ─── AttachmentList ───────────────────────────────────────────────────────────
@@ -112,19 +115,23 @@ type PinState = 'idle' | 'loading' | 'success' | 'error';
 /**
  * Hover/focus-within action bar for a message.
  * Reply and Add Reaction are authenticated-only stubs (future issues).
- * More (⋯) is only rendered when canPin is true, and opens a dropdown with
- * Pin/Unpin — which calls the backend and tracks state locally.
+ * More (⋯) is rendered when canPin or isOwnMessage is true, and opens a
+ * dropdown with Pin/Unpin (canPin) and Edit Message (isOwnMessage).
  */
 function ActionBar({
   messageId,
   serverId,
   canPin,
   initialPinned,
+  isOwnMessage,
+  onEditClick,
 }: {
   messageId: string;
   serverId?: string;
   canPin?: boolean;
   initialPinned?: boolean;
+  isOwnMessage?: boolean;
+  onEditClick?: () => void;
 }) {
   const { isAuthenticated } = useAuth();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
@@ -192,7 +199,7 @@ function ActionBar({
     }
   }, [isPinned, messageId, serverId]);
 
-  if (!isAuthenticated && !canPin) {
+  if (!isAuthenticated && !canPin && !isOwnMessage) {
     return null;
   }
 
@@ -242,8 +249,8 @@ function ActionBar({
         </>
       )}
 
-      {/* More — only rendered when user has pin permission */}
-      {canPin && (
+      {/* More — rendered when user can pin or is the message author */}
+      {(canPin || isOwnMessage) && (
         <div ref={moreRef} className='relative'>
           <button
             type='button'
@@ -266,15 +273,40 @@ function ActionBar({
 
           {isMoreOpen && (
             <div className='absolute right-0 top-full mt-1 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20'>
-              <button
-                type='button'
-                onClick={handlePinToggle}
-                disabled={pinState === 'loading'}
-                className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-gray-200 hover:bg-[#5865f2] hover:text-white disabled:opacity-50 transition-colors'
-              >
-                <PinMenuIcon />
-                {isPinned ? 'Unpin Message' : 'Pin Message'}
-              </button>
+              {isOwnMessage && (
+                <button
+                  type='button'
+                  onClick={() => {
+                    setIsMoreOpen(false);
+                    onEditClick?.();
+                  }}
+                  className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-gray-200 hover:bg-[#5865f2] hover:text-white transition-colors'
+                >
+                  <svg
+                    className='h-3.5 w-3.5 flex-shrink-0'
+                    viewBox='0 0 24 24'
+                    fill='none'
+                    stroke='currentColor'
+                    strokeWidth={2}
+                    aria-hidden='true'
+                  >
+                    <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7' />
+                    <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z' />
+                  </svg>
+                  Edit Message
+                </button>
+              )}
+              {canPin && (
+                <button
+                  type='button'
+                  onClick={handlePinToggle}
+                  disabled={pinState === 'loading'}
+                  className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-gray-200 hover:bg-[#5865f2] hover:text-white disabled:opacity-50 transition-colors'
+                >
+                  <PinMenuIcon />
+                  {isPinned ? 'Unpin Message' : 'Pin Message'}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -299,7 +331,15 @@ export function MessageItem({
   /** Required for pin actions. Passed alongside canPin. */
   serverId?: string;
 }) {
+  const { user } = useAuth();
+  const { showToast } = useToast();
   const [avatarError, setAvatarError] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(message.content);
+  const [isSaving, setIsSaving] = useState(false);
+  const [localContent, setLocalContent] = useState<string | undefined>(undefined);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+
   // Render-phase derived-state reset: when the avatar URL changes (including A→B→A),
   // reset avatarError so the new URL is always attempted.
   const [prevAvatarUrl, setPrevAvatarUrl] = useState(message.author.avatarUrl);
@@ -307,6 +347,67 @@ export function MessageItem({
     setPrevAvatarUrl(message.author.avatarUrl);
     if (avatarError) setAvatarError(false);
   }
+
+  // Keep editContent in sync when message content changes externally (e.g. via SSE)
+  const [prevContent, setPrevContent] = useState(message.content);
+  if (!isEditing && prevContent !== message.content) {
+    setPrevContent(message.content);
+    setEditContent(message.content);
+    if (localContent !== undefined) setLocalContent(undefined);
+  }
+
+  const isOwnMessage = !!user && user.id === message.author.id;
+
+  const handleEditClick = useCallback(() => {
+    const current = localContent ?? message.content;
+    setEditContent(current);
+    setIsEditing(true);
+    setTimeout(() => {
+      const el = editTextareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }
+    }, 0);
+  }, [localContent, message.content]);
+
+  const handleEditCancel = useCallback(() => {
+    setIsEditing(false);
+    setEditContent(localContent ?? message.content);
+  }, [localContent, message.content]);
+
+  const handleEditSave = useCallback(async () => {
+    const trimmed = editContent.trim();
+    const currentContent = localContent ?? message.content;
+    if (!trimmed || trimmed === currentContent || !serverId) {
+      setIsEditing(false);
+      return;
+    }
+    setIsSaving(true);
+    const result = await editMessageAction(message.id, serverId, trimmed);
+    setIsSaving(false);
+    if (result.ok) {
+      setIsEditing(false);
+      setLocalContent(result.message.content);
+    } else {
+      const msg = result.forbidden
+        ? "You don't have permission to edit this message."
+        : 'Failed to edit message. Please try again.';
+      showToast({ message: msg, type: 'error' });
+    }
+  }, [editContent, localContent, message.content, message.id, serverId, showToast]);
+
+  const handleEditKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleEditSave();
+      } else if (e.key === 'Escape') {
+        handleEditCancel();
+      }
+    },
+    [handleEditSave, handleEditCancel],
+  );
 
   // Trim first to guard against empty-string usernames — || catches "" where ?? would not.
   const trimmedUsername = message.author.username?.trim();
@@ -326,13 +427,51 @@ export function MessageItem({
       serverId={serverId}
       canPin={canPin}
       initialPinned={!!message.pinned}
+      isOwnMessage={isOwnMessage}
+      onEditClick={handleEditClick}
     />
+  );
+
+  const editUi = (
+    <div className='mt-0.5'>
+      <textarea
+        ref={editTextareaRef}
+        value={editContent}
+        onChange={e => setEditContent(e.target.value)}
+        onKeyDown={handleEditKeyDown}
+        disabled={isSaving}
+        rows={3}
+        className='w-full resize-none rounded-md bg-[#40444b] px-3 py-2 text-sm text-[#dcddde] outline-none focus:ring-1 focus:ring-[#5865f2] disabled:opacity-50'
+        aria-label='Edit message'
+      />
+      <div className='mt-1 flex items-center gap-2 text-xs text-gray-400'>
+        <span>
+          escape to{' '}
+          <button
+            type='button'
+            onClick={handleEditCancel}
+            className='text-[#5865f2] hover:underline'
+          >
+            cancel
+          </button>
+          {' · '}enter to{' '}
+          <button
+            type='button'
+            onClick={handleEditSave}
+            disabled={isSaving}
+            className='text-[#5865f2] hover:underline disabled:opacity-50'
+          >
+            save
+          </button>
+        </span>
+      </div>
+    </div>
   );
 
   if (!showHeader) {
     return (
       <div className='group relative flex gap-4 px-4 py-0.5 hover:bg-white/[0.02]'>
-        {actionBar}
+        {!isEditing && actionBar}
         {/* Spacer aligns content with the 40px avatar of the header row */}
         <div className='w-10 flex-shrink-0 text-right'>
           <span className='invisible text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
@@ -340,10 +479,16 @@ export function MessageItem({
           </span>
         </div>
         <div className='min-w-0 flex-1'>
-          <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-            {message.content}
-            {message.editedAt && <span className='ml-1 text-[10px] text-gray-500'>(edited)</span>}
-          </p>
+          {isEditing ? (
+            editUi
+          ) : (
+            <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
+              {localContent ?? message.content}
+              {(message.editedAt || localContent !== undefined) && (
+                <span className='ml-1 text-[10px] text-gray-500'>(edited)</span>
+              )}
+            </p>
+          )}
           <AttachmentList attachments={message.attachments} />
           <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
         </div>
@@ -353,7 +498,7 @@ export function MessageItem({
 
   return (
     <div className='group relative flex gap-4 px-4 py-0.5 hover:bg-white/[0.02]'>
-      {actionBar}
+      {!isEditing && actionBar}
       {/* Avatar */}
       <div className='mt-0.5 flex-shrink-0'>
         {message.author.avatarUrl && !avatarError ? (
@@ -381,11 +526,17 @@ export function MessageItem({
           <span className='text-[11px] text-gray-400'>
             {formatMessageTimestamp(message.timestamp)}
           </span>
-          {message.editedAt && <span className='text-[10px] text-gray-500'>(edited)</span>}
+          {(message.editedAt || localContent !== undefined) && (
+            <span className='text-[10px] text-gray-500'>(edited)</span>
+          )}
         </div>
-        <p className='mt-0.5 whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-          {message.content}
-        </p>
+        {isEditing ? (
+          editUi
+        ) : (
+          <p className='mt-0.5 whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
+            {localContent ?? message.content}
+          </p>
+        )}
         <AttachmentList attachments={message.attachments} />
         <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
       </div>

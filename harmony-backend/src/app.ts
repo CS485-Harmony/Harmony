@@ -10,11 +10,13 @@ import { authRouter } from './routes/auth.router';
 import { createPublicRouter } from './routes/public.router';
 import { seoRouter } from './routes/seo.router';
 import { eventsRouter } from './routes/events.router';
+import { presenceRouter } from './routes/presence.router';
 import { attachmentRouter } from './routes/attachment.router';
 import { adminMetaTagRouter } from './routes/admin.metaTag.router';
 import { instanceId } from './lib/instance-identity';
 import { createLogger } from './lib/logger';
 import { redis } from './db/redis';
+import { presenceService } from './services/presence.service';
 
 const logger = createLogger({ component: 'app', instanceId });
 
@@ -56,6 +58,8 @@ export interface CreateAppOptions {
 }
 
 export function createApp(options: CreateAppOptions = {}) {
+  presenceService.startSweeper();
+
   const isE2E = process.env.NODE_ENV === 'e2e';
   // Each limiter calls makeStore() independently so it gets its own instance.
   const makeStore = (prefix: string): Store | undefined =>
@@ -154,6 +158,9 @@ export function createApp(options: CreateAppOptions = {}) {
 
   // Real-time SSE endpoints
   app.use('/api/events', eventsRouter);
+
+  // Presence updates from authenticated browser clients
+  app.use('/api/presence', presenceRouter);
 
   // Attachment upload + file serving
   app.use('/api/attachments', attachmentRouter);

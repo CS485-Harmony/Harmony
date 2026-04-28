@@ -9,6 +9,10 @@ jest.mock('@/hooks/useAuth', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
+jest.mock('@/hooks/useToast', () => ({
+  useToast: () => ({ showToast: jest.fn() }),
+}));
+
 jest.mock('next/navigation', () => ({
   usePathname: () => '/c/testserver/new-channel',
   useRouter: () => ({ push: jest.fn() }),
