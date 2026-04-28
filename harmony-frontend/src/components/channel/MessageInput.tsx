@@ -2,16 +2,26 @@
  * Channel Component: MessageInput
  * Message composition bar at the bottom of the channel view.
  * Supports multi-line input, Enter-to-send, character limit, file attachments,
- * and read-only guest state.
+ * emoji picker, and read-only guest state.
  * Ref: dev-spec-guest-public-channel-view.md — M3, CL-C3
  */
 
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { cn } from '@/lib/utils';
 import { sendMessageAction } from '@/app/actions/sendMessage';
 import type { Message, AttachmentInput } from '@/types';
+
+// Lazy-load the heavy emoji picker bundle so it doesn't block the initial render
+const EmojiPickerPopover = dynamic(
+  () =>
+    import('@/components/channel/EmojiPickerPopover').then(m => ({
+      default: m.EmojiPickerPopover,
+    })),
+  { ssr: false },
+);
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -43,16 +53,31 @@ export function MessageInput({
   const [sendError, setSendError] = useState<string | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentInput[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
 
   // On channel switch: clear draft, clear attachments, clear any send error, and autofocus
   useEffect(() => {
     setValue('');
     setSendError(null);
     setPendingAttachments([]);
+    setShowEmojiPicker(false);
     textareaRef.current?.focus();
   }, [channelId]);
+
+  // Close picker when clicking outside the popover
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showEmojiPicker]);
 
   // Auto-resize: grow up to ~8 lines, then scroll
   useEffect(() => {
@@ -66,55 +91,76 @@ export function MessageInput({
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-      // Reset the input so selecting the same file again triggers onChange
-      e.target.value = '';
+    // Reset the input so selecting the same file again triggers onChange
+    e.target.value = '';
 
-      setIsUploading(true);
-      setSendError(null);
+    setIsUploading(true);
+    setSendError(null);
 
-      try {
-        const formData = new FormData();
-        formData.append('file', file);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
 
-        const res = await fetch('/api/attachments/upload', {
-          method: 'POST',
-          body: formData,
-        });
+      const res = await fetch('/api/attachments/upload', {
+        method: 'POST',
+        body: formData,
+      });
 
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          const msg =
-            typeof body?.error === 'string'
-              ? body.error
-              : res.status === 401
-                ? 'You must be logged in to upload files.'
-                : res.status === 413
-                  ? 'File is too large (max 25 MB).'
-                  : 'Upload failed. Unsupported file type or server error.';
-          setSendError(msg);
-          return;
-        }
-
-        const attachment = (await res.json()) as AttachmentInput;
-        setPendingAttachments(prev => [...prev, attachment]);
-      } catch {
-        setSendError('Upload failed. Please try again.');
-      } finally {
-        setIsUploading(false);
-        textareaRef.current?.focus();
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        const msg =
+          typeof body?.error === 'string'
+            ? body.error
+            : res.status === 401
+              ? 'You must be logged in to upload files.'
+              : res.status === 413
+                ? 'File is too large (max 25 MB).'
+                : 'Upload failed. Unsupported file type or server error.';
+        setSendError(msg);
+        return;
       }
-    },
-    [],
-  );
+
+      const attachment = (await res.json()) as AttachmentInput;
+      setPendingAttachments(prev => [...prev, attachment]);
+    } catch {
+      setSendError('Upload failed. Please try again.');
+    } finally {
+      setIsUploading(false);
+      textareaRef.current?.focus();
+    }
+  }, []);
 
   const removeAttachment = (index: number) => {
     setPendingAttachments(prev => prev.filter((_, i) => i !== index));
   };
+
+  const handleEmojiSelect = useCallback(
+    (emoji: { native: string }) => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      const start = textarea.selectionStart ?? value.length;
+      const end = textarea.selectionEnd ?? value.length;
+      const next = value.slice(0, start) + emoji.native + value.slice(end);
+
+      if (next.length <= MAX_CHARS) {
+        setValue(next);
+        // Restore focus and move cursor after the inserted emoji
+        requestAnimationFrame(() => {
+          const pos = start + emoji.native.length;
+          textarea.focus();
+          textarea.setSelectionRange(pos, pos);
+        });
+      }
+
+      setShowEmojiPicker(false);
+    },
+    [value],
+  );
 
   const handleSend = useCallback(async () => {
     const trimmed = value.trim();
@@ -137,7 +183,16 @@ export function MessageInput({
       setIsSending(false);
       textareaRef.current?.focus();
     }
-  }, [value, isSending, isUploading, isReadOnly, channelId, serverId, onMessageSent, pendingAttachments]);
+  }, [
+    value,
+    isSending,
+    isUploading,
+    isReadOnly,
+    channelId,
+    serverId,
+    onMessageSent,
+    pendingAttachments,
+  ]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Enter sends; Shift+Enter inserts a newline
@@ -171,7 +226,7 @@ export function MessageInput({
   const isAtLimit = remaining <= 0;
 
   return (
-    <div className='flex-shrink-0 px-4 pb-6 pt-2'>
+    <div className='relative flex-shrink-0 px-4 pb-6 pt-2'>
       {sendError && (
         <p className='mb-1 px-1 text-xs text-red-400' role='alert'>
           {sendError}
@@ -290,27 +345,42 @@ export function MessageInput({
           </button>
 
           {/* Emoji button */}
-          <button
-            type='button'
-            title='Emoji (coming soon)'
-            aria-label='Emoji'
-            className='flex h-8 w-8 items-center justify-center rounded text-gray-400 transition-colors hover:bg-white/10 hover:text-gray-200'
-          >
-            <svg
-              className='h-5 w-5'
-              viewBox='0 0 24 24'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth={2}
-              strokeLinecap='round'
-              strokeLinejoin='round'
+          <div ref={emojiPickerRef} className='relative'>
+            <button
+              type='button'
+              title='Emoji'
+              aria-label='Emoji'
+              aria-expanded={showEmojiPicker}
+              aria-haspopup='dialog'
+              onClick={() => setShowEmojiPicker(prev => !prev)}
+              className='flex h-8 w-8 items-center justify-center rounded text-gray-400 transition-colors hover:bg-white/10 hover:text-gray-200'
             >
-              <circle cx='12' cy='12' r='10' />
-              <path d='M8 13s1.5 2 4 2 4-2 4-2' />
-              <line x1='9' y1='9' x2='9.01' y2='9' />
-              <line x1='15' y1='9' x2='15.01' y2='9' />
-            </svg>
-          </button>
+              <svg
+                className='h-5 w-5'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              >
+                <circle cx='12' cy='12' r='10' />
+                <path d='M8 13s1.5 2 4 2 4-2 4-2' />
+                <line x1='9' y1='9' x2='9.01' y2='9' />
+                <line x1='15' y1='9' x2='15.01' y2='9' />
+              </svg>
+            </button>
+
+            {showEmojiPicker && (
+              <div
+                role='dialog'
+                aria-label='Emoji picker'
+                className='absolute bottom-full right-0 z-50 mb-2'
+              >
+                <EmojiPickerPopover onEmojiSelect={handleEmojiSelect} />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
