@@ -888,6 +888,7 @@ describe('GET /api/public/servers/:serverSlug/channels/:channelSlug/meta-tags', 
     ogImage: 'https://harmony.test/og.png',
     keywords: ['general'],
     generatedAt: '2026-04-28T00:00:00.000Z',
+    isFallbackPreview: false,
     isCustom: false,
     generatedTitle: 'General - Test Server | Harmony',
     generatedDescription: 'General discussion in Test Server.',
@@ -957,6 +958,8 @@ describe('GET /api/public/servers/:serverSlug/channels/:channelSlug/meta-tags', 
 
     expect(res.status).toBe(404);
     expect(res.body).toHaveProperty('error', 'Channel not found');
+    expect(mockMetaTagService.getMetaTagsForPreview).not.toHaveBeenCalled();
+    expect(mockMetaTagService.getFallbackMetaTagsForPreview).not.toHaveBeenCalled();
   });
 });
 

@@ -174,9 +174,9 @@ describe('getCloudFixture cache behavior', () => {
       publicChannel: 'two',
       publicChannels: ['two', 'three'],
       publicChannelTargets: [
-        { serverSlug: 'small-server', channelSlug: 'one' },
         { serverSlug: 'larger-server', channelSlug: 'two' },
         { serverSlug: 'larger-server', channelSlug: 'three' },
+        { serverSlug: 'small-server', channelSlug: 'one' },
       ],
     });
   });

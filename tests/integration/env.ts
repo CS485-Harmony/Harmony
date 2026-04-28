@@ -108,6 +108,12 @@ export type CloudFixture = {
   }>;
 };
 
+type DiscoveredServerFixture = {
+  serverId?: string;
+  serverSlug: string;
+  publicChannels: string[];
+};
+
 let cloudFixturePromise: Promise<CloudFixture> | null = null;
 
 async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
@@ -122,12 +128,7 @@ async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
     id?: string;
     slug?: string;
   }>;
-  let primaryFixture: {
-    serverId?: string;
-    serverSlug: string;
-    publicChannels: string[];
-  } | null = null;
-  const publicChannelTargets: Array<{ serverSlug: string; channelSlug: string }> = [];
+  const discoveredFixtures: DiscoveredServerFixture[] = [];
 
   for (const server of servers) {
     if (!server.slug) continue;
@@ -144,24 +145,34 @@ async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
       .map((ch) => ch.slug);
     if (!publicChannels.length) continue;
 
-    if (primaryFixture === null || publicChannels.length > primaryFixture.publicChannels.length) {
-      primaryFixture = {
-        serverId: server.id,
-        serverSlug: server.slug,
-        publicChannels,
-      };
-    }
-
-    for (const channelSlug of publicChannels) {
-      if (publicChannelTargets.length >= 3) break;
-      publicChannelTargets.push({
-        serverSlug: server.slug,
-        channelSlug,
-      });
-    }
+    discoveredFixtures.push({
+      serverId: server.id,
+      serverSlug: server.slug,
+      publicChannels,
+    });
   }
 
-  if (primaryFixture) {
+  if (discoveredFixtures.length > 0) {
+    const primaryFixture = discoveredFixtures.reduce((best, candidate) =>
+      candidate.publicChannels.length > best.publicChannels.length ? candidate : best,
+    );
+    const publicChannelTargets: Array<{ serverSlug: string; channelSlug: string }> = [];
+    const prioritizedFixtures = [
+      primaryFixture,
+      ...discoveredFixtures.filter((fixture) => fixture.serverSlug !== primaryFixture.serverSlug),
+    ];
+
+    for (const fixture of prioritizedFixtures) {
+      for (const channelSlug of fixture.publicChannels) {
+        if (publicChannelTargets.length >= 3) break;
+        publicChannelTargets.push({
+          serverSlug: fixture.serverSlug,
+          channelSlug,
+        });
+      }
+      if (publicChannelTargets.length >= 3) break;
+    }
+
     return {
       serverId: primaryFixture.serverId,
       serverSlug: primaryFixture.serverSlug,

@@ -361,7 +361,20 @@ export function createPublicRouter(store?: Store) {
             },
             'Primary public meta tag preview failed; falling back to on-the-fly generation',
           );
-          preview = await metaTagService.getFallbackMetaTagsForPreview(channel.id);
+          try {
+            preview = await metaTagService.getFallbackMetaTagsForPreview(channel.id);
+          } catch (fallbackErr) {
+            logger.warn(
+              {
+                err: fallbackErr,
+                serverSlug: req.params.serverSlug,
+                channelSlug: req.params.channelSlug,
+                channelId: channel.id,
+              },
+              'Fallback public meta tag preview generation also failed',
+            );
+            throw fallbackErr;
+          }
         }
         res.set('Cache-Control', 'public, max-age=60');
         res.json({

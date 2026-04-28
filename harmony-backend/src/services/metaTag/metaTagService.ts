@@ -263,6 +263,9 @@ async function loadPreviewFallbackInputs(channelId: string): Promise<{
   channel: ChannelContext;
   messages: MessageContext[];
 }> {
+  // Keep this loader separate from loadGenerationInputs(): the fallback path is
+  // specifically for cases where reading persisted generated_meta_tags may be
+  // the failing step, so it intentionally avoids selecting that relation.
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
     select: {
@@ -326,6 +329,7 @@ function buildPreviewFromTags(
     ogImage: tags.openGraph.ogImage,
     keywords: tags.keywords,
     generatedAt: persisted?.generatedAt.toISOString() ?? new Date().toISOString(),
+    isFallbackPreview: persisted === null,
     isCustom: Boolean(
       persisted?.customTitle || persisted?.customDescription || persisted?.customOgImage,
     ),

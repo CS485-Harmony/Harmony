@@ -63,6 +63,7 @@ export interface MetaTagPreview {
   ogImage: string;
   keywords: string[];
   generatedAt: string;
+  isFallbackPreview: boolean;
   isCustom: boolean;
   generatedTitle: string;
   generatedDescription: string;
