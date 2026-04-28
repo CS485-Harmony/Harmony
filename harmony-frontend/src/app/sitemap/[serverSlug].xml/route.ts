@@ -5,7 +5,7 @@ import { proxySitemapXml } from '@/lib/sitemap-response';
 export const revalidate = 300;
 
 interface RouteContext {
-  params: Promise<Record<string, string | string[] | undefined>>;
+  params: Promise<Record<string, never>>;
 }
 
 /**
@@ -13,10 +13,12 @@ interface RouteContext {
  * proxy of the backend XML generator, revalidating periodically, so crawlers
  * never need the API domain as the primary SEO surface.
  */
-export async function GET(request: Request, context?: RouteContext) {
-  const params = await context?.params;
-  const serverSlug = params?.serverSlug;
-  if (typeof serverSlug !== 'string') {
+export async function GET(request: Request, context: RouteContext) {
+  await context.params;
+  const pathname = new URL(request.url).pathname;
+  const slugSegment = pathname.split('/').at(-1) ?? '';
+  const serverSlug = slugSegment.endsWith('.xml') ? slugSegment.slice(0, -4) : slugSegment;
+  if (!serverSlug) {
     return new Response('Sitemap not found.', {
       status: 404,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
