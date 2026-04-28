@@ -14,7 +14,9 @@ type ActivePresenceStatus = Extract<UserStatus, 'ONLINE' | 'IDLE'>;
 
 async function updateUserStatusIfChanged(userId: string, status: UserStatus): Promise<void> {
   const user = await userRepository.findSelf(userId);
-  if (!user || user.status !== status) {
+  if (!user) return;
+
+  if (user.status !== status) {
     await userService.updateUser(userId, { status });
   }
 }

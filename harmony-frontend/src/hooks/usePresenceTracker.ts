@@ -8,8 +8,7 @@ import { getApiBaseUrl } from '@/lib/runtime-config';
 type PresenceStatus = 'ONLINE' | 'IDLE';
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
-const ACTIVE_THROTTLE_MS = 30_000;
-const HEARTBEAT_INTERVAL_MS = 30_000;
+const PRESENCE_INTERVAL_MS = 30_000;
 const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'focus'];
 
 const logger = createFrontendLogger({ component: 'presence-tracker' });
@@ -60,10 +59,10 @@ export function usePresenceTracker(enabled: boolean): void {
 
     const setPresence = (status: PresenceStatus, force = false) => {
       const now = Date.now();
-      if (!force && status === 'ONLINE' && now - lastActivePostRef.current < ACTIVE_THROTTLE_MS) {
+      if (!force && statusRef.current === status) return;
+      if (!force && status === 'ONLINE' && now - lastActivePostRef.current < PRESENCE_INTERVAL_MS) {
         return;
       }
-      if (!force && statusRef.current === status) return;
 
       statusRef.current = status;
       if (status === 'ONLINE') lastActivePostRef.current = now;
@@ -86,7 +85,7 @@ export function usePresenceTracker(enabled: boolean): void {
     armIdleTimer();
     heartbeatTimerRef.current = setInterval(() => {
       postPresence(statusRef.current);
-    }, HEARTBEAT_INTERVAL_MS);
+    }, PRESENCE_INTERVAL_MS);
     for (const event of ACTIVITY_EVENTS) {
       window.addEventListener(event, markActive, { passive: true });
     }

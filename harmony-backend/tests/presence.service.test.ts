@@ -63,6 +63,15 @@ describe('presenceService.renewLease', () => {
     expect(mockRedis.zadd).toHaveBeenCalled();
     expect(mockUpdateUser).not.toHaveBeenCalled();
   });
+
+  it('does not update status when the user no longer exists', async () => {
+    mockFindSelf.mockResolvedValue(null);
+
+    await presenceService.renewLease('deleted-user', UserStatus.ONLINE);
+
+    expect(mockRedis.zadd).toHaveBeenCalled();
+    expect(mockUpdateUser).not.toHaveBeenCalled();
+  });
 });
 
 describe('presenceService.expireStaleLeases', () => {

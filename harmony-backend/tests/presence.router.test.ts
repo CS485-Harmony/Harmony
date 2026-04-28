@@ -78,4 +78,18 @@ describe('POST /api/presence/status', () => {
     expect(res.status).toBe(401);
     expect(mockRenewLease).not.toHaveBeenCalled();
   });
+
+  it('rejects invalid bearer token', async () => {
+    mockVerifyAccessToken.mockImplementation(() => {
+      throw new Error('expired');
+    });
+
+    const res = await request(app)
+      .post('/api/presence/status')
+      .set('Authorization', 'Bearer expired-token')
+      .send({ status: 'ONLINE' });
+
+    expect(res.status).toBe(401);
+    expect(mockRenewLease).not.toHaveBeenCalled();
+  });
 });

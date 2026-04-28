@@ -72,6 +72,24 @@ describe('usePresenceTracker', () => {
     );
   });
 
+  it('does not throttle the IDLE to ONLINE transition', () => {
+    renderHook(() => usePresenceTracker(true));
+
+    act(() => {
+      jest.advanceTimersByTime(29 * 1000);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }));
+      jest.advanceTimersByTime(5 * 60 * 1000);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'b' }));
+    });
+
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      `${API_URL}/api/presence/status`,
+      expect.objectContaining({
+        body: JSON.stringify({ status: 'ONLINE' }),
+      }),
+    );
+  });
+
   it('renews the current presence status on a heartbeat interval', () => {
     renderHook(() => usePresenceTracker(true));
 
