@@ -9,6 +9,7 @@ import { voiceRouter } from './routers/voice.router';
 import { reactionRouter } from './routers/reaction.router';
 import { inviteRouter } from './routers/invite.router';
 import { permissionRouter } from './routers/permission.router';
+import { notificationRouter } from './routers/notification.router';
 
 export const appRouter = router({
   health: publicProcedure.query(() => {
@@ -24,6 +25,7 @@ export const appRouter = router({
   reaction: reactionRouter,
   invite: inviteRouter,
   permission: permissionRouter,
+  notification: notificationRouter,
 });
 
 export type AppRouter = typeof appRouter;

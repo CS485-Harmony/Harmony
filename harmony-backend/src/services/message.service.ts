@@ -6,6 +6,7 @@ import { permissionService } from './permission.service';
 import { eventBus, EventChannels } from '../events/eventBus';
 import { channelRepository } from '../repositories/channel.repository';
 import { messageRepository } from '../repositories/message.repository';
+import { pushNotificationService } from './pushNotification.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -146,7 +147,7 @@ export const messageService = {
   async sendMessage(input: SendMessageInput) {
     const { serverId, channelId, authorId, content, attachments } = input;
 
-    await requireChannelInServer(channelId, serverId);
+    const channel = await requireChannelInServer(channelId, serverId);
 
     const message = await messageRepository.create({
       channel: { connect: { id: channelId } },
@@ -185,6 +186,35 @@ export const messageService = {
           'Failed to publish message created event',
         ),
       );
+
+    // Dispatch push notifications fire-and-forget
+    (async () => {
+      try {
+        const [author, server] = await Promise.all([
+          prisma.user.findUnique({ where: { id: authorId }, select: { username: true } }),
+          prisma.server.findUnique({ where: { id: serverId }, select: { slug: true } }),
+        ]);
+        if (!author || !server) return;
+
+        const ctx = {
+          authorId,
+          channelId,
+          serverId,
+          channelName: channel.name,
+          authorUsername: author.username,
+          serverSlug: server.slug,
+          channelSlug: channel.slug,
+          content,
+        };
+
+        await Promise.all([
+          pushNotificationService.notifyMentions(ctx),
+          pushNotificationService.notifyNewMessage(ctx),
+        ]);
+      } catch (err) {
+        logger.warn({ err, messageId: message.id }, 'Push notification dispatch failed');
+      }
+    })();
 
     return message;
   },
