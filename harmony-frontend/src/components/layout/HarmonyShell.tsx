@@ -23,7 +23,6 @@ import { VoiceProvider } from '@/contexts/VoiceContext';
 import { BrowseServersModal } from '@/components/server-rail/BrowseServersModal';
 import { useServerEvents } from '@/hooks/useServerEvents';
 import { useServerListSync } from '@/hooks/useServerListSync';
-import { usePresenceTracker } from '@/hooks/usePresenceTracker';
 import { ChannelType, ChannelVisibility, UserStatus } from '@/types';
 import { useRouter } from 'next/navigation';
 import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
@@ -320,6 +319,19 @@ export function HarmonyShell({
     [],
   );
 
+  const authUserStatusKey = authUser ? `${authUser.id}:${authUser.status}:${authUser.role}` : null;
+  const [prevAuthUserStatusKey, setPrevAuthUserStatusKey] = useState(authUserStatusKey);
+  if (authUserStatusKey !== prevAuthUserStatusKey) {
+    setPrevAuthUserStatusKey(authUserStatusKey);
+    if (authUser?.id) {
+      setLocalMembers(prev =>
+        prev.map(m =>
+          m.id === authUser.id ? { ...m, status: authUser.status, role: authUser.role } : m,
+        ),
+      );
+    }
+  }
+
   // ── Real-time visibility changes ──────────────────────────────────────────
 
   const handleChannelVisibilityChanged = useCallback(
@@ -382,8 +394,6 @@ export function HarmonyShell({
     onServerUpdated: handleServerUpdated,
     enabled: isAuthenticated,
   });
-
-  usePresenceTracker(isAuthenticated);
 
   // #c10/#c23: single global Ctrl+K / Cmd+K handler — SearchModal no longer needs its own
   useEffect(() => {

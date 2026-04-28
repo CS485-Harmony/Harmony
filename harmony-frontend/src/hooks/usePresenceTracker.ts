@@ -4,8 +4,10 @@ import { useEffect, useRef } from 'react';
 import { getAccessToken } from '@/lib/api-client';
 import { createFrontendLogger } from '@/lib/frontend-logger';
 import { getApiBaseUrl } from '@/lib/runtime-config';
+import type { UserStatus } from '@/types/user';
 
 type PresenceStatus = 'ONLINE' | 'IDLE';
+type FrontendPresenceStatus = Extract<UserStatus, 'online' | 'idle'>;
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const PRESENCE_INTERVAL_MS = 30_000;
@@ -35,7 +37,14 @@ function postPresence(status: PresenceStatus): void {
   });
 }
 
-export function usePresenceTracker(enabled: boolean): void {
+function toFrontendStatus(status: PresenceStatus): FrontendPresenceStatus {
+  return status === 'ONLINE' ? 'online' : 'idle';
+}
+
+export function usePresenceTracker(
+  enabled: boolean,
+  onStatusChanged?: (status: FrontendPresenceStatus) => void,
+): void {
   const statusRef = useRef<PresenceStatus>('ONLINE');
   const lastActivePostRef = useRef(0);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -65,6 +74,7 @@ export function usePresenceTracker(enabled: boolean): void {
       }
 
       statusRef.current = status;
+      onStatusChanged?.(toFrontendStatus(status));
       if (status === 'ONLINE') lastActivePostRef.current = now;
       postPresence(status);
     };
@@ -97,5 +107,5 @@ export function usePresenceTracker(enabled: boolean): void {
         window.removeEventListener(event, markActive);
       }
     };
-  }, [enabled]);
+  }, [enabled, onStatusChanged]);
 }
