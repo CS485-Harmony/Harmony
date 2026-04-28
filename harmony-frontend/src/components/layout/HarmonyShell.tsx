@@ -23,6 +23,7 @@ import { VoiceProvider } from '@/contexts/VoiceContext';
 import { BrowseServersModal } from '@/components/server-rail/BrowseServersModal';
 import { useServerEvents } from '@/hooks/useServerEvents';
 import { useServerListSync } from '@/hooks/useServerListSync';
+import { usePresenceTracker } from '@/hooks/usePresenceTracker';
 import { ChannelType, ChannelVisibility, UserStatus } from '@/types';
 import { useRouter } from 'next/navigation';
 import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
@@ -164,15 +165,6 @@ export function HarmonyShell({
     isAdmin: checkIsAdmin,
   } = useAuth();
 
-  // Fallback for guest/unauthenticated view
-  const currentUser: User = authUser ?? {
-    id: 'guest',
-    username: 'Guest',
-    displayName: 'Guest',
-    status: 'online',
-    role: 'guest',
-  };
-
   const router = useRouter();
   const [isCreateServerOpen, setIsCreateServerOpen] = useState(false);
   const [isBrowseServersOpen, setIsBrowseServersOpen] = useState(false);
@@ -185,15 +177,31 @@ export function HarmonyShell({
 
   const { notifyServerCreated, notifyServerJoined } = useServerListSync();
 
+  const currentMemberRecord = useMemo(
+    () => localMembers.find(m => m.id === authUser?.id),
+    [localMembers, authUser?.id],
+  );
+
+  // Fallback for guest/unauthenticated view.
+  const currentUser: User = authUser
+    ? {
+        ...authUser,
+        status: currentMemberRecord?.status ?? authUser.status,
+        role: currentMemberRecord?.role ?? authUser.role,
+      }
+    : {
+        id: 'guest',
+        username: 'Guest',
+        displayName: 'Guest',
+        status: 'online',
+        role: 'guest',
+      };
+
   // Show the pin UI only to users with MODERATOR+ server-scoped role, and never
   // while the channel is locked (pinning would be meaningless/unauthorized anyway).
   // localMembers is populated by toFrontendMember() in serverService.ts, which maps
   // the backend ServerMember.role field (server-scoped) to User.role.
   // System admins bypass membership checks — they are authorized server-side regardless.
-  const currentMemberRecord = useMemo(
-    () => localMembers.find(m => m.id === authUser?.id),
-    [localMembers, authUser?.id],
-  );
   const canPin = useMemo(
     () =>
       isAuthenticated &&
@@ -375,6 +383,8 @@ export function HarmonyShell({
     enabled: isAuthenticated,
   });
 
+  usePresenceTracker(isAuthenticated);
+
   // #c10/#c23: single global Ctrl+K / Cmd+K handler — SearchModal no longer needs its own
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -497,7 +507,7 @@ export function HarmonyShell({
               />
             )}
             <MembersSidebar
-              members={members}
+              members={localMembers}
               isOpen={isMembersOpen}
               onClose={() => setIsMembersOpen(false)}
             />
