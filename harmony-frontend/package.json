@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
-    "@emoji-mart/react": "^1.1.1",
     "axios": "^1.13.5",
     "clsx": "^2.1.1",
     "emoji-mart": "^5.6.0",

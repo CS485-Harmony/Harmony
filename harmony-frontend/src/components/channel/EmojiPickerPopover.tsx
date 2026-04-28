@@ -2,11 +2,13 @@
 
 /**
  * EmojiPickerPopover
- * Thin wrapper around emoji-mart's Picker so it can be lazy-loaded.
- * Only rendered when the user opens the emoji panel in MessageInput.
+ * Mounts the vanilla emoji-mart Picker into a div ref so it works with
+ * React 19 without the @emoji-mart/react wrapper (which only supports React ≤18).
+ * Only rendered client-side via next/dynamic { ssr: false }.
  */
 
-import Picker from '@emoji-mart/react';
+import { useEffect, useRef } from 'react';
+import { Picker } from 'emoji-mart';
 import data from '@emoji-mart/data';
 
 export interface EmojiPickerPopoverProps {
@@ -14,14 +16,31 @@ export interface EmojiPickerPopoverProps {
 }
 
 export function EmojiPickerPopover({ onEmojiSelect }: EmojiPickerPopoverProps) {
-  return (
-    <Picker
-      data={data}
-      onEmojiSelect={onEmojiSelect}
-      theme='dark'
-      previewPosition='none'
-      skinTonePosition='none'
-      maxFrequentRows={2}
-    />
-  );
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const picker = new (Picker as any)({
+      data,
+      onEmojiSelect,
+      theme: 'dark',
+      previewPosition: 'none',
+      skinTonePosition: 'none',
+      maxFrequentRows: 2,
+    });
+
+    el.appendChild(picker);
+
+    return () => {
+      if (el.contains(picker)) el.removeChild(picker);
+    };
+    // onEmojiSelect is stable (useCallback in parent) — intentionally omitted
+    // from deps to avoid remounting the picker on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return <div ref={containerRef} />;
 }
