@@ -111,6 +111,7 @@ function buildPreview(
     ogImage,
     keywords,
     generatedAt: record.generatedAt.toISOString(),
+    isFallbackPreview: false,
     isCustom,
     generatedTitle: record.title,
     generatedDescription: record.description,
