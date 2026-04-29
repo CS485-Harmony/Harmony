@@ -202,6 +202,36 @@ export async function isChannelGuestAccessible(
   return result !== null && !result.isPrivate;
 }
 
+/**
+ * Fetch all public (PUBLIC_INDEXABLE + PUBLIC_NO_INDEX) channels for a server.
+ * Returns an empty array on error or if the server is not found.
+ * Deduplicated within a single render pass via React `cache`.
+ */
+export const fetchPublicChannels = cache(async (serverSlug: string): Promise<Channel[]> => {
+  try {
+    const res = await fetch(
+      `${API_CONFIG.BASE_URL}/api/public/servers/${encodeURIComponent(serverSlug)}/channels`,
+      { next: { revalidate: CACHE_DURATION.PUBLIC_API_REVALIDATE } },
+    );
+    if (!res.ok) return [];
+    const data: { channels: Array<{ id: string; name: string; slug: string; type: string; topic?: string | null; visibility: string }> } =
+      await res.json();
+    return data.channels.map(c => ({
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      serverId: '',
+      type: mapChannelType(c.type),
+      visibility: mapChannelVisibility(c.visibility),
+      topic: c.topic ?? undefined,
+      position: 0,
+      createdAt: '',
+    }));
+  } catch {
+    return [];
+  }
+});
+
 export const fetchPublicMetaTags = cache(
   async (serverSlug: string, channelSlug: string): Promise<PublicMetaTagResponse | null> => {
     try {

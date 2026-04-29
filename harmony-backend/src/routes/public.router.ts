@@ -233,14 +233,17 @@ export function createPublicRouter(store?: Store) {
         return;
       }
 
-      const cacheKey = `server:${sanitizeKeySegment(server.id)}:public_channels`;
+      const cacheKey = `server:${sanitizeKeySegment(server.id)}:public_channels_v2`;
       const cacheOpts = { ttl: CacheTTL.serverInfo, staleTtl: CacheTTL.serverInfo };
 
       const fetcher = async () => {
         const channels = await prisma.channel.findMany({
-          where: { serverId: server.id, visibility: ChannelVisibility.PUBLIC_INDEXABLE },
+          where: {
+            serverId: server.id,
+            visibility: { in: [ChannelVisibility.PUBLIC_INDEXABLE, ChannelVisibility.PUBLIC_NO_INDEX] },
+          },
           orderBy: { position: 'asc' },
-          select: { id: true, name: true, slug: true, type: true, topic: true },
+          select: { id: true, name: true, slug: true, type: true, topic: true, visibility: true },
         });
         return { channels };
       };
