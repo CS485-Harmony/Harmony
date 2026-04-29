@@ -14,7 +14,6 @@ interface MentionAutocompleteProps {
   candidates: MentionCandidate[];
   selectedIndex: number;
   onSelect: (candidate: MentionCandidate) => void;
-  onClose: () => void;
 }
 
 /**
@@ -25,7 +24,6 @@ export function MentionAutocomplete({
   candidates,
   selectedIndex,
   onSelect,
-  onClose,
 }: MentionAutocompleteProps) {
   const listRef = useRef<HTMLUListElement>(null);
 

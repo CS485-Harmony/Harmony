@@ -228,6 +228,7 @@ export function MessageInput({
     onMessageSent,
     pendingAttachments,
     replyingTo,
+    closeMentionDropdown,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -408,7 +409,6 @@ export function MessageInput({
           candidates={mentionCandidates}
           selectedIndex={mentionSelectedIdx}
           onSelect={handleMentionSelect}
-          onClose={closeMentionDropdown}
         />
       )}
 
