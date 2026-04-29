@@ -12,7 +12,7 @@ import { eventBus } from '../src/events/eventBus';
 import { prisma } from '../src/db/prisma';
 import { createDeferred, waitFor } from './helpers/async';
 import type { Express } from 'express';
-import type { ChannelCreatedPayload } from '../src/events/eventTypes';
+import type { ChannelCreatedPayload, MessageCreatedPayload } from '../src/events/eventTypes';
 
 const VALID_TOKEN = 'valid-token';
 const VALID_SERVER_ID = '550e8400-e29b-41d4-a716-446655440001';
@@ -47,7 +47,7 @@ jest.mock('../src/services/auth.service', () => ({
 
 jest.mock('../src/db/prisma', () => ({
   prisma: {
-    message: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+    message: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     channel: { findUnique: jest.fn(), findMany: jest.fn() },
     server: { findUnique: jest.fn() },
     serverMember: { findFirst: jest.fn() },
@@ -132,6 +132,7 @@ beforeEach(() => {
   (prisma.server.findUnique as jest.Mock).mockResolvedValue({ id: VALID_SERVER_ID });
   (prisma.serverMember.findFirst as jest.Mock).mockResolvedValue({ userId: 'test-user-id' });
   (prisma.channel.findMany as jest.Mock).mockResolvedValue([]);
+  (prisma.message.findMany as jest.Mock).mockResolvedValue([]);
   (prisma.channel.findUnique as jest.Mock).mockResolvedValue({
     id: CREATED_CHANNEL_ID,
     serverId: VALID_SERVER_ID,
@@ -270,6 +271,220 @@ describe('GET /api/events/server/:serverId — subscription readiness', () => {
     expect(body).toContain('event: channel:created');
     expect(body).toContain(CREATED_CHANNEL_ID);
     expect(body).toContain('"name":"general"');
+  });
+
+  it('buffers message:created events that arrive before the stream becomes live', async () => {
+    const ready = createDeferred<void>();
+    const responseStarted = createDeferred<void>();
+    const MESSAGE_ID = '550e8400-e29b-41d4-a716-446655440010';
+    const CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440011';
+    let messageCreatedHandler: ((payload: MessageCreatedPayload) => Promise<void>) | null = null;
+
+    // Pre-populate serverChannelIds by returning one channel from the preload query.
+    (prisma.channel.findMany as jest.Mock).mockResolvedValue([{ id: CHANNEL_ID }]);
+
+    mockSubscribe.mockImplementation(
+      (channel: string, handler: (payload: MessageCreatedPayload) => Promise<void>) => {
+        if (channel === 'harmony:MESSAGE_CREATED') {
+          messageCreatedHandler = handler;
+        }
+        return { unsubscribe: jest.fn(), ready: ready.promise };
+      },
+    );
+
+    (prisma.message.findUnique as jest.Mock).mockResolvedValue({
+      id: MESSAGE_ID,
+      channelId: CHANNEL_ID,
+      authorId: 'author-1',
+      author: { id: 'author-1', username: 'bob', displayName: 'Bob', avatarUrl: null },
+      content: 'live message during setup window',
+      createdAt: new Date('2026-04-19T11:00:00.000Z'),
+      editedAt: null,
+      attachments: [],
+      isDeleted: false,
+    });
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    const chunks: string[] = [];
+    let response: http.IncomingMessage | null = null;
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get(
+        { hostname: 'localhost', port, path: sseUrl },
+        (res) => {
+          response = res;
+          responseStarted.resolve();
+          res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+          res.on('error', reject);
+        },
+      );
+
+      req.on('error', reject);
+
+      setTimeout(async () => {
+        if (!messageCreatedHandler) {
+          reject(new Error('MESSAGE_CREATED handler was not registered'));
+          return;
+        }
+
+        await messageCreatedHandler({
+          messageId: MESSAGE_ID,
+          channelId: CHANNEL_ID,
+          authorId: 'author-1',
+          timestamp: new Date('2026-04-19T11:00:00.000Z').toISOString(),
+        });
+
+        ready.resolve();
+        await responseStarted.promise;
+
+        setTimeout(() => {
+          response?.destroy();
+          req.destroy();
+          resolve();
+        }, 75);
+      }, 50);
+    });
+
+    const body = chunks.join('');
+    expect(body).toContain('event: message:created');
+    expect(body).toContain('live message during setup window');
+  });
+});
+
+// ─── Last-Event-ID replay ──────────────────────────────────────────────────────
+
+describe('GET /api/events/server/:serverId — Last-Event-ID replay', () => {
+  const REPLAY_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440020';
+  const REPLAY_MESSAGE_ID = '550e8400-e29b-41d4-a716-446655440021';
+  const lastEventId = '2026-04-19T09:59:00.000Z';
+  const sseUrlWithReplay = `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}&lastEventId=${encodeURIComponent(lastEventId)}`;
+
+  it('replays message:created events missed during the reconnect gap', async () => {
+    (prisma.channel.findMany as jest.Mock).mockResolvedValue([{ id: REPLAY_CHANNEL_ID }]);
+
+    const missedMessage = {
+      id: REPLAY_MESSAGE_ID,
+      channelId: REPLAY_CHANNEL_ID,
+      authorId: 'author-2',
+      author: { id: 'author-2', username: 'carol', displayName: 'Carol', avatarUrl: null },
+      content: 'missed during disconnect',
+      createdAt: new Date('2026-04-19T09:59:30.000Z'),
+      editedAt: null,
+      attachments: [],
+      isDeleted: false,
+    };
+    (prisma.message.findMany as jest.Mock).mockResolvedValue([missedMessage]);
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    const chunks: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get({ hostname: 'localhost', port, path: sseUrlWithReplay }, (res) => {
+        res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+        res.on('error', reject);
+        setTimeout(() => {
+          res.destroy();
+          req.destroy();
+          resolve();
+        }, 150);
+      });
+      req.on('error', reject);
+    });
+
+    const body = chunks.join('');
+    expect(body).toContain('event: message:created');
+    expect(body).toContain('missed during disconnect');
+    expect(body).toContain(lastEventId.slice(0, 10)); // id: field contains the date
+  });
+
+  it('emits replay frames before buffered live events', async () => {
+    const ready = createDeferred<void>();
+    const LIVE_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440022';
+    const LIVE_MESSAGE_ID = '550e8400-e29b-41d4-a716-446655440023';
+    let messageCreatedHandler: ((payload: MessageCreatedPayload) => Promise<void>) | null = null;
+
+    (prisma.channel.findMany as jest.Mock).mockResolvedValue([{ id: LIVE_CHANNEL_ID }]);
+
+    const replayMsg = {
+      id: REPLAY_MESSAGE_ID,
+      channelId: LIVE_CHANNEL_ID,
+      authorId: 'author-2',
+      author: { id: 'author-2', username: 'carol', displayName: 'Carol', avatarUrl: null },
+      content: 'replay message',
+      createdAt: new Date('2026-04-19T09:59:30.000Z'),
+      editedAt: null,
+      attachments: [],
+      isDeleted: false,
+    };
+    const liveMsg = {
+      id: LIVE_MESSAGE_ID,
+      channelId: LIVE_CHANNEL_ID,
+      authorId: 'author-3',
+      author: { id: 'author-3', username: 'dave', displayName: 'Dave', avatarUrl: null },
+      content: 'live message',
+      createdAt: new Date('2026-04-19T10:01:00.000Z'),
+      editedAt: null,
+      attachments: [],
+      isDeleted: false,
+    };
+
+    (prisma.message.findMany as jest.Mock).mockResolvedValue([replayMsg]);
+    (prisma.message.findUnique as jest.Mock).mockResolvedValue(liveMsg);
+
+    mockSubscribe.mockImplementation(
+      (channel: string, handler: (payload: MessageCreatedPayload) => Promise<void>) => {
+        if (channel === 'harmony:MESSAGE_CREATED') messageCreatedHandler = handler;
+        return { unsubscribe: jest.fn(), ready: ready.promise };
+      },
+    );
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    const chunks: string[] = [];
+    const responseStarted = createDeferred<void>();
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get(
+        { hostname: 'localhost', port, path: sseUrlWithReplay },
+        (res) => {
+          responseStarted.resolve();
+          res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+          res.on('error', reject);
+        },
+      );
+      req.on('error', reject);
+
+      setTimeout(async () => {
+        if (!messageCreatedHandler) {
+          reject(new Error('MESSAGE_CREATED handler was not registered'));
+          return;
+        }
+        // Simulate a live event arriving during the readiness window.
+        await messageCreatedHandler({
+          messageId: LIVE_MESSAGE_ID,
+          channelId: LIVE_CHANNEL_ID,
+          authorId: 'author-3',
+          timestamp: new Date('2026-04-19T10:01:00.000Z').toISOString(),
+        });
+        ready.resolve();
+        await responseStarted.promise;
+        setTimeout(() => {
+          req.destroy();
+          resolve();
+        }, 150);
+      }, 50);
+    });
+
+    const body = chunks.join('');
+    const replayPos = body.indexOf('replay message');
+    const livePos = body.indexOf('live message');
+    expect(replayPos).toBeGreaterThanOrEqual(0);
+    expect(livePos).toBeGreaterThan(replayPos);
   });
 });
 
