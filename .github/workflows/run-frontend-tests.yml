@@ -17,14 +17,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Detect relevant code/test changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'harmony-frontend/**'
+
+      - name: Skip frontend tests for non-code changes
+        if: steps.changes.outputs.relevant != 'true' && github.event_name != 'workflow_dispatch'
+        run: echo "No changes under harmony-frontend/; skipping frontend tests."
+
       - uses: actions/setup-node@v4
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: harmony-frontend/package-lock.json
 
       - name: Install dependencies
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: npm ci
 
       - name: Run frontend tests
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: npm test

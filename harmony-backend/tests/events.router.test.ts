@@ -46,7 +46,7 @@ jest.mock('../src/services/auth.service', () => ({
 
 jest.mock('../src/db/prisma', () => ({
   prisma: {
-    message: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+    message: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     channel: { findUnique: jest.fn() },
     serverMember: { findFirst: jest.fn() },
   },
@@ -136,6 +136,7 @@ beforeEach(() => {
   // Default prisma mocks for auth path through SSE endpoint
   (prisma.channel.findUnique as jest.Mock).mockResolvedValue({ serverId: 'test-server-id' });
   (prisma.serverMember.findFirst as jest.Mock).mockResolvedValue({ userId: 'test-user-id' });
+  (prisma.message.findMany as jest.Mock).mockResolvedValue([]);
 });
 
 // ─── SSE headers ──────────────────────────────────────────────────────────────
@@ -281,6 +282,53 @@ describe('GET /api/events/channel/:channelId — subscription readiness', () => 
     const body = chunks.join('');
     expect(body).toContain('event: message:created');
     expect(body).toContain('hello from the setup window');
+  });
+});
+
+// ─── Last-Event-ID replay ──────────────────────────────────────────────────────
+
+describe('GET /api/events/channel/:channelId — Last-Event-ID replay', () => {
+  const VALID_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440001';
+  const lastEventId = '2026-04-19T09:59:00.000Z';
+  const sseUrl = `/api/events/channel/${VALID_CHANNEL_ID}?token=${VALID_TOKEN}&lastEventId=${encodeURIComponent(lastEventId)}`;
+
+  it('replays message:created events missed during the reconnect gap', async () => {
+    const missedMessage = {
+      id: 'missed-msg-1',
+      channelId: VALID_CHANNEL_ID,
+      authorId: 'author-1',
+      author: { id: 'author-1', username: 'alice', displayName: 'Alice', avatarUrl: null },
+      content: 'missed during disconnect',
+      createdAt: new Date('2026-04-19T09:59:30.000Z'),
+      editedAt: null,
+      attachments: [],
+      isDeleted: false,
+    };
+    (prisma.message.findMany as jest.Mock).mockResolvedValue([missedMessage]);
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    const chunks: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+        res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+        res.on('error', reject);
+        setTimeout(() => {
+          res.destroy();
+          req.destroy();
+          resolve();
+        }, 150);
+      });
+      req.on('error', reject);
+    });
+
+    const body = chunks.join('');
+    expect(body).toContain('event: message:created');
+    expect(body).toContain('missed during disconnect');
+    // Verify the id: field is present with the message's createdAt timestamp
+    expect(body).toContain('id: 2026-04-19');
   });
 });
 

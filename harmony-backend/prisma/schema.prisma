@@ -73,6 +73,7 @@ model User {
   refreshTokens      RefreshToken[]
   ownedServers       Server[]             @relation("ServerOwner")
   serverMemberships  ServerMember[]
+  createdInvites     ServerInvite[]       @relation("InviteCreator")
 
   @@map("users")
 }
@@ -105,6 +106,7 @@ model Server {
   owner    User      @relation("ServerOwner", fields: [ownerId], references: [id])
   channels Channel[]
   members  ServerMember[]
+  invites  ServerInvite[]
 
   // idx_servers_slug is pinned via map: on the @unique above.
   // idx_servers_public (partial WHERE is_public = TRUE) is added in the
@@ -234,6 +236,24 @@ model VisibilityAuditLog {
   // Both indexes below are added as raw SQL in the migration (DESC ordering
   // cannot be expressed in Prisma schema DSL for composite indexes).
   @@map("visibility_audit_log")
+}
+
+/// Invite codes that allow users to join a server regardless of its isPublic flag.
+model ServerInvite {
+  id        String    @id @default(uuid()) @db.Uuid
+  code      String    @unique @db.VarChar(16)
+  serverId  String    @map("server_id") @db.Uuid
+  creatorId String    @map("creator_id") @db.Uuid
+  uses      Int       @default(0)
+  maxUses   Int?      @map("max_uses")
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  server  Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  creator User   @relation("InviteCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([serverId], map: "idx_server_invites_server")
+  @@map("server_invites")
 }
 
 model GeneratedMetaTags {

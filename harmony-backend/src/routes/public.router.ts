@@ -7,6 +7,7 @@ import { cacheMiddleware } from '../middleware/cache.middleware';
 import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from '../services/cache.service';
 import { createPublicRateLimiter } from '../middleware/rate-limit.middleware';
 import { metaTagService } from '../services/metaTag/metaTagService';
+import { inviteService } from '../services/invite.service';
 
 const logger = createLogger({ component: 'public-router' });
 
@@ -392,6 +393,26 @@ export function createPublicRouter(store?: Store) {
       }
     },
   );
+
+  /**
+   * GET /api/public/invites/:code
+   * Returns server preview info for an invite code without consuming it.
+   * Returns 404 if code is unknown, expired, or exhausted.
+   */
+  router.get('/invites/:code', async (req: Request, res: Response) => {
+    try {
+      const preview = await inviteService.preview(req.params.code);
+      if (!preview) {
+        res.status(404).json({ error: 'Invite not found or no longer valid' });
+        return;
+      }
+      res.set('Cache-Control', 'no-store');
+      res.json(preview);
+    } catch (err) {
+      logger.error({ err, code: req.params.code }, 'Public invite preview route failed');
+      if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 
   return router;
 }

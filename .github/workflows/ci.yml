@@ -19,19 +19,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Detect relevant code/test changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'harmony-frontend/**'
+
+      - name: Skip frontend lint/build for non-code changes
+        if: steps.changes.outputs.relevant != 'true' && github.event_name != 'workflow_dispatch'
+        run: echo "No changes under harmony-frontend/; skipping frontend lint/build."
+
       - uses: actions/setup-node@v4
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: harmony-frontend/package-lock.json
 
       - name: Install dependencies
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: npm ci
 
       - name: Lint
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: npm run lint
 
       - name: Build
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: npm run build
 
   backend-lint-build:
@@ -43,20 +59,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Detect relevant code/test changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'harmony-backend/**'
+
+      - name: Skip backend lint/build for non-code changes
+        if: steps.changes.outputs.relevant != 'true' && github.event_name != 'workflow_dispatch'
+        run: echo "No changes under harmony-backend/; skipping backend lint/build."
+
       - uses: actions/setup-node@v4
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: harmony-backend/package-lock.json
 
       - name: Install dependencies
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: npm ci
 
       - name: Lint
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: npm run lint
 
       - name: Generate Prisma client
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: npx prisma generate
 
       - name: Build
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: npm run build

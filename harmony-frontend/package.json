@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:sandbox": "next build --webpack",
     "start": "next start",
     "build:local-e2e": "NEXT_PUBLIC_API_URL=http://localhost:4000 NEXT_PUBLIC_BASE_URL=http://localhost:3000 next build",
+    "build:local-e2e:sandbox": "NEXT_PUBLIC_API_URL=http://localhost:4000 NEXT_PUBLIC_BASE_URL=http://localhost:3000 next build --webpack",
     "start:local-e2e": "PORT=3000 NEXT_PUBLIC_API_URL=http://localhost:4000 NEXT_PUBLIC_BASE_URL=http://localhost:3000 next start",
     "test": "jest --forceExit",
     "test:e2e": "playwright test",

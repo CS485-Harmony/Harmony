@@ -1,6 +1,7 @@
 import { ServerSettingsPage } from '@/components/settings/ServerSettingsPage';
 import { requireServerSettingsAccess } from './settings-access';
-import { getSessionUser } from '@/lib/trpc-client';
+import { getSessionUser, trpcQuery } from '@/lib/trpc-client';
+import type { PermissionMatrix } from '@/components/settings/PermissionsSection';
 
 interface PageProps {
   params: Promise<{ serverSlug: string }>;
@@ -8,9 +9,10 @@ interface PageProps {
 
 export default async function ServerSettingsRoute({ params }: PageProps) {
   const { serverSlug } = await params;
-  const [server, sessionUser] = await Promise.all([
+  const [server, sessionUser, permissionMatrix] = await Promise.all([
     requireServerSettingsAccess(serverSlug),
     getSessionUser(),
+    trpcQuery<PermissionMatrix>('permission.getMatrix').catch((): null => null),
   ]);
 
   return (
@@ -20,6 +22,7 @@ export default async function ServerSettingsRoute({ params }: PageProps) {
       canDeleteServer={Boolean(
         sessionUser && (sessionUser.isSystemAdmin || sessionUser.id === server.ownerId),
       )}
+      permissionMatrix={permissionMatrix}
     />
   );
 }

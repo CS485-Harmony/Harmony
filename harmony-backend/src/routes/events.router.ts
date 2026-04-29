@@ -71,8 +71,9 @@ type BufferedSseState = {
   heartbeat: ReturnType<typeof setInterval> | null;
 };
 
-function formatEvent(eventType: string, data: unknown): string {
-  return `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+function formatEvent(eventType: string, data: unknown, id?: string): string {
+  const idLine = id !== undefined ? `id: ${id}\n` : '';
+  return `${idLine}event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
 function createBufferedSseState(): BufferedSseState {
@@ -100,10 +101,10 @@ function cleanupSseConnection(state: BufferedSseState, subscriptions: EventSubsc
 function createBufferedEventWriter(
   res: Response,
   state: BufferedSseState,
-): (eventType: string, data: unknown) => void {
-  return (eventType: string, data: unknown) => {
+): (eventType: string, data: unknown, id?: string) => void {
+  return (eventType: string, data: unknown, id?: string) => {
     if (state.closed) return;
-    const frame = formatEvent(eventType, data);
+    const frame = formatEvent(eventType, data, id);
     if (!state.ready) {
       state.pendingFrames.push(frame);
       return;
@@ -118,6 +119,7 @@ async function finalizeSseSetup(
   state: BufferedSseState,
   subscriptions: EventSubscription[],
   logContext: Record<string, string>,
+  replayFrames?: () => Promise<string[]>,
 ): Promise<boolean> {
   const cleanup = () => cleanupSseConnection(state, subscriptions);
   req.on('close', cleanup);
@@ -142,6 +144,20 @@ async function finalizeSseSetup(
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
+
+  // Replay missed events (Last-Event-ID) before flushing the live buffer.
+  // This fills the reconnect gap: DB range [lastEventId, subscribeStartTime],
+  // buffer range [subscribeStartTime, ∞) — no overlap, no duplicates.
+  if (replayFrames) {
+    try {
+      const frames = await replayFrames();
+      for (const frame of frames) {
+        res.write(frame);
+      }
+    } catch (err) {
+      logger.warn({ err, ...logContext }, 'Last-Event-ID replay failed; continuing without replay');
+    }
+  }
 
   state.ready = true;
   for (const frame of state.pendingFrames.splice(0)) {
@@ -201,6 +217,12 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     return;
   }
 
+  // ── Last-Event-ID replay — capture subscription start time and last ID ────
+  const subscribeStartTime = new Date();
+  const lastEventId =
+    (typeof req.headers['last-event-id'] === 'string' ? req.headers['last-event-id'] : null) ??
+    (typeof req.query.lastEventId === 'string' ? req.query.lastEventId : null);
+
   const sseState = createBufferedSseState();
   const writeEvent = createBufferedEventWriter(res, sseState);
 
@@ -218,16 +240,20 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
         });
         if (!message || message.isDeleted) return;
 
-        writeEvent('message:created', {
-          id: message.id,
-          channelId: message.channelId,
-          authorId: message.authorId,
-          author: message.author,
-          content: message.content,
-          timestamp: message.createdAt.toISOString(),
-          attachments: message.attachments,
-          editedAt: message.editedAt ? message.editedAt.toISOString() : null,
-        });
+        writeEvent(
+          'message:created',
+          {
+            id: message.id,
+            channelId: message.channelId,
+            authorId: message.authorId,
+            author: message.author,
+            content: message.content,
+            timestamp: message.createdAt.toISOString(),
+            attachments: message.attachments,
+            editedAt: message.editedAt ? message.editedAt.toISOString() : null,
+          },
+          message.createdAt.toISOString(),
+        );
       } catch (err) {
         logger.warn(
           { err, channelId, messageId: payload.messageId },
@@ -300,11 +326,47 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     serverUpdatedSubscription,
   ];
 
-  await finalizeSseSetup(req, res, sseState, channelSubscriptions, {
-    route: 'channel-events',
-    channelId,
-    serverId: channel.serverId,
-  });
+  // ── Replay messages missed during reconnect gap ──────────────────────────
+  const replayFrames = lastEventId
+    ? async (): Promise<string[]> => {
+        const lastTs = new Date(lastEventId);
+        if (isNaN(lastTs.getTime())) return [];
+        const missed = await prisma.message.findMany({
+          where: {
+            channelId,
+            isDeleted: false,
+            createdAt: { gt: lastTs, lt: subscribeStartTime },
+          },
+          include: MESSAGE_SSE_INCLUDE,
+          orderBy: { createdAt: 'asc' },
+        });
+        return missed.map((msg) =>
+          formatEvent(
+            'message:created',
+            {
+              id: msg.id,
+              channelId: msg.channelId,
+              authorId: msg.authorId,
+              author: msg.author,
+              content: msg.content,
+              timestamp: msg.createdAt.toISOString(),
+              attachments: msg.attachments,
+              editedAt: msg.editedAt ? msg.editedAt.toISOString() : null,
+            },
+            msg.createdAt.toISOString(),
+          ),
+        );
+      }
+    : undefined;
+
+  await finalizeSseSetup(
+    req,
+    res,
+    sseState,
+    channelSubscriptions,
+    { route: 'channel-events', channelId, serverId: channel.serverId },
+    replayFrames,
+  );
 });
 
 // ─── Prisma select shape for channel SSE events ───────────────────────────────
@@ -378,6 +440,12 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     res.status(403).json({ error: 'You are not a member of this server' });
     return;
   }
+
+  // ── Last-Event-ID replay — capture subscription start time and last ID ────
+  const subscribeStartTime = new Date();
+  const lastEventId =
+    (typeof req.headers['last-event-id'] === 'string' ? req.headers['last-event-id'] : null) ??
+    (typeof req.query.lastEventId === 'string' ? req.query.lastEventId : null);
 
   const sseState = createBufferedSseState();
   const writeEvent = createBufferedEventWriter(res, sseState);
@@ -458,16 +526,20 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
         });
         if (!message || message.isDeleted) return;
 
-        writeEvent('message:created', {
-          id: message.id,
-          channelId: message.channelId,
-          authorId: message.authorId,
-          author: message.author,
-          content: message.content,
-          timestamp: message.createdAt.toISOString(),
-          attachments: message.attachments,
-          editedAt: message.editedAt ? message.editedAt.toISOString() : null,
-        });
+        writeEvent(
+          'message:created',
+          {
+            id: message.id,
+            channelId: message.channelId,
+            authorId: message.authorId,
+            author: message.author,
+            content: message.content,
+            timestamp: message.createdAt.toISOString(),
+            attachments: message.attachments,
+            editedAt: message.editedAt ? message.editedAt.toISOString() : null,
+          },
+          message.createdAt.toISOString(),
+        );
       } catch (err) {
         logger.warn(
           { err, serverId, messageId: payload.messageId },
@@ -648,8 +720,40 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
   );
   subscriptions.push(visibilityChangedSubscription);
 
-  await finalizeSseSetup(req, res, sseState, subscriptions, {
-    route: 'server-events',
-    serverId,
-  });
+  // ── Replay messages missed during reconnect gap ──────────────────────────
+  const serverReplayFrames = lastEventId
+    ? async (): Promise<string[]> => {
+        const lastTs = new Date(lastEventId);
+        if (isNaN(lastTs.getTime())) return [];
+        const channelIdList = [...serverChannelIds];
+        if (channelIdList.length === 0) return [];
+        const missed = await prisma.message.findMany({
+          where: {
+            channelId: { in: channelIdList },
+            isDeleted: false,
+            createdAt: { gt: lastTs, lt: subscribeStartTime },
+          },
+          include: MESSAGE_SSE_INCLUDE,
+          orderBy: { createdAt: 'asc' },
+        });
+        return missed.map((msg) =>
+          formatEvent(
+            'message:created',
+            {
+              id: msg.id,
+              channelId: msg.channelId,
+              authorId: msg.authorId,
+              author: msg.author,
+              content: msg.content,
+              timestamp: msg.createdAt.toISOString(),
+              attachments: msg.attachments,
+              editedAt: msg.editedAt ? msg.editedAt.toISOString() : null,
+            },
+            msg.createdAt.toISOString(),
+          ),
+        );
+      }
+    : undefined;
+
+  await finalizeSseSetup(req, res, sseState, subscriptions, { route: 'server-events', serverId }, serverReplayFrames);
 });
