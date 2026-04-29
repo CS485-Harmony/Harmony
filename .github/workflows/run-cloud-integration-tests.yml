@@ -1,0 +1,53 @@
+name: Cloud Integration Tests
+
+on:
+  deployment_status:
+  workflow_dispatch:
+
+jobs:
+  run-cloud-integration-tests:
+    name: Run Cloud Integration Tests
+    if: github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    environment: cloud-integration-tests
+    env:
+      TEST_TARGET: cloud
+      BACKEND_URL: ${{ vars.CLOUD_TEST_BACKEND_URL }}
+      FRONTEND_URL: ${{ vars.CLOUD_TEST_FRONTEND_URL }}
+      CLOUD_TEST_SERVER_SLUG: ${{ vars.CLOUD_TEST_SERVER_SLUG }}
+      CLOUD_TEST_PUBLIC_CHANNEL: ${{ vars.CLOUD_TEST_PUBLIC_CHANNEL }}
+      CLOUD_TEST_PUBLIC_CHANNELS: ${{ vars.CLOUD_TEST_PUBLIC_CHANNELS }}
+      CLOUD_TEST_SERVER_ID: ${{ vars.CLOUD_TEST_SERVER_ID }}
+      CLOUD_TEST_ACCESS_TOKEN: ${{ secrets.CLOUD_TEST_ACCESS_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate cloud integration test configuration
+        run: |
+          missing=0
+          for name in BACKEND_URL FRONTEND_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing cloud integration test config::Set repository variable ${name} for cloud integration tests"
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Set up Node.js (integration tests)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tests/integration/package-lock.json
+
+      - name: Install integration test dependencies
+        working-directory: tests/integration
+        run: npm ci
+
+      - name: Run integration tests (cloud target)
+        working-directory: tests/integration
+        run: npm run test:cloud
