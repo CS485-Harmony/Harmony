@@ -67,7 +67,7 @@ const ADMIN_PERMISSIONS = new Set<Action>([
 
 const OWNER_PERMISSIONS = new Set<Action>([...ADMIN_PERMISSIONS, 'server:delete']);
 
-const ROLE_PERMISSIONS: Record<RoleType, Set<Action>> = {
+export const ROLE_PERMISSIONS: Record<RoleType, Set<Action>> = {
   OWNER: OWNER_PERMISSIONS,
   ADMIN: ADMIN_PERMISSIONS,
   MODERATOR: MODERATOR_PERMISSIONS,
