@@ -75,8 +75,14 @@ trap 'cleanup 143' TERM
 trap 'cleanup $?' EXIT
 
 set +e
-wait -n "$BACKEND_PID" "$WORKER_PID" "$FRONTEND_PID"
-FIRST_EXIT_CODE=$?
-set -e
-
-cleanup "$FIRST_EXIT_CODE"
+while true; do
+  for pid in "$BACKEND_PID" "$WORKER_PID" "$FRONTEND_PID"; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid"
+      FIRST_EXIT_CODE=$?
+      set -e
+      cleanup "$FIRST_EXIT_CODE"
+    fi
+  done
+  sleep 1
+done
