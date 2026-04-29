@@ -1,5 +1,5 @@
 import { requireServerSettingsAccess } from '@/app/settings/[serverSlug]/settings-access';
-import { getCurrentUser } from '@/services/authService';
+import { getSessionUser } from '@/lib/trpc-client';
 import { getServerAuthenticated, getServerMembersWithRole } from '@/services/serverService';
 
 const mockRedirect = jest.fn((path: string) => {
@@ -14,8 +14,8 @@ jest.mock('next/navigation', () => ({
   notFound: () => mockNotFound(),
 }));
 
-jest.mock('@/services/authService', () => ({
-  getCurrentUser: jest.fn(),
+jest.mock('@/lib/trpc-client', () => ({
+  getSessionUser: jest.fn(),
 }));
 
 jest.mock('@/services/serverService', () => ({
@@ -23,7 +23,7 @@ jest.mock('@/services/serverService', () => ({
   getServerMembersWithRole: jest.fn(),
 }));
 
-const mockGetCurrentUser = getCurrentUser as jest.MockedFunction<typeof getCurrentUser>;
+const mockGetSessionUser = getSessionUser as jest.MockedFunction<typeof getSessionUser>;
 const mockGetServerAuthenticated = getServerAuthenticated as jest.MockedFunction<
   typeof getServerAuthenticated
 >;
@@ -42,12 +42,10 @@ describe('requireServerSettingsAccess', () => {
     >;
     mockGetServerAuthenticated.mockResolvedValue(server);
     mockGetServerMembersWithRole.mockResolvedValue([]);
-    mockGetCurrentUser.mockResolvedValue({
+    mockGetSessionUser.mockResolvedValue({
       id: 'owner-1',
       username: 'owner',
       displayName: 'Owner',
-      role: 'member',
-      status: 'online',
       isSystemAdmin: false,
     });
 
@@ -61,12 +59,10 @@ describe('requireServerSettingsAccess', () => {
     >;
     mockGetServerAuthenticated.mockResolvedValue(server);
     mockGetServerMembersWithRole.mockResolvedValue([]);
-    mockGetCurrentUser.mockResolvedValue({
+    mockGetSessionUser.mockResolvedValue({
       id: 'admin-1',
       username: 'admin',
       displayName: 'Admin',
-      role: 'member',
-      status: 'online',
       isSystemAdmin: true,
     });
 
@@ -88,12 +84,10 @@ describe('requireServerSettingsAccess', () => {
         joinedAt: '2026-04-17T00:00:00.000Z',
       },
     ]);
-    mockGetCurrentUser.mockResolvedValue({
+    mockGetSessionUser.mockResolvedValue({
       id: 'admin-member-1',
       username: 'admin-member',
       displayName: 'Admin Member',
-      role: 'member',
-      status: 'online',
       isSystemAdmin: false,
     });
 
@@ -115,12 +109,10 @@ describe('requireServerSettingsAccess', () => {
         joinedAt: '2026-04-17T00:00:00.000Z',
       },
     ]);
-    mockGetCurrentUser.mockResolvedValue({
+    mockGetSessionUser.mockResolvedValue({
       id: 'member-1',
       username: 'member',
       displayName: 'Member',
-      role: 'member',
-      status: 'online',
       isSystemAdmin: false,
     });
 
@@ -144,12 +136,10 @@ describe('requireServerSettingsAccess', () => {
         joinedAt: '2026-04-17T00:00:00.000Z',
       },
     ]);
-    mockGetCurrentUser.mockResolvedValue({
+    mockGetSessionUser.mockResolvedValue({
       id: 'member-1',
       username: 'member',
       displayName: 'Member',
-      role: 'member',
-      status: 'online',
       isSystemAdmin: false,
     });
 
