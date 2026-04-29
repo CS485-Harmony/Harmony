@@ -4,21 +4,27 @@
  * Supports a full variant (avatar + author + timestamp + content) and a
  * compact variant (no avatar/name) for grouped follow-up messages.
  *
- * ActionBar: appears on hover/focus. Shows Reply and Add Reaction stubs to
- * authenticated users. Shows a "More" (⋯) dropdown with "Pin/Unpin Message"
- * for users with message:pin permission (MODERATOR, ADMIN, OWNER), and
- * "Edit Message" for the message's own author.
+ * ActionBar: appears on hover/focus. Shows Reply (functional) and Add Reaction
+ * stub for all users. Shows a "More" (⋯) dropdown with "Pin/Unpin Message" for
+ * users with message:pin permission (MODERATOR, ADMIN, OWNER), and "Edit
+ * Message" for the message's own author.
+ *
+ * Threading: top-level messages with replies show a "View N replies" button.
+ * Clicking it expands an inline ThreadView showing indented replies and a
+ * reply composer.
  */
 
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Image from 'next/image';
+import { useRouter, usePathname } from 'next/navigation';
 import { formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
 import { pinMessageAction, unpinMessageAction } from '@/app/actions/pinMessage';
 import { editMessageAction } from '@/app/actions/editMessage';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
+import { ThreadView } from '@/components/message/ThreadView';
 import type { Message, Reaction } from '@/types';
 
 // ─── AttachmentList ───────────────────────────────────────────────────────────
@@ -114,7 +120,7 @@ type PinState = 'idle' | 'loading' | 'success' | 'error';
 
 /**
  * Hover/focus-within action bar for a message.
- * Reply and Add Reaction are authenticated-only stubs (future issues).
+ * Reply triggers onReplyClick (opens thread for authenticated users).
  * More (⋯) is rendered when canPin or isOwnMessage is true, and opens a
  * dropdown with Pin/Unpin (canPin) and Edit Message (isOwnMessage).
  */
@@ -125,6 +131,7 @@ function ActionBar({
   initialPinned,
   isOwnMessage,
   onEditClick,
+  onReplyClick,
 }: {
   messageId: string;
   serverId?: string;
@@ -132,8 +139,11 @@ function ActionBar({
   initialPinned?: boolean;
   isOwnMessage?: boolean;
   onEditClick?: () => void;
+  onReplyClick?: () => void;
 }) {
   const { isAuthenticated } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
@@ -199,10 +209,6 @@ function ActionBar({
     }
   }, [isPinned, messageId, serverId]);
 
-  if (!isAuthenticated && !canPin && !isOwnMessage) {
-    return null;
-  }
-
   return (
     <div className='absolute -top-3 right-4 z-10 flex items-center rounded-md border border-white/10 bg-[#2f3136] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'>
       {/* Inline pin feedback */}
@@ -211,43 +217,51 @@ function ActionBar({
       )}
       {pinState === 'error' && <span className='px-2 text-xs text-red-400'>{pinErrorMsg}</span>}
 
-      {isAuthenticated && (
-        <>
-          <button
-            type='button'
-            aria-label='Reply'
-            title='Reply'
-            className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-          >
-            <svg
-              className='h-4 w-4'
-              viewBox='0 0 24 24'
-              fill='currentColor'
-              aria-hidden='true'
-              focusable='false'
-            >
-              <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
-            </svg>
-          </button>
+      {/* Reply — redirects guests to login; opens thread for authenticated users */}
+      <button
+        type='button'
+        aria-label='Reply'
+        title='Reply'
+        onClick={
+          !isAuthenticated
+            ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`)
+            : onReplyClick
+        }
+        className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+      >
+        <svg
+          className='h-4 w-4'
+          viewBox='0 0 24 24'
+          fill='currentColor'
+          aria-hidden='true'
+          focusable='false'
+        >
+          <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
+        </svg>
+      </button>
 
-          <button
-            type='button'
-            aria-label='Add Reaction'
-            title='Add Reaction'
-            className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-          >
-            <svg
-              className='h-4 w-4'
-              viewBox='0 0 24 24'
-              fill='currentColor'
-              aria-hidden='true'
-              focusable='false'
-            >
-              <path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22C6.486 22 2 17.514 2 12S6.486 2 12 2s10 4.486 10 10-4.486 10-10 10zm-3.5-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm1.476 2.37a.75.75 0 0 0-1.06-1.06 4.5 4.5 0 0 1-6.832 0 .75.75 0 0 0-1.061 1.06 6 6 0 0 0 8.953 0z' />
-            </svg>
-          </button>
-        </>
-      )}
+      {/* Add Reaction — redirects guests to login; stub for authenticated users */}
+      <button
+        type='button'
+        aria-label='Add Reaction'
+        title='Add Reaction'
+        onClick={
+          !isAuthenticated
+            ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`)
+            : undefined
+        }
+        className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+      >
+        <svg
+          className='h-4 w-4'
+          viewBox='0 0 24 24'
+          fill='currentColor'
+          aria-hidden='true'
+          focusable='false'
+        >
+          <path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22C6.486 22 2 17.514 2 12S6.486 2 12 2s10 4.486 10 10-4.486 10-10 10zm-3.5-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm1.476 2.37a.75.75 0 0 0-1.06-1.06 4.5 4.5 0 0 1-6.832 0 .75.75 0 0 0-1.061 1.06 6 6 0 0 0 8.953 0z' />
+        </svg>
+      </button>
 
       {/* More — rendered when user can pin or is the message author */}
       {(canPin || isOwnMessage) && (
@@ -339,6 +353,10 @@ export function MessageItem({
   const [isSaving, setIsSaving] = useState(false);
   const [localContent, setLocalContent] = useState<string | undefined>(undefined);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // Thread state: only top-level messages (no parentMessageId) can have threads
+  const isTopLevel = !message.parentMessageId;
+  const [isThreadOpen, setIsThreadOpen] = useState(false);
+  const [localReplyCount, setLocalReplyCount] = useState(message.replyCount ?? 0);
 
   // Render-phase derived-state reset: when the avatar URL changes (including A→B→A),
   // reset avatarError so the new URL is always attempted.
@@ -421,6 +439,10 @@ export function MessageItem({
   //   moderator → #3ba55c (green), member/guest → text-white
   const authorNameClass = 'cursor-pointer font-medium text-white hover:underline';
 
+  const handleReplyClick = useCallback(() => {
+    setIsThreadOpen(true);
+  }, []);
+
   const actionBar = (
     <ActionBar
       messageId={message.id}
@@ -429,6 +451,7 @@ export function MessageItem({
       initialPinned={!!message.pinned}
       isOwnMessage={isOwnMessage}
       onEditClick={handleEditClick}
+      onReplyClick={isTopLevel ? handleReplyClick : undefined}
     />
   );
 
@@ -468,78 +491,120 @@ export function MessageItem({
     </div>
   );
 
+  // "View N replies" / "Hide replies" button shown on top-level messages with replies
+  const threadToggle =
+    isTopLevel && serverId ? (
+      <button
+        type='button'
+        onClick={() => setIsThreadOpen(v => !v)}
+        className='mt-1 flex items-center gap-1 text-xs text-[#5865f2] hover:underline'
+        aria-expanded={isThreadOpen}
+        aria-label={
+          isThreadOpen
+            ? 'Hide replies'
+            : `View ${localReplyCount} ${localReplyCount === 1 ? 'reply' : 'replies'}`
+        }
+      >
+        <svg className='h-3 w-3' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+          <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
+        </svg>
+        {isThreadOpen
+          ? 'Hide replies'
+          : `${localReplyCount} ${localReplyCount === 1 ? 'reply' : 'replies'}`}
+      </button>
+    ) : null;
+
+  // Inline thread view rendered below message content
+  const threadView =
+    isTopLevel && isThreadOpen && serverId ? (
+      <ThreadView
+        parentMessage={message}
+        channelId={message.channelId}
+        serverId={serverId}
+        onReplyCountChange={delta => setLocalReplyCount(c => c + delta)}
+      />
+    ) : null;
+
   if (!showHeader) {
     return (
-      <div className='group relative flex gap-4 px-4 py-0.5 hover:bg-white/[0.02]'>
-        {!isEditing && actionBar}
-        {/* Spacer aligns content with the 40px avatar of the header row */}
-        <div className='w-10 flex-shrink-0 text-right'>
-          <span className='invisible text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
-            {formatTimeOnly(message.timestamp)}
-          </span>
+      <div className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'>
+        <div className='flex gap-4'>
+          {!isEditing && actionBar}
+          {/* Spacer aligns content with the 40px avatar of the header row */}
+          <div className='w-10 flex-shrink-0 text-right'>
+            <span className='invisible text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
+              {formatTimeOnly(message.timestamp)}
+            </span>
+          </div>
+          <div className='min-w-0 flex-1'>
+            {isEditing ? (
+              editUi
+            ) : (
+              <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
+                {localContent ?? message.content}
+                {(message.editedAt || localContent !== undefined) && (
+                  <span className='ml-1 text-[10px] text-gray-500'>(edited)</span>
+                )}
+              </p>
+            )}
+            <AttachmentList attachments={message.attachments} />
+            <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
+            {localReplyCount > 0 && threadToggle}
+          </div>
         </div>
-        <div className='min-w-0 flex-1'>
-          {isEditing ? (
-            editUi
-          ) : (
-            <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-              {localContent ?? message.content}
-              {(message.editedAt || localContent !== undefined) && (
-                <span className='ml-1 text-[10px] text-gray-500'>(edited)</span>
-              )}
-            </p>
-          )}
-          <AttachmentList attachments={message.attachments} />
-          <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
-        </div>
+        {threadView}
       </div>
     );
   }
 
   return (
-    <div className='group relative flex gap-4 px-4 py-0.5 hover:bg-white/[0.02]'>
-      {!isEditing && actionBar}
-      {/* Avatar */}
-      <div className='mt-0.5 flex-shrink-0'>
-        {message.author.avatarUrl && !avatarError ? (
-          <Image
-            src={message.author.avatarUrl}
-            alt={message.author.username}
-            width={40}
-            height={40}
-            unoptimized
-            className='h-10 w-10 rounded-full'
-            onError={() => setAvatarError(true)}
-          />
-        ) : (
-          <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#5865f2] text-sm font-bold text-white'>
-            {authorInitial}
-          </div>
-        )}
-      </div>
-      {/* Content */}
-      <div className='min-w-0 flex-1'>
-        <div className='flex items-baseline gap-2'>
-          <span className={authorNameClass}>
-            {message.author.displayName ?? message.author.username}
-          </span>
-          <span className='text-[11px] text-gray-400'>
-            {formatMessageTimestamp(message.timestamp)}
-          </span>
-          {(message.editedAt || localContent !== undefined) && (
-            <span className='text-[10px] text-gray-500'>(edited)</span>
+    <div className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'>
+      <div className='flex gap-4'>
+        {!isEditing && actionBar}
+        {/* Avatar */}
+        <div className='mt-0.5 flex-shrink-0'>
+          {message.author.avatarUrl && !avatarError ? (
+            <Image
+              src={message.author.avatarUrl}
+              alt={message.author.username}
+              width={40}
+              height={40}
+              unoptimized
+              className='h-10 w-10 rounded-full'
+              onError={() => setAvatarError(true)}
+            />
+          ) : (
+            <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#5865f2] text-sm font-bold text-white'>
+              {authorInitial}
+            </div>
           )}
         </div>
-        {isEditing ? (
-          editUi
-        ) : (
-          <p className='mt-0.5 whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-            {localContent ?? message.content}
-          </p>
-        )}
-        <AttachmentList attachments={message.attachments} />
-        <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
+        {/* Content */}
+        <div className='min-w-0 flex-1'>
+          <div className='flex items-baseline gap-2'>
+            <span className={authorNameClass}>
+              {message.author.displayName ?? message.author.username}
+            </span>
+            <span className='text-[11px] text-gray-400'>
+              {formatMessageTimestamp(message.timestamp)}
+            </span>
+            {(message.editedAt || localContent !== undefined) && (
+              <span className='text-[10px] text-gray-500'>(edited)</span>
+            )}
+          </div>
+          {isEditing ? (
+            editUi
+          ) : (
+            <p className='mt-0.5 whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
+              {localContent ?? message.content}
+            </p>
+          )}
+          <AttachmentList attachments={message.attachments} />
+          <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
+          {localReplyCount > 0 && threadToggle}
+        </div>
       </div>
+      {threadView}
     </div>
   );
 }

@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MessageItem } from '@/components/message/MessageItem';
 import type { Message } from '@/types';
 
 const mockUseAuth = jest.fn();
+const mockPush = jest.fn();
 
 jest.mock('@/hooks/useAuth', () => ({
   useAuth: () => mockUseAuth(),
@@ -15,7 +16,7 @@ jest.mock('@/hooks/useToast', () => ({
 
 jest.mock('next/navigation', () => ({
   usePathname: () => '/c/testserver/new-channel',
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: mockPush }),
 }));
 
 const baseMessage: Message = {
@@ -36,15 +37,33 @@ describe('MessageItem guest actions', () => {
     jest.clearAllMocks();
   });
 
-  it('does not render Reply or Add Reaction controls for guest users', () => {
+  it('keeps Reply and Add Reaction controls available for guest users', () => {
     mockUseAuth.mockReturnValue({
       isAuthenticated: false,
     });
 
     render(<MessageItem message={baseMessage} />);
 
-    expect(screen.queryByRole('button', { name: 'Reply' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Add Reaction' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reply' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add Reaction' })).toBeInTheDocument();
+  });
+
+  it('redirects guests to login when clicking Reply or Add Reaction', () => {
+    mockUseAuth.mockReturnValue({
+      isAuthenticated: false,
+    });
+
+    render(<MessageItem message={baseMessage} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    expect(mockPush).toHaveBeenCalledWith(
+      '/auth/login?returnUrl=%2Fc%2Ftestserver%2Fnew-channel'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Reaction' }));
+    expect(mockPush).toHaveBeenCalledWith(
+      '/auth/login?returnUrl=%2Fc%2Ftestserver%2Fnew-channel'
+    );
   });
 
   it('keeps Reply and Add Reaction controls available for authenticated users', () => {
