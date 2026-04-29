@@ -1,7 +1,11 @@
-/**
- * AppLayout — wraps all /channels/* authenticated routes.
- * TODO: add authentication guard here (redirect to login if unauthenticated).
- */
-export default function AppLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+import { Suspense, type ReactNode } from 'react';
+import { AuthGuard } from '@/components/layout/AuthGuard';
+
+/** Wraps all /channels/* authenticated routes. */
+export default function AppLayout({ children }: { children: ReactNode }) {
+  return (
+    <Suspense>
+      <AuthGuard>{children}</AuthGuard>
+    </Suspense>
+  );
 }
