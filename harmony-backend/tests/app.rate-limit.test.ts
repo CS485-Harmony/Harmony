@@ -80,4 +80,23 @@ describe('auth rate limiters — store delegation (Issue #318)', () => {
     // 3 increment calls recorded in the shared array
     expect(incrementCalls.length).toBe(3);
   });
+
+  it('does not lock out local development after 10 login attempts', async () => {
+    const previousEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+
+    try {
+      const app = createApp();
+      let lastStatus = 0;
+
+      for (let attempt = 0; attempt < 11; attempt += 1) {
+        const res = await request(app).post('/api/auth/login').send({});
+        lastStatus = res.status;
+      }
+
+      expect(lastStatus).not.toBe(429);
+    } finally {
+      process.env.NODE_ENV = previousEnv;
+    }
+  });
 });

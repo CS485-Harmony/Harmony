@@ -14,8 +14,14 @@ jest.mock('@/lib/passwordAuth', () => ({
   derivePasswordVerifier: jest.fn(),
 }));
 
+jest.mock('@/app/actions/session', () => ({
+  setSessionCookie: jest.fn().mockResolvedValue(undefined),
+  clearSessionCookie: jest.fn().mockResolvedValue(undefined),
+}));
+
 import { apiClient, getAccessToken, setTokens } from '@/lib/api-client';
 import { derivePasswordVerifier } from '@/lib/passwordAuth';
+import { clearSessionCookie, setSessionCookie } from '@/app/actions/session';
 import {
   getCurrentUser,
   login,
@@ -81,6 +87,7 @@ describe('authService password transport hardening', () => {
       password: 'plain-text-password',
     });
     expect(mockedSetTokens).toHaveBeenCalledWith('access', 'refresh');
+    expect(setSessionCookie).toHaveBeenCalledWith('access');
   });
 
   it('requests a registration salt and never posts the raw password during signup', async () => {
@@ -106,6 +113,17 @@ describe('authService password transport hardening', () => {
       username: 'alice',
       password: 'plain-text-password',
     });
+    expect(setSessionCookie).toHaveBeenCalledWith('access');
+  });
+
+  it('clears the server auth cookie on logout', async () => {
+    const { logout } = await import('@/services/authService');
+    window.localStorage.setItem('harmony_refresh_token', 'refresh-token');
+    mockedApiClient.post.mockResolvedValueOnce(undefined);
+
+    await logout();
+
+    expect(clearSessionCookie).toHaveBeenCalled();
   });
 
   it('preserves backend OFFLINE until live presence tracking marks the session online', async () => {

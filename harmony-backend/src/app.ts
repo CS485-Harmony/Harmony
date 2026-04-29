@@ -61,6 +61,7 @@ export function createApp(options: CreateAppOptions = {}) {
   presenceService.startSweeper();
 
   const isE2E = process.env.NODE_ENV === 'e2e';
+  const isProduction = process.env.NODE_ENV === 'production';
   // Each limiter calls makeStore() independently so it gets its own instance.
   const makeStore = (prefix: string): Store | undefined =>
     options.rateLimitStore ? options.rateLimitStore() : buildProductionStore(prefix);
@@ -72,7 +73,7 @@ export function createApp(options: CreateAppOptions = {}) {
 
   const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: isE2E ? 1000 : 10,
+    max: isProduction ? 10 : 1000,
     standardHeaders: true,
     legacyHeaders: false,
     store: makeStore('rl:login:'),
@@ -90,7 +91,7 @@ export function createApp(options: CreateAppOptions = {}) {
 
   const refreshLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: isE2E ? 1000 : 30,
+    max: isProduction ? 30 : 1000,
     standardHeaders: true,
     legacyHeaders: false,
     store: makeStore('rl:refresh:'),

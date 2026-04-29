@@ -21,6 +21,7 @@ import {
   getRefreshToken,
 } from '@/lib/api-client';
 import { derivePasswordVerifier } from '@/lib/passwordAuth';
+import { clearSessionCookie, setSessionCookie } from '@/app/actions/session';
 
 // ─── Backend response shapes ──────────────────────────────────────────────────
 
@@ -146,6 +147,7 @@ export async function login(email: string, password: string): Promise<User> {
     passwordVerifier,
   });
   setTokens(tokens.accessToken, tokens.refreshToken);
+  await setSessionCookie(tokens.accessToken);
 
   const user = await apiClient.trpcQuery<BackendUser>('user.getCurrentUser');
   return applyStoredManualStatusOverride(mapBackendUser(user));
@@ -173,6 +175,7 @@ export async function register(
     passwordVerifier,
   });
   setTokens(tokens.accessToken, tokens.refreshToken);
+  await setSessionCookie(tokens.accessToken);
 
   let user = await apiClient.trpcQuery<BackendUser>('user.getCurrentUser');
 
@@ -197,6 +200,7 @@ export async function logout(): Promise<void> {
     }
   }
   clearTokens();
+  await clearSessionCookie();
 }
 
 /**
