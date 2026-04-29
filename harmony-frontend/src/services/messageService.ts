@@ -44,6 +44,22 @@ function toFrontendMessage(raw: Record<string, unknown>, fallbackChannelId = '')
       | string
       | null
       | undefined,
+    parentMessage: (() => {
+      const p = (raw.parentMessage ?? raw.parent) as Record<string, unknown> | null | undefined;
+      if (!p) return null;
+      const pa = p.author as Record<string, unknown> | undefined;
+      return {
+        id: p.id as string,
+        content: (p.content ?? '') as string,
+        isDeleted: (p.isDeleted ?? p.is_deleted ?? false) as boolean,
+        author: {
+          id: (pa?.id ?? '') as string,
+          username: (pa?.username ?? '') as string,
+          displayName: (pa?.displayName ?? pa?.display_name) as string | undefined,
+          avatarUrl: (pa?.avatarUrl ?? pa?.avatar_url) as string | undefined,
+        },
+      };
+    })(),
     replyCount:
       typeof raw.replyCount === 'number'
         ? raw.replyCount

@@ -58,6 +58,14 @@ const MESSAGE_SSE_INCLUDE = {
   attachments: {
     select: { id: true, filename: true, url: true, contentType: true },
   },
+  parent: {
+    select: {
+      id: true,
+      content: true,
+      isDeleted: true,
+      author: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
+    },
+  },
 } as const;
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
@@ -251,6 +259,15 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
             timestamp: message.createdAt.toISOString(),
             attachments: message.attachments,
             editedAt: message.editedAt ? message.editedAt.toISOString() : null,
+            parentMessageId: message.parentMessageId,
+            parentMessage: message.parent
+              ? {
+                  id: message.parent.id,
+                  content: message.parent.isDeleted ? '' : message.parent.content,
+                  isDeleted: message.parent.isDeleted,
+                  author: message.parent.author,
+                }
+              : null,
           },
           message.createdAt.toISOString(),
         );
@@ -352,6 +369,15 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
               timestamp: msg.createdAt.toISOString(),
               attachments: msg.attachments,
               editedAt: msg.editedAt ? msg.editedAt.toISOString() : null,
+              parentMessageId: msg.parentMessageId,
+              parentMessage: msg.parent
+                ? {
+                    id: msg.parent.id,
+                    content: msg.parent.isDeleted ? '' : msg.parent.content,
+                    isDeleted: msg.parent.isDeleted,
+                    author: msg.parent.author,
+                  }
+                : null,
             },
             msg.createdAt.toISOString(),
           ),
@@ -537,6 +563,15 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
             timestamp: message.createdAt.toISOString(),
             attachments: message.attachments,
             editedAt: message.editedAt ? message.editedAt.toISOString() : null,
+            parentMessageId: message.parentMessageId,
+            parentMessage: message.parent
+              ? {
+                  id: message.parent.id,
+                  content: message.parent.isDeleted ? '' : message.parent.content,
+                  isDeleted: message.parent.isDeleted,
+                  author: message.parent.author,
+                }
+              : null,
           },
           message.createdAt.toISOString(),
         );
@@ -748,6 +783,15 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
               timestamp: msg.createdAt.toISOString(),
               attachments: msg.attachments,
               editedAt: msg.editedAt ? msg.editedAt.toISOString() : null,
+              parentMessageId: msg.parentMessageId,
+              parentMessage: msg.parent
+                ? {
+                    id: msg.parent.id,
+                    content: msg.parent.isDeleted ? '' : msg.parent.content,
+                    isDeleted: msg.parent.isDeleted,
+                    author: msg.parent.author,
+                  }
+                : null,
             },
             msg.createdAt.toISOString(),
           ),

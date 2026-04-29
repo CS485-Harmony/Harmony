@@ -12,6 +12,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { cn } from '@/lib/utils';
 import { sendMessageAction } from '@/app/actions/sendMessage';
+import { createReplyAction } from '@/app/actions/createReply';
 import type { Message, AttachmentInput } from '@/types';
 
 // Lazy-load the heavy emoji picker bundle so it doesn't block the initial render
@@ -39,6 +40,10 @@ export interface MessageInputProps {
   isReadOnly?: boolean;
   /** Called with the newly created message after a successful send */
   onMessageSent?: (message: Message) => void;
+  /** When set, shows a "Replying to X" banner and sends as a reply to this message */
+  replyingTo?: Message | null;
+  /** Called when the user dismisses the reply banner */
+  onCancelReply?: () => void;
 }
 
 export function MessageInput({
@@ -47,6 +52,8 @@ export function MessageInput({
   serverId,
   isReadOnly = false,
   onMessageSent,
+  replyingTo,
+  onCancelReply,
 }: MessageInputProps) {
   const [value, setValue] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -168,12 +175,26 @@ export function MessageInput({
     setIsSending(true);
     setSendError(null);
     try {
-      const msg = await sendMessageAction(
-        channelId,
-        trimmed,
-        serverId,
-        pendingAttachments.length ? pendingAttachments : undefined,
-      );
+      let msg: Message;
+      if (replyingTo) {
+        const result = await createReplyAction(replyingTo.id, channelId, serverId, trimmed);
+        if (!result.ok) {
+          setSendError(
+            result.forbidden
+              ? "You don't have permission to reply in this channel."
+              : 'Failed to send reply. Please try again.',
+          );
+          return;
+        }
+        msg = result.message;
+      } else {
+        msg = await sendMessageAction(
+          channelId,
+          trimmed,
+          serverId,
+          pendingAttachments.length ? pendingAttachments : undefined,
+        );
+      }
       setValue('');
       setPendingAttachments([]);
       onMessageSent?.(msg);
@@ -192,6 +213,7 @@ export function MessageInput({
     serverId,
     onMessageSent,
     pendingAttachments,
+    replyingTo,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -227,6 +249,28 @@ export function MessageInput({
 
   return (
     <div className='relative flex-shrink-0 px-4 pb-6 pt-2'>
+      {replyingTo && (
+        <div className='mb-1 flex items-center gap-2 rounded-t bg-[#36393f] px-3 py-1.5 text-xs text-gray-400'>
+          <svg className='h-3.5 w-3.5 flex-shrink-0' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+            <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
+          </svg>
+          <span>
+            Replying to{' '}
+            <span className='font-medium text-white'>
+              {replyingTo.author.displayName ?? replyingTo.author.username}
+            </span>
+          </span>
+          <span className='ml-1 truncate text-gray-500'>{replyingTo.content}</span>
+          <button
+            type='button'
+            aria-label='Cancel reply'
+            onClick={onCancelReply}
+            className='ml-auto flex-shrink-0 text-gray-500 hover:text-gray-200 transition-colors'
+          >
+            ✕
+          </button>
+        </div>
+      )}
       {sendError && (
         <p className='mb-1 px-1 text-xs text-red-400' role='alert'>
           {sendError}
@@ -309,7 +353,7 @@ export function MessageInput({
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={`Message #${channelName}`}
+          placeholder={replyingTo ? `Reply to ${replyingTo.author.displayName ?? replyingTo.author.username}…` : `Message #${channelName}`}
           rows={1}
           disabled={isSending}
           aria-label={`Message #${channelName}`}
