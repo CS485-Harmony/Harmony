@@ -15,6 +15,7 @@ import {
 } from '@/app/settings/[serverSlug]/[channelSlug]/actions';
 import { VisibilityToggle } from '@/components/channel/VisibilityToggle';
 import { SeoPreviewSection } from '@/components/settings/SeoPreviewSection';
+import { apiClient } from '@/lib/api-client';
 import type { Channel } from '@/types';
 import type { AuditLogEntry, AuditLogPage } from '@/services/channelService';
 import { ChannelVisibility } from '@/types';
@@ -30,13 +31,91 @@ const BG = {
 
 // ─── Sidebar sections ─────────────────────────────────────────────────────────
 
-type Section = 'overview' | 'permissions' | 'visibility' | 'seo';
+type NotifLevel = 'ALL' | 'MENTIONS' | 'NONE';
+
+const NOTIF_LABELS: Record<NotifLevel, string> = {
+  ALL: 'All Messages',
+  MENTIONS: 'Mentions Only',
+  NONE: 'Muted',
+};
+
+function ChannelNotificationsSection({ channel, serverId }: { channel: Channel; serverId: string }) {
+  const [level, setLevel] = useState<NotifLevel>('MENTIONS');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiClient
+      .trpcQuery<{ level: NotifLevel }[]>('notification.getPreferences')
+      .then((prefs) => {
+        const pref = prefs.find(
+          (p: { channelId?: string | null; level: NotifLevel }) => p.channelId === channel.id,
+        );
+        if (pref) setLevel(pref.level);
+      })
+      .catch(() => {});
+  }, [channel.id]);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await apiClient.trpcMutation('notification.setChannelLevel', {
+        channelId: channel.id,
+        serverId,
+        level,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className='space-y-4'>
+      <h2 className='text-lg font-semibold text-white'>Notification Settings</h2>
+      <p className='text-sm text-gray-400'>
+        Choose which messages in <span className='font-medium text-gray-200'>#{channel.name}</span>{' '}
+        trigger a push notification for you.
+      </p>
+      <div className='flex items-center gap-3'>
+        <select
+          value={level}
+          onChange={(e) => setLevel(e.target.value as NotifLevel)}
+          disabled={saving}
+          className='rounded bg-[#1e1f22] px-3 py-1.5 text-sm text-gray-200 border border-[#3d4148] focus:outline-none focus:border-indigo-500 disabled:opacity-50'
+        >
+          {(Object.keys(NOTIF_LABELS) as NotifLevel[]).map((l) => (
+            <option key={l} value={l}>
+              {NOTIF_LABELS[l]}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={save}
+          disabled={saving}
+          className='rounded px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-medium disabled:opacity-50 transition-colors'
+        >
+          {saving ? 'Saving…' : saved ? 'Saved!' : 'Save'}
+        </button>
+      </div>
+      {error && <p className='text-xs text-red-400'>{error}</p>}
+    </div>
+  );
+}
+
+type Section = 'overview' | 'permissions' | 'visibility' | 'seo' | 'notifications';
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'permissions', label: 'Permissions' },
   { id: 'visibility', label: 'Visibility' },
   { id: 'seo', label: 'SEO Preview' },
+  { id: 'notifications', label: 'Notifications' },
 ];
 
 // ─── Overview section ─────────────────────────────────────────────────────────
@@ -680,6 +759,9 @@ export function ChannelSettingsPage({
               channelSlug={channel.slug}
               canManageSeo={canManageSeo}
             />
+          )}
+          {activeSection === 'notifications' && (
+            <ChannelNotificationsSection channel={channel} serverId={channel.serverId} />
           )}
         </div>
       </main>
