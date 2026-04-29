@@ -17,13 +17,24 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { useRouter, usePathname } from 'next/navigation';
-import { formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
+import { cn, formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
 import { pinMessageAction, unpinMessageAction } from '@/app/actions/pinMessage';
 import { editMessageAction } from '@/app/actions/editMessage';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
+import { ThreadView } from '@/components/message/ThreadView';
+import { apiClient } from '@/lib/api-client';
 import type { Message, Reaction } from '@/types';
+
+const EmojiPickerPopover = dynamic(
+  () =>
+    import('@/components/channel/EmojiPickerPopover').then(m => ({
+      default: m.EmojiPickerPopover,
+    })),
+  { ssr: false },
+);
 
 // ─── AttachmentList ───────────────────────────────────────────────────────────
 
@@ -75,21 +86,41 @@ function AttachmentList({ attachments }: { attachments: Message['attachments'] }
 
 // ─── ReactionList ─────────────────────────────────────────────────────────────
 
-function ReactionList({ reactions, messageId }: { reactions: Reaction[]; messageId: string }) {
+function ReactionList({
+  reactions,
+  messageId,
+  userId,
+  onReactionClick,
+}: {
+  reactions: Reaction[];
+  messageId: string;
+  userId?: string;
+  onReactionClick?: (emoji: string, alreadyReacted: boolean) => void;
+}) {
   if (!reactions || reactions.length === 0) return null;
   return (
     <div className='mt-1 flex flex-wrap gap-1'>
-      {reactions.map(r => (
-        <button
-          key={`${r.emoji}-${messageId}`}
-          type='button'
-          aria-label={`React with ${r.emoji} (${r.count} ${r.count !== 1 ? 'reactions' : 'reaction'})`}
-          className='flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-gray-300 hover:bg-white/10'
-        >
-          <span>{r.emoji}</span>
-          <span>{r.count}</span>
-        </button>
-      ))}
+      {reactions.map(r => {
+        const alreadyReacted = !!userId && r.userIds.includes(userId);
+        return (
+          <button
+            key={`${r.emoji}-${messageId}`}
+            type='button'
+            aria-label={`React with ${r.emoji} (${r.count} ${r.count !== 1 ? 'reactions' : 'reaction'})${alreadyReacted ? ' — click to remove' : ''}`}
+            aria-pressed={alreadyReacted}
+            onClick={() => onReactionClick?.(r.emoji, alreadyReacted)}
+            className={cn(
+              'flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors',
+              alreadyReacted
+                ? 'border-[#5865f2]/60 bg-[#5865f2]/20 text-[#5865f2] hover:bg-[#5865f2]/30'
+                : 'border-white/10 bg-white/5 text-gray-300 hover:bg-white/10',
+            )}
+          >
+            <span>{r.emoji}</span>
+            <span>{r.count}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -167,6 +198,7 @@ type PinState = 'idle' | 'loading' | 'success' | 'error';
 function ActionBar({
   messageId,
   serverId,
+  channelId,
   canPin,
   initialPinned,
   isOwnMessage,
@@ -174,9 +206,11 @@ function ActionBar({
   onReplyClick,
   onPinActionStart,
   onPinToggle,
+  onReactionAdd,
 }: {
   messageId: string;
   serverId?: string;
+  channelId?: string;
   canPin?: boolean;
   initialPinned?: boolean;
   isOwnMessage?: boolean;
@@ -184,8 +218,10 @@ function ActionBar({
   onReplyClick?: () => void;
   onPinActionStart?: () => void;
   onPinToggle?: (messageId: string, pinned: boolean) => void;
+  onReactionAdd?: (emoji: string) => void;
 }) {
   const { isAuthenticated } = useAuth();
+  const { showToast } = useToast();
   const router = useRouter();
   const pathname = usePathname();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
@@ -193,7 +229,9 @@ function ActionBar({
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
   const [pinErrorMsg, setPinErrorMsg] = useState('');
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -216,6 +254,40 @@ function ActionBar({
     document.addEventListener('mousedown', onClickOutside);
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [isMoreOpen]);
+
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    function onClickOutside(e: MouseEvent) {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [showEmojiPicker]);
+
+  const handleEmojiSelect = useCallback(
+    async (emoji: { native: string }) => {
+      setShowEmojiPicker(false);
+      if (!channelId || !serverId) return;
+      try {
+        await apiClient.trpcMutation('reaction.addReaction', {
+          serverId,
+          channelId,
+          messageId,
+          emoji: emoji.native,
+        });
+        onReactionAdd?.(emoji.native);
+      } catch (err: unknown) {
+        const code = (err as { response?: { data?: { error?: { json?: { code?: string } } } } })
+          ?.response?.data?.error?.json?.code;
+        if (code !== 'CONFLICT') {
+          showToast({ message: 'Failed to add reaction. Please try again.', type: 'error' });
+        }
+      }
+    },
+    [channelId, serverId, messageId, onReactionAdd, showToast],
+  );
 
   const handlePinToggle = useCallback(async () => {
     if (!serverId) return;
@@ -289,28 +361,41 @@ function ActionBar({
         </svg>
       </button>
 
-      {/* Add Reaction — redirects guests to login; stub for authenticated users */}
-      <button
-        type='button'
-        aria-label='Add Reaction'
-        title='Add Reaction'
-        onClick={
-          !isAuthenticated
-            ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`)
-            : undefined
-        }
-        className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-      >
-        <svg
-          className='h-4 w-4'
-          viewBox='0 0 24 24'
-          fill='currentColor'
-          aria-hidden='true'
-          focusable='false'
+      {/* Add Reaction — redirects guests to login; opens emoji picker for authenticated users */}
+      <div ref={emojiPickerRef} className='relative'>
+        <button
+          type='button'
+          aria-label='Add Reaction'
+          title='Add Reaction'
+          aria-expanded={isAuthenticated ? showEmojiPicker : undefined}
+          aria-haspopup={isAuthenticated ? 'dialog' : undefined}
+          onClick={
+            !isAuthenticated
+              ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`)
+              : () => setShowEmojiPicker(prev => !prev)
+          }
+          className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
         >
-          <path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22C6.486 22 2 17.514 2 12S6.486 2 12 2s10 4.486 10 10-4.486 10-10 10zm-3.5-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm1.476 2.37a.75.75 0 0 0-1.06-1.06 4.5 4.5 0 0 1-6.832 0 .75.75 0 0 0-1.061 1.06 6 6 0 0 0 8.953 0z' />
-        </svg>
-      </button>
+          <svg
+            className='h-4 w-4'
+            viewBox='0 0 24 24'
+            fill='currentColor'
+            aria-hidden='true'
+            focusable='false'
+          >
+            <path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22C6.486 22 2 17.514 2 12S6.486 2 12 2s10 4.486 10 10-4.486 10-10 10zm-3.5-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm1.476 2.37a.75.75 0 0 0-1.06-1.06 4.5 4.5 0 0 1-6.832 0 .75.75 0 0 0-1.061 1.06 6 6 0 0 0 8.953 0z' />
+          </svg>
+        </button>
+        {isAuthenticated && showEmojiPicker && (
+          <div
+            role='dialog'
+            aria-label='Emoji picker'
+            className='absolute bottom-full right-0 z-50 mb-2'
+          >
+            <EmojiPickerPopover onEmojiSelect={handleEmojiSelect} />
+          </div>
+        )}
+      </div>
 
       {/* More — rendered when user can pin or is the message author */}
       {(canPin || isOwnMessage) && (
@@ -412,14 +497,20 @@ export function MessageItem({
   /** Called when the user triggers a pin/unpin action for this message. */
   onPinToggle?: (messageId: string, pinned: boolean) => void;
 }) {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { showToast } = useToast();
+  const router = useRouter();
+  const pathname = usePathname();
   const [avatarError, setAvatarError] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [isSaving, setIsSaving] = useState(false);
   const [localContent, setLocalContent] = useState<string | undefined>(undefined);
+  const [localReactions, setLocalReactions] = useState<Reaction[]>(message.reactions ?? []);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const isTopLevel = !message.parentMessageId;
+  const [isThreadOpen, setIsThreadOpen] = useState(false);
+  const [localReplyCount, setLocalReplyCount] = useState(message.replyCount ?? 0);
 
   // Render-phase derived-state reset: when the avatar URL changes (including A→B→A),
   // reset avatarError so the new URL is always attempted.
@@ -437,7 +528,122 @@ export function MessageItem({
     if (localContent !== undefined) setLocalContent(undefined);
   }
 
+  // Sync localReactions when message.reactions changes externally (e.g. via SSE)
+  const [prevReactions, setPrevReactions] = useState(message.reactions);
+  if (prevReactions !== message.reactions) {
+    setPrevReactions(message.reactions);
+    setLocalReactions(message.reactions ?? []);
+  }
+
   const isOwnMessage = !!user && user.id === message.author.id;
+
+  const handleReactionAdd = useCallback(
+    (emoji: string) => {
+      setLocalReactions(prev => {
+        const existing = prev.find(r => r.emoji === emoji);
+        if (existing) {
+          return prev.map(r =>
+            r.emoji === emoji
+              ? {
+                  ...r,
+                  count: r.count + 1,
+                  userIds: user?.id ? [...r.userIds, user.id] : r.userIds,
+                }
+              : r,
+          );
+        }
+        return [...prev, { emoji, count: 1, userIds: user?.id ? [user.id] : [] }];
+      });
+    },
+    [user],
+  );
+
+  // Called when user clicks an existing reaction pill to add or remove their reaction.
+  const handleReactionToggle = useCallback(
+    async (emoji: string, alreadyReacted: boolean) => {
+      if (!isAuthenticated) {
+        router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`);
+        return;
+      }
+      if (!serverId) return;
+
+      const channelId = message.channelId;
+      const messageId = message.id;
+      const uid = user?.id;
+
+      if (alreadyReacted) {
+        // Optimistic remove
+        setLocalReactions(prev =>
+          prev
+            .map(r =>
+              r.emoji === emoji
+                ? { ...r, count: r.count - 1, userIds: r.userIds.filter(id => id !== uid) }
+                : r,
+            )
+            .filter(r => r.count > 0),
+        );
+        try {
+          await apiClient.trpcMutation('reaction.removeReaction', {
+            serverId,
+            channelId,
+            messageId,
+            emoji,
+          });
+        } catch {
+          // Revert: add the reaction back
+          setLocalReactions(prev => {
+            const existing = prev.find(r => r.emoji === emoji);
+            if (existing) {
+              return prev.map(r =>
+                r.emoji === emoji
+                  ? { ...r, count: r.count + 1, userIds: uid ? [...r.userIds, uid] : r.userIds }
+                  : r,
+              );
+            }
+            return [...prev, { emoji, count: 1, userIds: uid ? [uid] : [] }];
+          });
+          showToast({ message: 'Failed to remove reaction. Please try again.', type: 'error' });
+        }
+      } else {
+        // Optimistic add
+        setLocalReactions(prev => {
+          const existing = prev.find(r => r.emoji === emoji);
+          if (existing) {
+            return prev.map(r =>
+              r.emoji === emoji
+                ? { ...r, count: r.count + 1, userIds: uid ? [...r.userIds, uid] : r.userIds }
+                : r,
+            );
+          }
+          return [...prev, { emoji, count: 1, userIds: uid ? [uid] : [] }];
+        });
+        try {
+          await apiClient.trpcMutation('reaction.addReaction', {
+            serverId,
+            channelId,
+            messageId,
+            emoji,
+          });
+        } catch (err: unknown) {
+          const code = (err as { response?: { data?: { error?: { json?: { code?: string } } } } })
+            ?.response?.data?.error?.json?.code;
+          if (code === 'CONFLICT') return; // already reacted — optimistic state is correct
+          // Revert: remove the optimistic reaction
+          setLocalReactions(prev =>
+            prev
+              .map(r =>
+                r.emoji === emoji
+                  ? { ...r, count: r.count - 1, userIds: r.userIds.filter(id => id !== uid) }
+                  : r,
+              )
+              .filter(r => r.count > 0),
+          );
+          showToast({ message: 'Failed to add reaction. Please try again.', type: 'error' });
+        }
+      }
+    },
+    [isAuthenticated, serverId, message, user, showToast, router, pathname],
+  );
 
   const handleEditClick = useCallback(() => {
     const current = localContent ?? message.content;
@@ -510,15 +716,49 @@ export function MessageItem({
     <ActionBar
       messageId={message.id}
       serverId={serverId}
+      channelId={message.channelId}
       canPin={canPin}
       initialPinned={!!message.pinned}
       isOwnMessage={isOwnMessage}
       onEditClick={handleEditClick}
-      onReplyClick={handleReplyClick}
+      onReplyClick={isTopLevel ? handleReplyClick : undefined}
       onPinActionStart={onPinActionStart}
       onPinToggle={onPinToggle}
+      onReactionAdd={handleReactionAdd}
     />
   );
+
+  const threadToggle =
+    isTopLevel && serverId ? (
+      <button
+        type='button'
+        onClick={() => setIsThreadOpen(v => !v)}
+        className='mt-1 flex items-center gap-1 text-xs text-[#5865f2] hover:underline'
+        aria-expanded={isThreadOpen}
+        aria-label={
+          isThreadOpen
+            ? 'Hide replies'
+            : `View ${localReplyCount} ${localReplyCount === 1 ? 'reply' : 'replies'}`
+        }
+      >
+        <svg className='h-3 w-3' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+          <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
+        </svg>
+        {isThreadOpen
+          ? 'Hide replies'
+          : `${localReplyCount} ${localReplyCount === 1 ? 'reply' : 'replies'}`}
+      </button>
+    ) : null;
+
+  const threadView =
+    isTopLevel && isThreadOpen && serverId ? (
+      <ThreadView
+        parentMessage={message}
+        channelId={message.channelId}
+        serverId={serverId}
+        onReplyCountChange={delta => setLocalReplyCount(c => c + delta)}
+      />
+    ) : null;
 
   const editUi = (
     <div className='mt-0.5'>
@@ -571,7 +811,7 @@ export function MessageItem({
           {!isEditing && actionBar}
           {/* Spacer aligns content with the 40px avatar of the header row */}
           <div className='w-10 flex-shrink-0 text-right'>
-            <span className='invisible text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
+            <span className='invisible whitespace-nowrap text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
               {formatTimeOnly(message.timestamp)}
             </span>
           </div>
@@ -587,9 +827,16 @@ export function MessageItem({
               </p>
             )}
             <AttachmentList attachments={message.attachments} />
-            <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
+            <ReactionList
+              reactions={localReactions}
+              messageId={message.id}
+              userId={user?.id}
+              onReactionClick={handleReactionToggle}
+            />
+            {localReplyCount > 0 && threadToggle}
           </div>
         </div>
+        {threadView}
       </div>
     );
   }
@@ -630,7 +877,7 @@ export function MessageItem({
             <span className={authorNameClass}>
               {message.author.displayName ?? message.author.username}
             </span>
-            <span className='text-[11px] text-gray-400'>
+            <span className='whitespace-nowrap text-[11px] text-gray-400'>
               {formatMessageTimestamp(message.timestamp)}
             </span>
             {(message.editedAt || localContent !== undefined) && (
@@ -645,9 +892,16 @@ export function MessageItem({
             </p>
           )}
           <AttachmentList attachments={message.attachments} />
-          <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
+          <ReactionList
+            reactions={localReactions}
+            messageId={message.id}
+            userId={user?.id}
+            onReactionClick={handleReactionToggle}
+          />
+          {localReplyCount > 0 && threadToggle}
         </div>
       </div>
+      {threadView}
     </div>
   );
 }

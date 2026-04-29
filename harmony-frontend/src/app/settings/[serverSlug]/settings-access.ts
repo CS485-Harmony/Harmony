@@ -1,11 +1,11 @@
 import { notFound, redirect } from 'next/navigation';
-import { getCurrentUser } from '@/services/authService';
+import { getSessionUser } from '@/lib/trpc-client';
 import { getServerAuthenticated, getServerMembersWithRole } from '@/services/serverService';
 
 type UnauthorizedMode = 'redirect' | 'throw';
 
 function isSettingsAdmin(
-  user: Awaited<ReturnType<typeof getCurrentUser>>,
+  user: Awaited<ReturnType<typeof getSessionUser>>,
   ownerId: string,
 ): boolean {
   return Boolean(user && (user.isSystemAdmin || user.id === ownerId));
@@ -28,7 +28,7 @@ export async function requireServerSettingsAccess(
   const server = await getServerAuthenticated(serverSlug);
   if (!server) notFound();
 
-  const user = await getCurrentUser();
+  const user = await getSessionUser();
   if (isSettingsAdmin(user, server.ownerId)) {
     return server;
   }
