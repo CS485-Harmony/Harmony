@@ -109,13 +109,13 @@ jobs:
               - 'tests/**'
 
       - name: Skip integration tests for non-code changes
-        if: steps.changes.outputs.relevant != 'true'
+        if: steps.changes.outputs.relevant != 'true' && github.event_name != 'workflow_dispatch'
         run: echo "No changes under harmony-frontend/, harmony-backend/, or tests/; skipping local integration tests."
 
       # ── Backend setup ──────────────────────────────────────────────────────
 
       - name: Set up Node.js (backend)
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -123,27 +123,27 @@ jobs:
           cache-dependency-path: harmony-backend/package-lock.json
 
       - name: Install backend dependencies
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: harmony-backend
         run: npm ci
 
       - name: Generate Prisma client
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: harmony-backend
         run: npx prisma generate
 
       - name: Run database migrations
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: harmony-backend
         run: npx prisma migrate deploy
 
       - name: Seed mock dataset
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: harmony-backend
         run: npm run db:seed:mock
 
       - name: Start backend API
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: harmony-backend
         env:
           PORT: "4000"
@@ -153,12 +153,12 @@ jobs:
       # cache is never invalidated after visibility changes (VIS-1 test would fail).
       # No PORT override: worker.ts defaults to 4100 via parsePortEnv(4100).
       - name: Start backend worker
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: harmony-backend
         run: npx tsx src/worker.ts > /tmp/backend-worker.log 2>&1 &
 
       - name: Wait for backend API to be ready
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           echo "Waiting for backend API on port 4000..."
           for i in $(seq 1 30); do
@@ -178,7 +178,7 @@ jobs:
       # must be running on port 3000 for those tests to pass.
 
       - name: Set up Node.js (frontend)
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -186,12 +186,12 @@ jobs:
           cache-dependency-path: harmony-frontend/package-lock.json
 
       - name: Install frontend dependencies
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: harmony-frontend
         run: npm ci
 
       - name: Build frontend
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: harmony-frontend
         env:
           NODE_ENV: production
@@ -200,7 +200,7 @@ jobs:
         run: npm run build
 
       - name: Start frontend
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: harmony-frontend
         env:
           NODE_ENV: production
@@ -210,7 +210,7 @@ jobs:
         run: npm run start > /tmp/frontend.log 2>&1 &
 
       - name: Wait for frontend to be ready
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           echo "Waiting for Next.js frontend on port 3000..."
           for i in $(seq 1 30); do
@@ -228,7 +228,7 @@ jobs:
       # ── Integration test suite ─────────────────────────────────────────────
 
       - name: Set up Node.js (integration tests)
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -236,12 +236,12 @@ jobs:
           cache-dependency-path: tests/integration/package-lock.json
 
       - name: Install integration test dependencies
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: tests/integration
         run: npm ci
 
       - name: Run integration tests (local target)
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch'
         working-directory: tests/integration
         env:
           TEST_TARGET: local
@@ -250,7 +250,7 @@ jobs:
         run: npm test 2>&1 | tee /tmp/integration-test-output.log; exit ${PIPESTATUS[0]}
 
       - name: Upload integration test output
-        if: always() && steps.changes.outputs.relevant == 'true'
+        if: always() && (steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-output
@@ -258,7 +258,7 @@ jobs:
           retention-days: 7
 
       - name: Upload service logs on failure
-        if: failure() && steps.changes.outputs.relevant == 'true'
+        if: failure() && (steps.changes.outputs.relevant == 'true' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
           name: service-logs
@@ -285,6 +285,9 @@ jobs:
       CLOUD_TEST_PUBLIC_CHANNELS: ${{ vars.CLOUD_TEST_PUBLIC_CHANNELS }}
       CLOUD_TEST_SERVER_ID: ${{ vars.CLOUD_TEST_SERVER_ID }}
       CLOUD_TEST_ACCESS_TOKEN: ${{ secrets.CLOUD_TEST_ACCESS_TOKEN }}
+      VERCEL_DEPLOYMENT_CONTEXT: ${{ vars.VERCEL_DEPLOYMENT_CONTEXT || 'Vercel' }}
+      RAILWAY_BACKEND_API_CONTEXT: ${{ vars.RAILWAY_BACKEND_API_CONTEXT || 'overflowing-luck - Harmony backend-api' }}
+      RAILWAY_BACKEND_WORKER_CONTEXT: ${{ vars.RAILWAY_BACKEND_WORKER_CONTEXT || 'overflowing-luck - backend-worker' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -310,10 +313,13 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         run: |
+          # These status-context labels must match the commit-status contexts
+          # reported by Vercel/Railway on main. Override them with repository or
+          # environment variables if either provider/project/service name changes.
           required_contexts=(
-            "Vercel"
-            "overflowing-luck - Harmony backend-api"
-            "overflowing-luck - backend-worker"
+            "$VERCEL_DEPLOYMENT_CONTEXT"
+            "$RAILWAY_BACKEND_API_CONTEXT"
+            "$RAILWAY_BACKEND_WORKER_CONTEXT"
           )
 
           deadline=$(( $(date +%s) + 1800 ))
