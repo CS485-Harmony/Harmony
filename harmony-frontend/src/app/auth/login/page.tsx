@@ -14,6 +14,7 @@ function LoginForm() {
   const { login } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const rawReturnUrl = searchParams.get('returnUrl') ?? '';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -22,9 +23,10 @@ function LoginForm() {
 
     try {
       await login(email, password);
-      const raw = searchParams.get('returnUrl') ?? '';
       const returnUrl =
-        raw.startsWith('/') && !raw.startsWith('//') ? raw.replace(/^\/c\//, '/channels/') : null;
+        rawReturnUrl.startsWith('/') && !rawReturnUrl.startsWith('//')
+          ? rawReturnUrl.replace(/^\/c\//, '/channels/')
+          : null;
       router.push(returnUrl ?? '/channels');
     } catch (err) {
       setError(getUserErrorMessage(err, 'Invalid credentials. Please try again.'));
@@ -96,7 +98,14 @@ function LoginForm() {
 
           <p className='text-sm text-discord-text-muted'>
             Need an account?{' '}
-            <Link href='/auth/signup' className='text-discord-accent hover:underline'>
+            <Link
+              href={
+                rawReturnUrl.startsWith('/') && !rawReturnUrl.startsWith('//')
+                  ? `/auth/signup?returnUrl=${encodeURIComponent(rawReturnUrl)}`
+                  : '/auth/signup'
+              }
+              className='text-discord-accent hover:underline'
+            >
               Register
             </Link>
           </p>

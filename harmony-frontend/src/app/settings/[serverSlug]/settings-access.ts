@@ -26,7 +26,13 @@ export async function requireServerSettingsAccess(
   mode: UnauthorizedMode = 'redirect',
 ) {
   const server = await getServerAuthenticated(serverSlug);
-  if (!server) notFound();
+  if (!server) {
+    // In server-action mode, notFound() propagates as a page-level 404 that
+    // bypasses the client try-catch. Throw a plain error instead so the
+    // action's caller can surface it as an inline message.
+    if (mode === 'throw') throw new Error('Server not found');
+    notFound();
+  }
 
   const user = await getSessionUser();
   if (isSettingsAdmin(user, server.ownerId)) {
