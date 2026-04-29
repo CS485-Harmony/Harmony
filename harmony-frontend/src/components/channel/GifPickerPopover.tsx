@@ -2,8 +2,8 @@
 
 /**
  * GifPickerPopover
- * Tenor-powered GIF search popover for the message input toolbar.
- * Shows trending GIFs on open; switches to search results as the user types.
+ * Pixabay-powered GIF search popover for the message input toolbar.
+ * Shows popular GIFs on open; switches to search results as the user types.
  * Click a GIF to fire onGifSelect with the full-quality URL.
  */
 
@@ -102,7 +102,7 @@ export function GifPickerPopover({ onGifSelect }: GifPickerPopoverProps) {
           type='text'
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder='Search Tenor GIFs…'
+          placeholder='Search Pixabay GIFs…'
           className='flex-1 bg-transparent text-sm text-[#dcddde] placeholder-gray-500 outline-none'
           aria-label='Search GIFs'
         />
@@ -169,7 +169,7 @@ export function GifPickerPopover({ onGifSelect }: GifPickerPopoverProps) {
         )}
       </div>
 
-      {/* Tenor attribution (required by Tenor API ToS) */}
+      {/* Pixabay attribution */}
       <div className='border-t border-black/20 px-3 py-1.5 text-center'>
         <span className='text-xs text-gray-500'>Powered by Pixabay</span>
       </div>
