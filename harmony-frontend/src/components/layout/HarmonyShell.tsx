@@ -577,6 +577,15 @@ export function HarmonyShell({
             channelName={currentChannel.name}
             isOpen={isSearchOpen}
             onClose={() => setIsSearchOpen(false)}
+            onResultSelect={message => {
+              const el = document.querySelector(`[data-message-id="${message.id}"]`);
+              if (!el) return;
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.remove('message-highlight-flash');
+              // Force a reflow so re-selecting the same message re-triggers the animation.
+              void (el as HTMLElement).offsetWidth;
+              el.classList.add('message-highlight-flash');
+            }}
           />
         )}
 

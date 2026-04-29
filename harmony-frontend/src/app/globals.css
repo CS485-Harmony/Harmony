@@ -18,3 +18,12 @@ body {
   color: var(--foreground);
   font-family: var(--font-inter);
 }
+
+@keyframes message-highlight-flash {
+  0% { background-color: rgba(250, 204, 21, 0.25); }
+  100% { background-color: transparent; }
+}
+
+.message-highlight-flash {
+  animation: message-highlight-flash 2s ease-out forwards;
+}
