@@ -22,10 +22,20 @@ import type { Message } from '@/types';
 
 // ─── Search logic ─────────────────────────────────────────────────────────────
 
+type SortOrder = 'newest' | 'oldest';
+
 function filterMessages(messages: Message[], query: string): Message[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   return messages.filter(m => m.content.toLowerCase().includes(q));
+}
+
+function sortMessages(messages: Message[], order: SortOrder): Message[] {
+  return [...messages].sort((a, b) => {
+    const tA = new Date(a.timestamp).getTime();
+    const tB = new Date(b.timestamp).getTime();
+    return order === 'newest' ? tB - tA : tA - tB;
+  });
 }
 
 // ─── Result item ──────────────────────────────────────────────────────────────
@@ -116,6 +126,7 @@ export function SearchModal({
   const [query, setQuery] = useState('');
   // #c11: debounce search to avoid re-filtering on every keystroke
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const inputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -126,8 +137,8 @@ export function SearchModal({
 
   // #c40: memoize to avoid re-filtering on unrelated re-renders
   const results = useMemo(
-    () => filterMessages(messages, debouncedQuery),
-    [messages, debouncedQuery],
+    () => sortMessages(filterMessages(messages, debouncedQuery), sortOrder),
+    [messages, debouncedQuery, sortOrder],
   );
 
   // Focus input when opening
@@ -135,9 +146,10 @@ export function SearchModal({
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 0);
     } else {
-      // Resetting query on close is intentional: next open should start clean.
+      // Resetting query and sort on close is intentional: next open should start clean.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuery('');
+      setSortOrder('newest');
     }
   }, [isOpen]);
 
@@ -277,9 +289,37 @@ export function SearchModal({
           {/* Result list */}
           {results.length > 0 && (
             <div className='px-2'>
-              <p className='mb-1 px-1 text-xs text-gray-400'>
-                {results.length} result{results.length !== 1 ? 's' : ''}
-              </p>
+              <div className='mb-1 flex items-center justify-between px-1'>
+                <p className='text-xs text-gray-400'>
+                  {results.length} result{results.length !== 1 ? 's' : ''}
+                </p>
+                <div className='flex items-center gap-1' role='group' aria-label='Sort order'>
+                  <button
+                    onClick={() => setSortOrder('newest')}
+                    aria-pressed={sortOrder === 'newest'}
+                    className={cn(
+                      'rounded px-2 py-0.5 text-xs transition-colors',
+                      sortOrder === 'newest'
+                        ? 'bg-indigo-100 font-medium text-indigo-700'
+                        : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600',
+                    )}
+                  >
+                    Newest
+                  </button>
+                  <button
+                    onClick={() => setSortOrder('oldest')}
+                    aria-pressed={sortOrder === 'oldest'}
+                    className={cn(
+                      'rounded px-2 py-0.5 text-xs transition-colors',
+                      sortOrder === 'oldest'
+                        ? 'bg-indigo-100 font-medium text-indigo-700'
+                        : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600',
+                    )}
+                  >
+                    Oldest
+                  </button>
+                </div>
+              </div>
               {results.map(message => (
                 <ResultItem
                   key={message.id}
