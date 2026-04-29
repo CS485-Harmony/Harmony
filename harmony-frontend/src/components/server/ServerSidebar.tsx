@@ -1,17 +1,12 @@
 /**
  * Server Component: ServerSidebar
- * Displays server info and list of other public channels for navigation
- * Based on dev spec C1.6 ServerSidebar
+ * Displays server info and list of other public channels for navigation.
+ * Currently used in the guest public-channel view.
+ * Based on dev spec C1.6 ServerSidebar.
  */
 
 import Link from 'next/link';
-
-interface Channel {
-  id: string;
-  name: string;
-  slug: string;
-  description?: string;
-}
+import type { PublicChannelListItem } from '@/services/publicApiService';
 
 interface ServerSidebarProps {
   serverInfo: {
@@ -20,7 +15,7 @@ interface ServerSidebarProps {
     slug: string;
     description?: string;
   };
-  publicChannels: Channel[];
+  publicChannels: PublicChannelListItem[];
   currentChannelId?: string;
 }
 
@@ -30,39 +25,54 @@ export function ServerSidebar({
   currentChannelId,
 }: ServerSidebarProps) {
   return (
-    <aside className='w-64 border-r border-gray-200 bg-gray-50 p-4'>
-      {/* Server header */}
-      <div className='mb-6'>
-        <h2 className='text-xl font-bold text-gray-900'>{serverInfo.name}</h2>
-        {serverInfo.description && (
-          <p className='mt-1 text-sm text-gray-600'>{serverInfo.description}</p>
-        )}
+    <aside className='flex w-60 shrink-0 flex-col overflow-hidden bg-[#2f3136]'>
+      {/* Server name header */}
+      <div className='flex h-12 shrink-0 items-center border-b border-black/20 px-4 shadow-sm'>
+        <h2 className='truncate text-sm font-semibold text-white'>{serverInfo.name}</h2>
       </div>
 
-      {/* Public channels list */}
-      <div>
-        <h3 className='mb-2 text-xs font-semibold uppercase text-gray-500'>Public Channels</h3>
-        <nav className='space-y-1'>
-          {publicChannels.map(channel => (
-            <Link
-              key={channel.id}
-              href={`/c/${serverInfo.slug}/${channel.slug}`}
-              className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors ${
-                channel.id === currentChannelId
-                  ? 'bg-blue-100 font-medium text-blue-700'
-                  : 'text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              <span className='text-gray-400'>#</span>
-              {channel.name}
-            </Link>
-          ))}
-        </nav>
+      {/* Channel list */}
+      <nav className='flex-1 overflow-y-auto px-2 py-2' aria-label='Public channels'>
+        <p className='mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-gray-400'>
+          Public Channels
+        </p>
 
-        {publicChannels.length === 0 && (
-          <p className='text-sm text-gray-500'>No public channels available</p>
+        {publicChannels.length === 0 ? (
+          <p className='px-2 py-1 text-xs text-gray-500'>No public channels</p>
+        ) : (
+          <ul className='space-y-0.5'>
+            {publicChannels.map(channel => {
+              const isActive = channel.id === currentChannelId;
+              return (
+                <li key={channel.id}>
+                  <Link
+                    href={`/c/${serverInfo.slug}/${channel.slug}`}
+                    title={channel.topic}
+                    className={`flex items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors ${
+                      isActive
+                        ? 'bg-[#3d4148] font-medium text-white'
+                        : 'text-gray-400 hover:bg-[#35373c] hover:text-gray-200'
+                    }`}
+                    aria-current={isActive ? 'page' : undefined}
+                  >
+                    <span className='shrink-0 text-gray-500' aria-hidden='true'>
+                      #
+                    </span>
+                    <span className='truncate'>{channel.name}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
         )}
-      </div>
+      </nav>
+
+      {/* Server description footer */}
+      {serverInfo.description && (
+        <div className='shrink-0 border-t border-black/20 px-4 py-3'>
+          <p className='text-xs text-gray-500 line-clamp-3'>{serverInfo.description}</p>
+        </div>
+      )}
     </aside>
   );
 }
