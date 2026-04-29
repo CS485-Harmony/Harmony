@@ -49,6 +49,9 @@ export function UserProfilePopover({
   const popoverRef = useRef<HTMLDivElement>(null);
   const [user, setUser] = useState<UserProfileData | null>(null);
   const [avatarError, setAvatarError] = useState(false);
+  // Capture seed at mount — call sites pass inline object literals, so
+  // including `seed` in the effect deps would re-fetch on every parent render.
+  const seedRef = useRef(seed);
 
   useEffect(() => {
     apiClient
@@ -56,11 +59,10 @@ export function UserProfilePopover({
       .then(setUser)
       .catch(() => {
         // If fetch fails, fall back to seed data with offline status
-        if (seed) {
-          setUser({ id: userId, username: seed.username, displayName: seed.displayName, avatarUrl: seed.avatarUrl, status: 'offline' });
-        }
+        const s = seedRef.current;
+        if (s) setUser({ id: userId, ...s, status: 'offline' });
       });
-  }, [userId, seed]);
+  }, [userId]); // seed intentionally omitted — captured via seedRef
 
   // Close on outside click
   useEffect(() => {
@@ -94,7 +96,12 @@ export function UserProfilePopover({
     }
     if (left < GAP) left = GAP;
 
-    const top = Math.max(GAP, anchorRect.top);
+    // Clamp top so the popover stays visible on short/mobile viewports
+    const POPOVER_HEIGHT_APPROX = 210;
+    const top = Math.min(
+      Math.max(GAP, anchorRect.top),
+      window.innerHeight - POPOVER_HEIGHT_APPROX - GAP,
+    );
 
     return { top, left, width: POPOVER_WIDTH };
   })();

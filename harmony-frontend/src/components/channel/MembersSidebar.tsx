@@ -108,7 +108,7 @@ function MemberRow({ user }: { user: User }) {
           isOffline && 'opacity-40',
         )}
         onClick={e => setProfileAnchorRect((e.currentTarget as HTMLDivElement).getBoundingClientRect())}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setProfileAnchorRect(e.currentTarget.getBoundingClientRect()); }}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setProfileAnchorRect(e.currentTarget.getBoundingClientRect()); } }}
       >
         {/* Avatar + status dot */}
         <div className='relative flex-shrink-0'>

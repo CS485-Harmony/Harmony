@@ -887,7 +887,7 @@ export function MessageItem({
               onClick={handleAuthorNameClick}
               role='button'
               tabIndex={0}
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') handleAuthorNameClick(e); }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleAuthorNameClick(e); } }}
             >
               {message.author.displayName ?? message.author.username}
             </span>
