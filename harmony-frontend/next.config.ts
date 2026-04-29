@@ -25,6 +25,15 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'api.dicebear.com',
       },
+      // Tenor GIF CDN — used by GifPickerPopover preview images
+      {
+        protocol: 'https',
+        hostname: 'media.tenor.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'c.tenor.com',
+      },
     ],
   },
 };
