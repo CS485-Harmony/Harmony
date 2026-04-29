@@ -283,7 +283,6 @@ describe('Issue #497 — MessageItem: reaction emoji picker', () => {
   });
 
   it('opens picker downward when trigger is near the top of the viewport', async () => {
-    const btn = document.createElement('button');
     jest
       .spyOn(HTMLButtonElement.prototype, 'getBoundingClientRect')
       .mockReturnValue({ top: 100, bottom: 132 } as DOMRect);
@@ -299,7 +298,6 @@ describe('Issue #497 — MessageItem: reaction emoji picker', () => {
     expect(dialog.className).not.toContain('bottom-full');
 
     jest.restoreAllMocks();
-    btn.remove();
   });
 
   it('opens picker upward when trigger has enough space above', async () => {

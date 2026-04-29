@@ -43,7 +43,7 @@ export function formatRelativeTime(date: Date | string): string {
  * Format a message timestamp in Discord style:
  *   - Same day   → "Today at 3:42 PM"
  *   - Yesterday  → "Yesterday at 3:42 PM"
- *   - Older      → "2/20/2026"
+ *   - Older      → "2/20/2026 at 3:42 PM"
  *
  * Note: "Today" / "Yesterday" comparisons use toDateString(), which operates
  * in the viewer's local browser timezone. A message sent just before midnight
