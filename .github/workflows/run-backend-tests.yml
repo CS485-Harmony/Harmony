@@ -43,20 +43,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Detect non-log changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            non_log:
+              - '!llm-logs/**'
+              - '**'
+
+      - name: Skip backend tests for llm-logs-only changes
+        if: steps.changes.outputs.non_log != 'true'
+        run: echo "llm-logs-only change detected; skipping backend tests."
+
       - uses: actions/setup-node@v4
+        if: steps.changes.outputs.non_log == 'true'
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: harmony-backend/package-lock.json
 
       - name: Install dependencies
+        if: steps.changes.outputs.non_log == 'true'
         run: npm ci
 
       - name: Generate Prisma client
+        if: steps.changes.outputs.non_log == 'true'
         run: npx prisma generate
 
       - name: Run migrations
+        if: steps.changes.outputs.non_log == 'true'
         run: npx prisma migrate deploy
 
       - name: Run backend tests
+        if: steps.changes.outputs.non_log == 'true'
         run: npm test
