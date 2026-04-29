@@ -41,18 +41,24 @@ export const inviteService = {
     serverId: string,
     creatorId: string,
     opts?: { maxUses?: number; expiresAt?: Date },
-  ): Promise<ServerInvite> {
+  ): Promise<InviteWithCreator> {
     const server = await serverRepository.findByIdSelect(serverId, { id: true });
     if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
 
     const code = generateCode();
-    return inviteRepository.create({
+    const invite = await inviteRepository.create({
       code,
       serverId,
       creatorId,
       maxUses: opts?.maxUses ?? null,
       expiresAt: opts?.expiresAt ?? null,
     });
+
+    const inviteWithCreator = await inviteRepository.findByIdWithCreator(invite.id);
+    if (!inviteWithCreator) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to load created invite' });
+    }
+    return inviteWithCreator as InviteWithCreator;
   },
 
   /**
