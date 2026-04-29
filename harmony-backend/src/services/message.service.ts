@@ -128,7 +128,7 @@ export const messageService = {
           { channelId, isDeleted: false },
           clampedLimit + 1,
           cursor,
-          { createdAt: 'asc' },
+          { createdAt: 'desc' },
         );
 
         const hasMore = messages.length > clampedLimit;
@@ -162,16 +162,13 @@ export const messageService = {
         }),
     });
 
-    cacheService
-      .invalidatePattern(
+    try {
+      await cacheService.invalidatePattern(
         `channel:msgs:${sanitizeKeySegment(serverId)}:${sanitizeKeySegment(channelId)}:*`,
-      )
-      .catch((err) =>
-        logger.warn(
-          { err, channelId, serverId },
-          'Failed to invalidate channel message cache after send',
-        ),
       );
+    } catch (err) {
+      logger.warn({ err, channelId, serverId }, 'Failed to invalidate channel message cache after send');
+    }
 
     eventBus
       .publish(EventChannels.MESSAGE_CREATED, {
@@ -464,21 +461,18 @@ export const messageService = {
     });
 
     // Invalidate channel-level and thread-level caches
-    cacheService
-      .invalidatePattern(
+    try {
+      await cacheService.invalidatePattern(
         `channel:msgs:${sanitizeKeySegment(serverId)}:${sanitizeKeySegment(channelId)}:*`,
-      )
-      .catch((err) =>
-        logger.warn(
-          { err, channelId, serverId },
-          'Failed to invalidate channel message cache after reply',
-        ),
       );
-    cacheService
-      .invalidatePattern(`thread:msgs:${sanitizeKeySegment(parentMessageId)}:*`)
-      .catch((err) =>
-        logger.warn({ err, parentMessageId }, 'Failed to invalidate thread cache after reply'),
-      );
+    } catch (err) {
+      logger.warn({ err, channelId, serverId }, 'Failed to invalidate channel message cache after reply');
+    }
+    try {
+      await cacheService.invalidatePattern(`thread:msgs:${sanitizeKeySegment(parentMessageId)}:*`);
+    } catch (err) {
+      logger.warn({ err, parentMessageId }, 'Failed to invalidate thread cache after reply');
+    }
 
     eventBus
       .publish(EventChannels.MESSAGE_CREATED, {

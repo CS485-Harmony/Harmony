@@ -99,9 +99,8 @@ export async function getMessages(
     });
     if (data === null)
       throw new Error(`getMessages: tRPC returned no data for channelId=${channelId}`);
-    // tRPC returns oldest-first; reverse so callers get newest-first.
     return {
-      messages: [...data.messages].reverse().map(m => toFrontendMessage(m, channelId)),
+      messages: data.messages.map(m => toFrontendMessage(m, channelId)),
       hasMore: !!data.nextCursor,
     };
   }
