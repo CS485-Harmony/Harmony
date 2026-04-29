@@ -145,10 +145,12 @@ function ActionBar({
   const router = useRouter();
   const pathname = usePathname();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const [openUpward, setOpenUpward] = useState(false);
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
   const [pinErrorMsg, setPinErrorMsg] = useState('');
   const moreRef = useRef<HTMLDivElement>(null);
+  const moreTriggerRef = useRef<HTMLButtonElement>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -270,8 +272,15 @@ function ActionBar({
             type='button'
             aria-label='More actions'
             title='More'
+            ref={moreTriggerRef}
             aria-expanded={isMoreOpen}
-            onClick={() => setIsMoreOpen(v => !v)}
+            onClick={() => {
+              if (!isMoreOpen && moreTriggerRef.current) {
+                const rect = moreTriggerRef.current.getBoundingClientRect();
+                setOpenUpward(window.innerHeight - rect.bottom < 180);
+              }
+              setIsMoreOpen(v => !v);
+            }}
             className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
           >
             <svg
@@ -286,7 +295,7 @@ function ActionBar({
           </button>
 
           {isMoreOpen && (
-            <div className='absolute right-0 top-full mt-1 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20'>
+            <div className={`absolute right-0 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
               {isOwnMessage && (
                 <button
                   type='button'
