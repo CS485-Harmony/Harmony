@@ -46,7 +46,7 @@ export function createPublicRouter(store?: Store) {
           select: { id: true, visibility: true },
         });
 
-        if (!channel || channel.visibility !== ChannelVisibility.PUBLIC_INDEXABLE) {
+        if (!channel || channel.visibility === ChannelVisibility.PRIVATE) {
           res.status(404).json({ error: 'Channel not found' });
           return;
         }
@@ -98,7 +98,7 @@ export function createPublicRouter(store?: Store) {
           select: { id: true, visibility: true },
         });
 
-        if (!channel || channel.visibility !== ChannelVisibility.PUBLIC_INDEXABLE) {
+        if (!channel || channel.visibility === ChannelVisibility.PRIVATE) {
           res.status(404).json({ error: 'Channel not found' });
           return;
         }
@@ -239,7 +239,10 @@ export function createPublicRouter(store?: Store) {
 
       const fetcher = async () => {
         const channels = await prisma.channel.findMany({
-          where: { serverId: server.id, visibility: ChannelVisibility.PUBLIC_INDEXABLE },
+          where: {
+            serverId: server.id,
+            visibility: { in: [ChannelVisibility.PUBLIC_INDEXABLE, ChannelVisibility.PUBLIC_NO_INDEX] },
+          },
           orderBy: { position: 'asc' },
           select: { id: true, name: true, slug: true, type: true, topic: true },
         });

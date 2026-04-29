@@ -67,6 +67,7 @@ export function MessageInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const shouldRefocusTextareaRef = useRef(false);
 
   // ── Mention autocomplete state ────────────────────────────────────────────
   const [mentionCandidates, setMentionCandidates] = useState<MentionCandidate[]>([]);
@@ -85,6 +86,7 @@ export function MessageInput({
     setMentionStart(-1);
     setMentionSelectedIdx(0);
     if (mentionDebounceRef.current) clearTimeout(mentionDebounceRef.current);
+    shouldRefocusTextareaRef.current = false;
     textareaRef.current?.focus();
   }, [channelId]);
 
@@ -115,6 +117,14 @@ export function MessageInput({
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
   }, [value]);
 
+  // Refocus only after controls have re-enabled; focusing while disabled is ignored by the browser.
+  useEffect(() => {
+    if (!isSending && !isUploading && shouldRefocusTextareaRef.current) {
+      textareaRef.current?.focus();
+      shouldRefocusTextareaRef.current = false;
+    }
+  }, [isSending, isUploading]);
+
   const handleAttachClick = () => {
     fileInputRef.current?.click();
   };
@@ -128,6 +138,7 @@ export function MessageInput({
 
     setIsUploading(true);
     setSendError(null);
+    shouldRefocusTextareaRef.current = true;
 
     try {
       const formData = new FormData();
@@ -158,7 +169,6 @@ export function MessageInput({
       setSendError('Upload failed. Please try again.');
     } finally {
       setIsUploading(false);
-      textareaRef.current?.focus();
     }
   }, []);
 
@@ -221,6 +231,7 @@ export function MessageInput({
     if ((!trimmed && !pendingAttachments.length) || isSending || isUploading || isReadOnly) return;
     setIsSending(true);
     setSendError(null);
+    shouldRefocusTextareaRef.current = true;
     try {
       let msg: Message;
       if (replyingTo) {
@@ -250,7 +261,6 @@ export function MessageInput({
       setSendError('Failed to send message. Please try again.');
     } finally {
       setIsSending(false);
-      textareaRef.current?.focus();
     }
   }, [
     value,

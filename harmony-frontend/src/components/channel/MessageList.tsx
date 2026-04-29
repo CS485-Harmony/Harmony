@@ -75,9 +75,18 @@ interface MessageListProps {
   canPin?: boolean;
   /** Called when the user clicks Reply on a message. */
   onReplyClick?: (message: Message) => void;
+  /** Called when the user clicks pin/unpin on a message. */
+  onPinToggle?: (messageId: string, pinned: boolean) => void;
 }
 
-export function MessageList({ channel, messages, serverId, canPin, onReplyClick }: MessageListProps) {
+export function MessageList({
+  channel,
+  messages,
+  serverId,
+  canPin,
+  onReplyClick,
+  onPinToggle,
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // #c7: only auto-scroll when user is already near the bottom
@@ -150,7 +159,15 @@ export function MessageList({ channel, messages, serverId, canPin, onReplyClick 
             <div key={group.messages[0]?.id || gi}>
               {showDateSeparator && <DateSeparator label={group.dateLabel} />}
               {group.messages.map((msg, mi) => (
-                <MessageItem key={msg.id} message={msg} showHeader={mi === 0} serverId={serverId} canPin={canPin} onReplyClick={onReplyClick} />
+                <MessageItem
+                  key={msg.id}
+                  message={msg}
+                  showHeader={mi === 0}
+                  serverId={serverId}
+                  canPin={canPin}
+                  onReplyClick={onReplyClick}
+                  onPinToggle={onPinToggle}
+                />
               ))}
             </div>
           );

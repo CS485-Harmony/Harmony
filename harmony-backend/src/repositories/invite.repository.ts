@@ -33,6 +33,15 @@ export const inviteRepository = {
     return client.serverInvite.findUnique({ where: { id } });
   },
 
+  findByIdWithCreator(id: string, client: Client = prisma) {
+    return client.serverInvite.findUnique({
+      where: { id },
+      include: {
+        creator: { select: { id: true, username: true, displayName: true } },
+      },
+    });
+  },
+
   create(data: Prisma.ServerInviteUncheckedCreateInput, client: Client = prisma) {
     return client.serverInvite.create({ data });
   },

@@ -281,4 +281,40 @@ describe('Issue #497 — MessageItem: reaction emoji picker', () => {
       expect(screen.queryByRole('dialog', { name: 'Emoji picker' })).not.toBeInTheDocument();
     });
   });
+
+  it('opens picker downward when trigger is near the top of the viewport', async () => {
+    jest
+      .spyOn(HTMLButtonElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({ top: 100, bottom: 132 } as DOMRect);
+
+    render(<MessageItem message={baseMessage} serverId='srv-1' />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add Reaction' }));
+    });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Emoji picker' });
+    expect(dialog.className).toContain('top-full');
+    expect(dialog.className).not.toContain('bottom-full');
+
+    jest.restoreAllMocks();
+  });
+
+  it('opens picker upward when trigger has enough space above', async () => {
+    jest
+      .spyOn(HTMLButtonElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({ top: 600, bottom: 632 } as DOMRect);
+
+    render(<MessageItem message={baseMessage} serverId='srv-1' />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add Reaction' }));
+    });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Emoji picker' });
+    expect(dialog.className).toContain('bottom-full');
+    expect(dialog.className).not.toContain('top-full');
+
+    jest.restoreAllMocks();
+  });
 });

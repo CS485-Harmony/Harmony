@@ -78,8 +78,8 @@ describe('utils', () => {
       expect(formatMessageTimestamp(new Date(2026, 2, 29, 9, 5, 0))).toMatch(/^Yesterday at /);
     });
 
-    it('formats older timestamps as a date', () => {
-      expect(formatMessageTimestamp(new Date(2026, 2, 20, 9, 5, 0))).toBe('3/20/2026');
+    it('formats older timestamps as a date with time', () => {
+      expect(formatMessageTimestamp(new Date(2026, 2, 20, 9, 5, 0))).toMatch(/^3\/20\/2026 at /);
     });
   });
 

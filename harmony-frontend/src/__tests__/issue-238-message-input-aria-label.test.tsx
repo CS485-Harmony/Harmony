@@ -22,7 +22,7 @@ jest.mock('@/app/actions/sendMessage', () => ({
 // ─── Imports ──────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MessageInput } from '../components/channel/MessageInput';
 
@@ -70,5 +70,50 @@ describe('Issue #238 — MessageInput: textarea aria-label accessibility', () =>
     // Read-only view shows a permission notice, no textarea
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.getByText(/do not have permission/i)).toBeInTheDocument();
+  });
+
+  it('keeps focus on textarea after sending a message with Enter', async () => {
+    mockSendMessageAction.mockResolvedValueOnce({
+      id: 'm-1',
+      content: 'hello world',
+      channelId: 'ch-1',
+      authorId: 'u-1',
+      createdAt: new Date().toISOString(),
+      editedAt: null,
+      deletedAt: null,
+      author: { id: 'u-1', username: 'tester' },
+      reactions: [],
+      replyCount: 0,
+      attachments: [],
+    });
+
+    render(<MessageInput {...defaultProps} />);
+
+    const textarea = screen.getByRole('textbox', { name: 'Message #general' });
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: 'hello world' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => {
+      expect(mockSendMessageAction).toHaveBeenCalledTimes(1);
+      expect(textarea).toHaveFocus();
+    });
+  });
+
+  it('restores textarea focus after send failure', async () => {
+    mockSendMessageAction.mockRejectedValueOnce(new Error('network failure'));
+
+    render(<MessageInput {...defaultProps} />);
+
+    const textarea = screen.getByRole('textbox', { name: 'Message #general' });
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: 'hello world' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => {
+      expect(mockSendMessageAction).toHaveBeenCalledTimes(1);
+      expect(textarea).toHaveFocus();
+      expect(screen.getByRole('alert')).toHaveTextContent(/failed to send message/i);
+    });
   });
 });

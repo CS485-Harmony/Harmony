@@ -21,7 +21,7 @@ Always check for lint or build errors before committing code.
 - Preserve spec labeling prefixes exactly: `M#` (modules), `CL-C#`/`CL-D#`/`CL-E#`/`CL-I#` (classes/DTOs/entities/interfaces), `D#`/`T#`/`F#`/`S#`/`B#` (schemas/tech/flows/states).
 - Keep **Section 3 (Class Diagram)** and **Section 4 (List of Classes)** synchronized whenever classes are added/renamed.
 - Preserve canonical visibility enum values exactly: `PUBLIC_INDEXABLE`, `PUBLIC_NO_INDEX`, `PRIVATE`.
-
+- Ignore the files in @llm-logs/
 - Always verify tests are running successfully in both the backend and the frontend before pushing changes
 
 ### Role-Specific Behaviors

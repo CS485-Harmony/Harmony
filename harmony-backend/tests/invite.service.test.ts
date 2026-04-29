@@ -1,5 +1,4 @@
 import { PrismaClient } from '@prisma/client';
-import { TRPCError } from '@trpc/server';
 import { redis } from '../src/db/redis';
 import { inviteService } from '../src/services/invite.service';
 
@@ -91,6 +90,11 @@ describe('inviteService (integration)', () => {
       expect(invite.serverId).toBe(publicServerId);
       expect(invite.creatorId).toBe(ownerUserId);
       expect(invite.uses).toBe(0);
+      expect(invite.creator).toMatchObject({
+        id: ownerUserId,
+        displayName: 'Invite Owner',
+      });
+      expect(invite.creator.username).toContain('inv_owner_');
     });
 
     it('creates an invite for a private server', async () => {

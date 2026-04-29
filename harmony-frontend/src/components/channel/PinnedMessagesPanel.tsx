@@ -15,13 +15,7 @@ import type { Message } from '@/types';
 
 function XIcon() {
   return (
-    <svg
-      className='h-4 w-4'
-      viewBox='0 0 24 24'
-      fill='none'
-      stroke='currentColor'
-      strokeWidth={2}
-    >
+    <svg className='h-4 w-4' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={2}>
       <path d='M18 6 6 18M6 6l12 12' />
     </svg>
   );
@@ -29,13 +23,7 @@ function XIcon() {
 
 function PinIcon() {
   return (
-    <svg
-      className='h-4 w-4'
-      viewBox='0 0 24 24'
-      fill='none'
-      stroke='currentColor'
-      strokeWidth={2}
-    >
+    <svg className='h-4 w-4' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={2}>
       <path d='M12 17v5' />
       <path d='M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z' />
     </svg>
@@ -76,6 +64,7 @@ export interface PinnedMessagesPanelProps {
   serverId: string;
   channelName: string;
   isOpen: boolean;
+  refreshKey?: number;
   onClose: () => void;
 }
 
@@ -84,6 +73,7 @@ export function PinnedMessagesPanel({
   serverId,
   channelName,
   isOpen,
+  refreshKey = 0,
   onClose,
 }: PinnedMessagesPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -109,8 +99,10 @@ export function PinnedMessagesPanel({
         if (isCurrent) setIsLoading(false);
       }
     })();
-    return () => { isCurrent = false; };
-  }, [isOpen, channelId, serverId]);
+    return () => {
+      isCurrent = false;
+    };
+  }, [isOpen, channelId, serverId, refreshKey]);
 
   return (
     <aside
@@ -137,18 +129,12 @@ export function PinnedMessagesPanel({
 
       {/* Body */}
       <div className='flex-1 overflow-y-auto p-3'>
-        {isLoading && (
-          <p className='text-center text-sm text-gray-400'>Loading…</p>
-        )}
+        {isLoading && <p className='text-center text-sm text-gray-400'>Loading…</p>}
 
-        {!isLoading && error && (
-          <p className='text-center text-sm text-red-400'>{error}</p>
-        )}
+        {!isLoading && error && <p className='text-center text-sm text-red-400'>{error}</p>}
 
         {!isLoading && !error && messages.length === 0 && (
-          <p className='text-center text-sm text-gray-400'>
-            No pinned messages in #{channelName}.
-          </p>
+          <p className='text-center text-sm text-gray-400'>No pinned messages in #{channelName}.</p>
         )}
 
         {!isLoading && !error && messages.length > 0 && (

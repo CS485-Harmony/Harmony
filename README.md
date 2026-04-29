@@ -72,6 +72,16 @@ password: HarmonyAdmin123!
 
 ### 3. Start the app for normal local development
 
+One-command startup from repo root:
+
+```bash
+npm run dev
+```
+
+This command runs `./dev.sh`, which starts Docker (`postgres`, `redis`), applies backend Prisma migrations, then launches backend API, backend worker, and frontend together with shared shutdown on `Ctrl+C`.
+
+Manual startup (three terminals):
+
 Use three terminals:
 
 ```bash

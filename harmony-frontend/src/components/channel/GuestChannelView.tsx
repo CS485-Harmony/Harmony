@@ -9,8 +9,10 @@ import { notFound } from 'next/navigation';
 import {
   fetchPublicServer,
   fetchPublicChannel,
+  fetchPublicChannels,
   fetchPublicMessages,
 } from '@/services/publicApiService';
+import { ServerSidebar } from '@/components/server/ServerSidebar';
 import { getChannels } from '@/services/channelService';
 import { TrpcHttpError } from '@/lib/trpc-errors';
 import { AuthRedirect } from '@/components/channel/AuthRedirect';
@@ -56,9 +58,10 @@ interface GuestChannelViewProps {
 }
 
 export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannelViewProps) {
-  const [server, channelResult] = await Promise.all([
+  const [server, channelResult, publicChannels] = await Promise.all([
     fetchPublicServer(serverSlug),
     fetchPublicChannel(serverSlug, channelSlug),
+    fetchPublicChannels(serverSlug),
   ]);
 
   if (!server || !channelResult) notFound();
@@ -89,7 +92,13 @@ export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannel
       <div className='flex h-screen flex-col overflow-hidden bg-[#36393f] font-sans'>
         {isMember && <AuthRedirect to={`/channels/${serverSlug}/${channelSlug}`} />}
         <GuestHeader server={server} />
-        <PrivateChannelLockedPane mode='guest' />
+        <div className='flex flex-1 overflow-hidden'>
+          <ServerSidebar
+            serverInfo={server}
+            publicChannels={publicChannels}
+          />
+          <PrivateChannelLockedPane mode='guest' />
+        </div>
       </div>
     );
   }
@@ -104,16 +113,24 @@ export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannel
       {isMember && <AuthRedirect to={`/channels/${serverSlug}/${channelSlug}`} />}
       <GuestHeader server={server} />
 
-      <VisibilityGuard visibility={channel.visibility} isLoading={false}>
-        <div className='flex flex-1 flex-col overflow-hidden'>
-          <ChannelHeader channel={channel} />
+      <div className='flex flex-1 overflow-hidden'>
+        <ServerSidebar
+          serverInfo={server}
+          publicChannels={publicChannels}
+          currentChannelId={channel.id}
+        />
 
+        <VisibilityGuard visibility={channel.visibility} isLoading={false}>
           <div className='flex flex-1 flex-col overflow-hidden'>
-            <MessageList key={channel.id} channel={channel} messages={sortedMessages} />
-            <GuestPromoBanner serverName={server.name} memberCount={memberCount} />
+            <ChannelHeader channel={channel} />
+
+            <div className='flex flex-1 flex-col overflow-hidden'>
+              <MessageList key={channel.id} channel={channel} messages={sortedMessages} />
+              <GuestPromoBanner serverName={server.name} memberCount={memberCount} />
+            </div>
           </div>
-        </div>
-      </VisibilityGuard>
+        </VisibilityGuard>
+      </div>
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
   fetchPublicServer,
   fetchPublicChannel,
   fetchPublicMessages,
+  fetchPublicChannels,
   isChannelGuestAccessible,
 } from '@/services/publicApiService';
 
@@ -424,5 +425,46 @@ describe('publicApiService', () => {
         await expect(isChannelGuestAccessible('harmony-hq', 'general')).resolves.toBe(expected);
       },
     );
+  });
+
+  describe('fetchPublicChannels', () => {
+    const makeChannelListResponse = (channels: unknown[]) => ({ channels });
+
+    it('URL-encodes the server slug', async () => {
+      mockFetch.mockResolvedValue(makeResponse(makeChannelListResponse([])));
+      await fetchPublicChannels('my server/slug');
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('my%20server%2Fslug'),
+        expect.anything(),
+      );
+    });
+
+    it('returns [] on a non-OK response', async () => {
+      mockFetch.mockResolvedValue(makeResponse({}, { status: 404 }));
+      await expect(fetchPublicChannels('missing')).resolves.toEqual([]);
+    });
+
+    it('returns [] on a network error', async () => {
+      mockFetch.mockRejectedValue(new Error('network'));
+      await expect(fetchPublicChannels('harmony-hq')).resolves.toEqual([]);
+    });
+
+    it('maps id, name, slug, type, and topic from the response', async () => {
+      mockFetch.mockResolvedValue(
+        makeResponse(
+          makeChannelListResponse([
+            { id: 'chn-1', name: 'general', slug: 'general', type: 'TEXT', topic: 'Chat here' },
+            { id: 'chn-2', name: 'voice', slug: 'voice', type: 'VOICE', topic: null },
+            { id: 'chn-3', name: 'news', slug: 'news', type: 'ANNOUNCEMENT', topic: undefined },
+          ]),
+        ),
+      );
+      const result = await fetchPublicChannels('harmony-hq');
+      expect(result).toEqual([
+        { id: 'chn-1', name: 'general', slug: 'general', type: ChannelType.TEXT, topic: 'Chat here' },
+        { id: 'chn-2', name: 'voice', slug: 'voice', type: ChannelType.VOICE, topic: undefined },
+        { id: 'chn-3', name: 'news', slug: 'news', type: ChannelType.ANNOUNCEMENT, topic: undefined },
+      ]);
+    });
   });
 });

@@ -2,6 +2,7 @@
   "name": "harmony",
   "private": true,
   "scripts": {
+    "dev": "./dev.sh",
     "test": "node ./scripts/run-root-jest.cjs",
     "jest": "node ./scripts/run-root-jest.cjs",
     "test:backend": "npm --prefix harmony-backend test --",

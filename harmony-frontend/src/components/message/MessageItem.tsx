@@ -146,7 +146,12 @@ function ReplyBanner({ parentMessage }: { parentMessage: NonNullable<Message['pa
       className='mb-0.5 flex min-w-0 items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors max-w-full'
       aria-label={`Jump to replied message from ${parentMessage.author.displayName ?? parentMessage.author.username}`}
     >
-      <svg className='h-3 w-3 flex-shrink-0 rotate-180' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+      <svg
+        className='h-3 w-3 flex-shrink-0 rotate-180'
+        viewBox='0 0 24 24'
+        fill='currentColor'
+        aria-hidden='true'
+      >
         <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
       </svg>
       {parentMessage.isDeleted ? (
@@ -200,6 +205,7 @@ function ActionBar({
   isOwnMessage,
   onEditClick,
   onReplyClick,
+  onPinToggle,
   onReactionAdd,
 }: {
   messageId: string;
@@ -210,6 +216,7 @@ function ActionBar({
   isOwnMessage?: boolean;
   onEditClick?: () => void;
   onReplyClick?: () => void;
+  onPinToggle?: (messageId: string, pinned: boolean) => void;
   onReactionAdd?: (emoji: string) => void;
 }) {
   const { isAuthenticated } = useAuth();
@@ -222,8 +229,10 @@ function ActionBar({
   const [pinState, setPinState] = useState<PinState>('idle');
   const [pinErrorMsg, setPinErrorMsg] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [emojiPickerOpenUpward, setEmojiPickerOpenUpward] = useState(true);
   const moreRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const emojiTriggerRef = useRef<HTMLButtonElement>(null);
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -271,9 +280,8 @@ function ActionBar({
         });
         onReactionAdd?.(emoji.native);
       } catch (err: unknown) {
-        const code = (
-          err as { response?: { data?: { error?: { json?: { code?: string } } } } }
-        )?.response?.data?.error?.json?.code;
+        const code = (err as { response?: { data?: { error?: { json?: { code?: string } } } } })
+          ?.response?.data?.error?.json?.code;
         if (code !== 'CONFLICT') {
           showToast({ message: 'Failed to add reaction. Please try again.', type: 'error' });
         }
@@ -284,6 +292,7 @@ function ActionBar({
 
   const handlePinToggle = useCallback(async () => {
     if (!serverId) return;
+    const nextPinned = !isPinned;
     setIsMoreOpen(false);
     setPinState('loading');
     const verb = isPinned ? 'unpin' : 'pin';
@@ -292,7 +301,8 @@ function ActionBar({
         ? await unpinMessageAction(messageId, serverId)
         : await pinMessageAction(messageId, serverId);
       if (result.ok) {
-        setIsPinned(prev => !prev);
+        setIsPinned(nextPinned);
+        onPinToggle?.(messageId, nextPinned);
         setPinState('success');
         if (successTimerRef.current) clearTimeout(successTimerRef.current);
         successTimerRef.current = setTimeout(() => setPinState('idle'), 2000);
@@ -318,7 +328,7 @@ function ActionBar({
         setPinErrorMsg('');
       }, 3000);
     }
-  }, [isPinned, messageId, serverId]);
+  }, [isPinned, messageId, onPinToggle, serverId]);
 
   return (
     <div className='absolute -top-3 right-4 z-10 flex items-center rounded-md border border-white/10 bg-[#2f3136] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'>
@@ -357,12 +367,19 @@ function ActionBar({
           type='button'
           aria-label='Add Reaction'
           title='Add Reaction'
+          ref={emojiTriggerRef}
           aria-expanded={isAuthenticated ? showEmojiPicker : undefined}
           aria-haspopup={isAuthenticated ? 'dialog' : undefined}
           onClick={
             !isAuthenticated
               ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`)
-              : () => setShowEmojiPicker(prev => !prev)
+              : () => {
+                  if (!showEmojiPicker && emojiTriggerRef.current) {
+                    const rect = emojiTriggerRef.current.getBoundingClientRect();
+                    setEmojiPickerOpenUpward(rect.top > 435);
+                  }
+                  setShowEmojiPicker(prev => !prev);
+                }
           }
           className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
         >
@@ -380,7 +397,7 @@ function ActionBar({
           <div
             role='dialog'
             aria-label='Emoji picker'
-            className='absolute bottom-full right-0 z-50 mb-2'
+            className={`absolute right-0 z-50 ${emojiPickerOpenUpward ? 'bottom-full mb-2' : 'top-full mt-2'}`}
           >
             <EmojiPickerPopover onEmojiSelect={handleEmojiSelect} />
           </div>
@@ -417,7 +434,9 @@ function ActionBar({
           </button>
 
           {isMoreOpen && (
-            <div className={`absolute right-0 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+            <div
+              className={`absolute right-0 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+            >
               {isOwnMessage && (
                 <button
                   type='button'
@@ -468,6 +487,7 @@ export function MessageItem({
   canPin,
   serverId,
   onReplyClick,
+  onPinToggle,
 }: {
   message: Message;
   /** Set to false for grouped follow-up messages from the same author. Hides the avatar and author line. */
@@ -478,6 +498,8 @@ export function MessageItem({
   serverId?: string;
   /** Called when the user clicks Reply on this message. */
   onReplyClick?: (message: Message) => void;
+  /** Called when the user triggers a pin/unpin action for this message. */
+  onPinToggle?: (messageId: string, pinned: boolean) => void;
 }) {
   const { user, isAuthenticated } = useAuth();
   const { showToast } = useToast();
@@ -704,6 +726,7 @@ export function MessageItem({
       isOwnMessage={isOwnMessage}
       onEditClick={handleEditClick}
       onReplyClick={isTopLevel ? handleReplyClick : undefined}
+      onPinToggle={onPinToggle}
       onReactionAdd={handleReactionAdd}
     />
   );
@@ -782,12 +805,16 @@ export function MessageItem({
         data-message-id={message.id}
         className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
       >
-        {message.parentMessage && <div className='ml-14 pt-1'><ReplyBanner parentMessage={message.parentMessage} /></div>}
+        {message.parentMessage && (
+          <div className='ml-14 pt-1'>
+            <ReplyBanner parentMessage={message.parentMessage} />
+          </div>
+        )}
         <div className='flex gap-4'>
           {!isEditing && actionBar}
           {/* Spacer aligns content with the 40px avatar of the header row */}
           <div className='w-10 flex-shrink-0 text-right'>
-            <span className='invisible text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
+            <span className='invisible whitespace-nowrap text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
               {formatTimeOnly(message.timestamp)}
             </span>
           </div>
@@ -804,11 +831,11 @@ export function MessageItem({
             )}
             <AttachmentList attachments={message.attachments} />
             <ReactionList
-                reactions={localReactions}
-                messageId={message.id}
-                userId={user?.id}
-                onReactionClick={handleReactionToggle}
-              />
+              reactions={localReactions}
+              messageId={message.id}
+              userId={user?.id}
+              onReactionClick={handleReactionToggle}
+            />
             {localReplyCount > 0 && threadToggle}
           </div>
         </div>
@@ -822,7 +849,11 @@ export function MessageItem({
       data-message-id={message.id}
       className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
     >
-      {message.parentMessage && <div className='ml-14 pt-1'><ReplyBanner parentMessage={message.parentMessage} /></div>}
+      {message.parentMessage && (
+        <div className='ml-14 pt-1'>
+          <ReplyBanner parentMessage={message.parentMessage} />
+        </div>
+      )}
       <div className='flex gap-4'>
         {!isEditing && actionBar}
         {/* Avatar */}
@@ -849,7 +880,7 @@ export function MessageItem({
             <span className={authorNameClass}>
               {message.author.displayName ?? message.author.username}
             </span>
-            <span className='text-[11px] text-gray-400'>
+            <span className='whitespace-nowrap text-[11px] text-gray-400'>
               {formatMessageTimestamp(message.timestamp)}
             </span>
             {(message.editedAt || localContent !== undefined) && (
@@ -865,11 +896,11 @@ export function MessageItem({
           )}
           <AttachmentList attachments={message.attachments} />
           <ReactionList
-                reactions={localReactions}
-                messageId={message.id}
-                userId={user?.id}
-                onReactionClick={handleReactionToggle}
-              />
+            reactions={localReactions}
+            messageId={message.id}
+            userId={user?.id}
+            onReactionClick={handleReactionToggle}
+          />
           {localReplyCount > 0 && threadToggle}
         </div>
       </div>
