@@ -241,7 +241,8 @@ export const messageService = {
         ),
       );
 
-    // Re-process mentions on edit (skipDuplicates prevents duplicate notifications)
+    // Re-process mentions on edit; both MessageMention and Notification rows have
+    // unique constraints so repeated calls are idempotent — no duplicate notifications.
     processMentions({
       messageId,
       channelId: message.channelId,

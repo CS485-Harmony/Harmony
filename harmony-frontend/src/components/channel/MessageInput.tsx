@@ -84,8 +84,16 @@ export function MessageInput({
     setMentionCandidates([]);
     setMentionStart(-1);
     setMentionSelectedIdx(0);
+    if (mentionDebounceRef.current) clearTimeout(mentionDebounceRef.current);
     textareaRef.current?.focus();
   }, [channelId]);
+
+  // Clear the mention debounce timer on unmount to avoid setState after unmount.
+  useEffect(() => {
+    return () => {
+      if (mentionDebounceRef.current) clearTimeout(mentionDebounceRef.current);
+    };
+  }, []);
 
   // Close picker when clicking outside the popover
   useEffect(() => {

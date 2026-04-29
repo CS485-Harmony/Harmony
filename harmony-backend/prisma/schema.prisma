@@ -290,6 +290,8 @@ model Notification {
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
+  /// Prevent duplicate mention notifications for the same user+message pair.
+  @@unique([userId, type, messageId], map: "idx_notifications_unique")
   @@index([userId, read], map: "idx_notifications_user_read")
   @@index([userId, createdAt(sort: Desc)], map: "idx_notifications_user_created")
   @@map("notifications")

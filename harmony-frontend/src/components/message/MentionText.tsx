@@ -1,17 +1,17 @@
 'use client';
 
 import React from 'react';
-import { useAuth } from '@/hooks/useAuth';
 
-interface MentionTextProps {
+export interface MentionTextProps {
   content: string;
-  /** Current user's username, used to highlight self-mentions differently. */
+  /** Current user's username — self-mentions get the accent highlight. */
   currentUsername?: string;
 }
 
 /**
  * Renders message content with @username tokens styled as inline mention pills.
- * Self-mentions receive an accent background; other mentions are styled dimly.
+ * Self-mentions receive an accent background; other mentions are styled subtly.
+ * Pass `currentUsername` from a parent component that already holds auth state.
  */
 export function MentionText({ content, currentUsername }: MentionTextProps) {
   if (!content.includes('@')) {
@@ -22,7 +22,7 @@ export function MentionText({ content, currentUsername }: MentionTextProps) {
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let key = 0;
-  // Create a fresh regex per call so shared lastIndex state never bleeds between renders.
+  // Create a fresh regex per call so lastIndex state never bleeds between renders.
   const re = /@([\w]{1,32})/g;
   while ((match = re.exec(content)) !== null) {
     const [full, username] = match;
@@ -57,17 +57,4 @@ export function MentionText({ content, currentUsername }: MentionTextProps) {
   }
 
   return <>{parts}</>;
-}
-
-/** Hook-aware wrapper that auto-reads the current user's username. */
-export function MentionTextWithSelf({ content }: { content: string }) {
-  let currentUsername: string | undefined;
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    const { user } = useAuth();
-    currentUsername = user?.username;
-  } catch {
-    // outside auth context — no self-highlighting
-  }
-  return <MentionText content={content} currentUsername={currentUsername} />;
 }

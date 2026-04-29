@@ -28,6 +28,9 @@ CREATE INDEX "idx_message_mentions_user" ON "message_mentions"("user_id");
 -- CreateIndex
 CREATE UNIQUE INDEX "idx_message_mentions_unique" ON "message_mentions"("message_id", "user_id");
 
+-- CreateIndex — prevent duplicate mention notifications per user+message pair
+CREATE UNIQUE INDEX "idx_notifications_unique" ON "notifications"("user_id", "type", "message_id");
+
 -- CreateIndex
 CREATE INDEX "idx_notifications_user_read" ON "notifications"("user_id", "read");
 
