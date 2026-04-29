@@ -6,6 +6,12 @@
 const mockFetch = jest.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
 
+const mockCookiesGet = jest.fn();
+
+jest.mock('next/headers', () => ({
+  cookies: jest.fn().mockResolvedValue({ get: mockCookiesGet }),
+}));
+
 // Minimal NextRequest / NextResponse shims
 jest.mock('next/server', () => ({
   NextRequest: class {
@@ -51,10 +57,19 @@ describe('GET /api/tenor', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     process.env = { ...OLD_ENV, TENOR_API_KEY: 'test-key' };
+    // Default: authenticated user
+    mockCookiesGet.mockReturnValue({ value: 'token-abc' });
   });
 
   afterAll(() => {
     process.env = OLD_ENV;
+  });
+
+  it('returns 401 when no auth_token cookie is present', async () => {
+    mockCookiesGet.mockReturnValue(undefined);
+    const req = makeRequest('http://localhost/api/tenor');
+    const res = await GET(req as never);
+    expect((res as { _status: number })._status).toBe(401);
   });
 
   it('returns 503 when TENOR_API_KEY is not set', async () => {
@@ -113,11 +128,12 @@ describe('GET /api/tenor', () => {
       json: jest.fn().mockResolvedValue(makeTenorResponse([])),
     });
 
+    // "hello world!" pre-encoded in the URL as "hello+world%21"
     const req = makeRequest('http://localhost/api/tenor?q=hello+world%21');
     await GET(req as never);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringMatching(/q=hello/),
+      expect.stringContaining('q=hello%20world!'),
       expect.anything(),
     );
   });

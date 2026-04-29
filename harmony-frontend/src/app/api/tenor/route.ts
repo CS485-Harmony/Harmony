@@ -1,11 +1,12 @@
 /**
  * Next.js API route: Tenor GIF proxy
- * Keeps TENOR_API_KEY server-side; exposes ?q= (search) and ?trending=1.
- * Returns a simplified array of { id, title, url, previewUrl } so the
- * component layer never touches the raw Tenor response shape.
+ * Keeps TENOR_API_KEY server-side; exposes ?q= (search) or no params (trending).
+ * Requires an authenticated session (auth_token cookie) to prevent anonymous
+ * API-key exhaustion. Returns { id, title, url, previewUrl }[].
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 
 const TENOR_BASE = 'https://tenor.googleapis.com/v2';
 const RESULTS_LIMIT = 24;
@@ -45,6 +46,12 @@ function mapResult(r: TenorResult): GifResult {
 }
 
 export async function GET(req: NextRequest) {
+  // Require an authenticated session to prevent anonymous API-key exhaustion.
+  const cookieStore = await cookies();
+  if (!cookieStore.get('auth_token')?.value) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const apiKey = process.env.TENOR_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: 'GIF search is not configured' }, { status: 503 });
@@ -52,7 +59,6 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = req.nextUrl;
   const query = searchParams.get('q')?.trim();
-  const trending = searchParams.get('trending') === '1';
 
   const params = new URLSearchParams({
     key: apiKey,
@@ -64,9 +70,6 @@ export async function GET(req: NextRequest) {
   const endpoint = query
     ? `${TENOR_BASE}/search?${params}&q=${encodeURIComponent(query)}`
     : `${TENOR_BASE}/featured?${params}`;
-
-  // Only hit trending if explicitly requested with no query
-  void trending;
 
   try {
     const res = await fetch(endpoint, { next: { revalidate: 60 } });

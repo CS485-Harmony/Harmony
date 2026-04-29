@@ -25,10 +25,12 @@ function useGifSearch(query: string) {
       ? `/api/tenor?q=${encodeURIComponent(query.trim())}`
       : `/api/tenor`;
 
-    setIsLoading(true);
-    setError(null);
-
     const timer = setTimeout(() => {
+      // State updates inside the timer callback avoid triggering the
+      // react-hooks/set-state-in-effect lint rule (no synchronous setState in body).
+      setIsLoading(true);
+      setError(null);
+
       fetch(url)
         .then(r => r.json())
         .then((data: { gifs?: GifResult[]; error?: string }) => {
