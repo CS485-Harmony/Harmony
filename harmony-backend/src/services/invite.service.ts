@@ -122,9 +122,14 @@ export const inviteService = {
     }
 
     await prisma.$transaction(async (tx) => {
+      // Atomic enforcement of maxUses — checked first so losing-race transactions
+      // roll back before any member/count writes are attempted.
+      const incResult = await inviteRepository.conditionalIncrementUses(invite.id, invite.maxUses, tx);
+      if (incResult.count === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This invite has reached its maximum uses' });
+      }
       await serverMemberRepository.create({ userId, serverId: invite.serverId, role: 'MEMBER' }, tx);
       await serverRepository.update(invite.serverId, { memberCount: { increment: 1 } }, tx);
-      await inviteRepository.incrementUses(invite.id, tx);
     });
 
     void eventBus.publish(EventChannels.MEMBER_JOINED, {

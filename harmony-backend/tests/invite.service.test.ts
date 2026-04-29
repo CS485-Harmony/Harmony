@@ -193,6 +193,40 @@ describe('inviteService (integration)', () => {
         code: 'NOT_FOUND',
       });
     });
+
+    it('enforces maxUses atomically under concurrent redemptions', async () => {
+      const ts2 = Date.now();
+      const concurrentUsers = await Promise.all(
+        Array.from({ length: 5 }, (_, i) =>
+          prisma.user.create({
+            data: {
+              email: `conc-${ts2}-${i}@example.com`,
+              username: `conc_${ts2}_${i}`,
+              passwordHash: '$2a$12$placeholderHashForTestingOnly000000000000000000000000000',
+              displayName: `Concurrent ${i}`,
+            },
+          })
+        )
+      );
+
+      try {
+        const invite = await inviteService.generate(publicServerId, ownerUserId, { maxUses: 1 });
+        const results = await Promise.allSettled(
+          concurrentUsers.map((u) => inviteService.redeem(invite.code, u.id))
+        );
+
+        const succeeded = results.filter((r) => r.status === 'fulfilled');
+        expect(succeeded).toHaveLength(1);
+
+        const updated = await prisma.serverInvite.findUnique({ where: { id: invite.id } });
+        expect(updated!.uses).toBe(1);
+      } finally {
+        await prisma.serverMember.deleteMany({
+          where: { userId: { in: concurrentUsers.map((u) => u.id) } },
+        });
+        await prisma.user.deleteMany({ where: { id: { in: concurrentUsers.map((u) => u.id) } } });
+      }
+    });
   });
 
   describe('delete', () => {

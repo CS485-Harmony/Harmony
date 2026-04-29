@@ -44,6 +44,14 @@ export const inviteRepository = {
     });
   },
 
+  // Returns count of updated rows; 0 means the invite was already exhausted.
+  conditionalIncrementUses(id: string, maxUses: number | null, client: Client = prisma) {
+    return client.serverInvite.updateMany({
+      where: { id, ...(maxUses !== null ? { uses: { lt: maxUses } } : {}) },
+      data: { uses: { increment: 1 } },
+    });
+  },
+
   delete(id: string, client: Client = prisma) {
     return client.serverInvite.delete({ where: { id } });
   },
