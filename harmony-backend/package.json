@@ -37,6 +37,7 @@
     "rate-limit-redis": "^4.3.1",
     "serverless-http": "^3.2.0",
     "twilio": "^5.13.0",
+    "web-push": "^3.6.7",
     "zod": "^3.24.2"
   },
   "devDependencies": {
@@ -49,6 +50,7 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^20.17.19",
     "@types/supertest": "^6.0.2",
+    "@types/web-push": "^3.6.4",
     "@typescript-eslint/eslint-plugin": "^8.26.0",
     "@typescript-eslint/parser": "^8.26.0",
     "dotenv": "^17.3.1",

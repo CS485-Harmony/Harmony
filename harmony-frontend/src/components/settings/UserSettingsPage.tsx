@@ -14,6 +14,7 @@ import { getUserErrorMessage } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import type { UserStatus } from '@/types';
 import { isChannelGuestAccessible } from '@/app/settings/actions';
+import { NotificationSettingsSection } from './NotificationSettingsSection';
 
 // ─── Discord colour tokens ────────────────────────────────────────────────────
 
@@ -44,10 +45,11 @@ const ALL_STATUSES: UserStatus[] = ['online', 'idle', 'dnd', 'offline'];
 
 // ─── Sidebar sections ─────────────────────────────────────────────────────────
 
-type Section = 'account' | 'logout';
+type Section = 'account' | 'notifications' | 'logout';
 
 const SECTIONS: { id: Section; label: string; danger?: boolean }[] = [
   { id: 'account', label: 'My Account' },
+  { id: 'notifications', label: 'Notifications' },
   { id: 'logout', label: 'Log Out', danger: true },
 ];
 
@@ -482,6 +484,7 @@ export function UserSettingsPage({ returnTo }: { returnTo?: string }) {
         <div className='p-4 sm:p-8'>
           <div className='mx-auto max-w-xl'>
             {activeSection === 'account' && <AccountSection />}
+            {activeSection === 'notifications' && <NotificationSettingsSection />}
             {activeSection === 'logout' && <LogoutSection returnTo={returnTo} />}
           </div>
         </div>
