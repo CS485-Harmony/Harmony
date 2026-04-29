@@ -46,7 +46,7 @@ export const notificationRouter = router({
     .mutation(async ({ ctx, input }) => {
       await prisma.pushSubscription.upsert({
         where: { endpoint: input.endpoint },
-        update: { p256dh: input.p256dh, auth: input.auth },
+        update: { p256dh: input.p256dh, auth: input.auth, userId: ctx.userId! },
         create: { userId: ctx.userId!, ...input },
       });
       return { success: true };
