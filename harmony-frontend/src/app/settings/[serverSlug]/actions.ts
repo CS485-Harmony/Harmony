@@ -18,6 +18,19 @@ import {
 } from '@/services/serverService';
 import type { Server, ServerMemberInfo } from '@/types';
 import { requireServerSettingsAccess } from './settings-access';
+import { trpcMutate, trpcQuery } from '@/lib/trpc-client';
+
+export interface InviteInfo {
+  id: string;
+  code: string;
+  serverId: string;
+  creatorId: string;
+  uses: number;
+  maxUses: number | null;
+  expiresAt: string | null;
+  createdAt: string;
+  creator: { id: string; username: string; displayName: string };
+}
 
 export async function saveServerSettings(
   serverSlug: string,
@@ -89,4 +102,19 @@ export async function removeMemberAction(serverSlug: string, targetUserId: strin
   const server = await requireServerSettingsAccess(serverSlug, 'throw');
   await removeMember(server.id, targetUserId);
   revalidatePath(`/settings/${serverSlug}`);
+}
+
+export async function listInvitesAction(serverSlug: string): Promise<InviteInfo[]> {
+  const server = await requireServerSettingsAccess(serverSlug, 'throw');
+  return trpcQuery<InviteInfo[]>('invite.list', { serverId: server.id });
+}
+
+export async function generateInviteAction(serverSlug: string): Promise<InviteInfo> {
+  const server = await requireServerSettingsAccess(serverSlug, 'throw');
+  return trpcMutate<InviteInfo>('invite.generate', { serverId: server.id });
+}
+
+export async function deleteInviteAction(serverSlug: string, inviteId: string): Promise<void> {
+  const server = await requireServerSettingsAccess(serverSlug, 'throw');
+  await trpcMutate('invite.delete', { serverId: server.id, inviteId });
 }

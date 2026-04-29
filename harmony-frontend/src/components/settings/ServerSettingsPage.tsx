@@ -12,6 +12,7 @@ import { cn, getUserErrorMessage } from '@/lib/utils';
 import { saveServerSettings, deleteServerAction } from '@/app/settings/[serverSlug]/actions';
 import { MembersSection } from '@/components/settings/MembersSection';
 import { VisibilitySection } from '@/components/settings/VisibilitySection';
+import { InviteSection } from '@/components/settings/InviteSection';
 import { PermissionsSection } from '@/components/settings/PermissionsSection';
 import type { PermissionMatrix } from '@/components/settings/PermissionsSection';
 import type { Server } from '@/types';
@@ -27,11 +28,12 @@ const BG = {
 
 // ─── Sidebar sections ─────────────────────────────────────────────────────────
 
-type Section = 'overview' | 'members' | 'privacy' | 'permissions' | 'danger-zone';
+type Section = 'overview' | 'members' | 'invites' | 'privacy' | 'permissions' | 'danger-zone';
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'members', label: 'Members' },
+  { id: 'invites', label: 'Invites' },
   { id: 'privacy', label: 'Privacy' },
   { id: 'permissions', label: 'Permissions' },
   { id: 'danger-zone', label: 'Danger Zone' },
@@ -385,6 +387,7 @@ export function ServerSettingsPage({
             <OverviewSection key={server.id} server={server} onSave={setDisplayName} />
           )}
           {activeSection === 'members' && <MembersSection serverSlug={serverSlug} />}
+          {activeSection === 'invites' && <InviteSection serverSlug={serverSlug} />}
           {activeSection === 'privacy' && (
             <VisibilitySection server={server} serverSlug={serverSlug} />
           )}
