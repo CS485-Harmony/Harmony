@@ -8,18 +8,23 @@ jobs:
   run-cloud-integration-tests:
     name: Run Cloud Integration Tests
     # Only run automatically for successful production deployment statuses.
-    # Vercel uses "Production" while Railway uses "<project> / production".
-    # Preview deployments use "Preview", so they are excluded.
+    # Vercel emits "Production", while Railway emits "<project> / production".
+    # Preview deployments ("Preview") are excluded.
     if: |
       github.event_name == 'workflow_dispatch' ||
       (
         github.event_name == 'deployment_status' &&
         github.event.deployment_status.state == 'success' &&
-        contains(toLower(github.event.deployment.environment), 'production') &&
-        !contains(toLower(github.event.deployment.environment), 'preview')
+        (
+          github.event.deployment.environment == 'Production' ||
+          endsWith(github.event.deployment.environment, '/ production')
+        )
       )
     runs-on: ubuntu-latest
     environment: cloud-integration-tests
+    permissions:
+      contents: read
+      issues: write
     env:
       TEST_TARGET: cloud
       BACKEND_URL: ${{ vars.CLOUD_TEST_BACKEND_URL }}
@@ -60,4 +65,88 @@ jobs:
 
       - name: Run integration tests (cloud target)
         working-directory: tests/integration
-        run: npm run test:cloud
+        run: npm run test:cloud 2>&1 | tee /tmp/cloud-integration-test-output.log; exit ${PIPESTATUS[0]}
+
+      - name: Upload cloud integration test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-integration-test-output
+          path: /tmp/cloud-integration-test-output.log
+          retention-days: 14
+
+      - name: Notify Discord on failure
+        if: failure()
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          DEPLOY_ENV: ${{ github.event.deployment.environment || 'n/a' }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL is not set; skipping Discord alert."
+            exit 0
+          fi
+
+          jq -n \
+            --arg content "Cloud integration tests failed on \`$EVENT_NAME\` (env: \`$DEPLOY_ENV\`, sha: \`$SHA\`). Run: $RUN_URL" \
+            '{content: $content}' | \
+          curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d @-
+
+      - name: Upsert cloud test failure tracker issue
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          DEPLOY_ENV: ${{ github.event.deployment.environment || 'n/a' }}
+          EVENT_NAME: ${{ github.event_name }}
+          BACKEND_URL: ${{ env.BACKEND_URL }}
+          FRONTEND_URL: ${{ env.FRONTEND_URL }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = 'Cloud Integration Tests Failure Tracker';
+            const labels = ['ci', 'bug'];
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            let issue = issues.find((i) => i.title === title);
+            if (!issue) {
+              const created = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body: 'Tracks failures from `.github/workflows/run-cloud-integration-tests.yml`.',
+                labels
+              });
+              issue = created.data;
+            }
+
+            const body = [
+              'Cloud integration test run failed.',
+              '',
+              `- Time: ${new Date().toISOString()}`,
+              `- Event: \`${process.env.EVENT_NAME}\``,
+              `- Deployment environment: \`${process.env.DEPLOY_ENV}\``,
+              `- Commit: \`${process.env.SHA}\``,
+              `- Backend URL: ${process.env.BACKEND_URL}`,
+              `- Frontend URL: ${process.env.FRONTEND_URL}`,
+              `- Run: ${process.env.RUN_URL}`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issue.number,
+              body
+            });
