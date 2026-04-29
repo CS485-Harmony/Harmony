@@ -9,9 +9,8 @@
  * users with message:pin permission (MODERATOR, ADMIN, OWNER), and "Edit
  * Message" for the message's own author.
  *
- * Threading: top-level messages with replies show a "View N replies" button.
- * Clicking it expands an inline ThreadView showing indented replies and a
- * reply composer.
+ * Replies: messages with a parentMessage show a Discord-style inline reply
+ * banner above the content. Clicking the banner scrolls to the parent message.
  */
 
 'use client';
@@ -126,6 +125,43 @@ function ReactionList({
   );
 }
 
+// ─── ReplyBanner ──────────────────────────────────────────────────────────────
+
+function ReplyBanner({ parentMessage }: { parentMessage: NonNullable<Message['parentMessage']> }) {
+  const handleClick = () => {
+    const el = document.querySelector(`[data-message-id="${parentMessage.id}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const label = parentMessage.isDeleted
+    ? 'Original message deleted'
+    : `${parentMessage.author.displayName ?? parentMessage.author.username}: ${parentMessage.content}`;
+
+  return (
+    <button
+      type='button'
+      onClick={handleClick}
+      title={label}
+      className='mb-0.5 flex min-w-0 items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors max-w-full'
+      aria-label={`Jump to replied message from ${parentMessage.author.displayName ?? parentMessage.author.username}`}
+    >
+      <svg className='h-3 w-3 flex-shrink-0 rotate-180' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+        <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
+      </svg>
+      {parentMessage.isDeleted ? (
+        <span className='italic text-gray-500'>Original message deleted</span>
+      ) : (
+        <>
+          <span className='font-medium text-gray-300 flex-shrink-0'>
+            {parentMessage.author.displayName ?? parentMessage.author.username}
+          </span>
+          <span className='min-w-0 truncate'>{parentMessage.content}</span>
+        </>
+      )}
+    </button>
+  );
+}
+
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
 function PinMenuIcon() {
@@ -180,12 +216,14 @@ function ActionBar({
   const router = useRouter();
   const pathname = usePathname();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const [openUpward, setOpenUpward] = useState(false);
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
   const [pinErrorMsg, setPinErrorMsg] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const moreTriggerRef = useRef<HTMLButtonElement>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -355,8 +393,15 @@ function ActionBar({
             type='button'
             aria-label='More actions'
             title='More'
+            ref={moreTriggerRef}
             aria-expanded={isMoreOpen}
-            onClick={() => setIsMoreOpen(v => !v)}
+            onClick={() => {
+              if (!isMoreOpen && moreTriggerRef.current) {
+                const rect = moreTriggerRef.current.getBoundingClientRect();
+                setOpenUpward(window.innerHeight - rect.bottom < 180);
+              }
+              setIsMoreOpen(v => !v);
+            }}
             className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
           >
             <svg
@@ -371,7 +416,7 @@ function ActionBar({
           </button>
 
           {isMoreOpen && (
-            <div className='absolute right-0 top-full mt-1 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20'>
+            <div className={`absolute right-0 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
               {isOwnMessage && (
                 <button
                   type='button'
@@ -421,6 +466,7 @@ export function MessageItem({
   showHeader = true,
   canPin,
   serverId,
+  onReplyClick,
 }: {
   message: Message;
   /** Set to false for grouped follow-up messages from the same author. Hides the avatar and author line. */
@@ -429,6 +475,8 @@ export function MessageItem({
   canPin?: boolean;
   /** Required for pin actions. Passed alongside canPin. */
   serverId?: string;
+  /** Called when the user clicks Reply on this message. */
+  onReplyClick?: (message: Message) => void;
 }) {
   const { user, isAuthenticated } = useAuth();
   const { showToast } = useToast();
@@ -441,7 +489,6 @@ export function MessageItem({
   const [localContent, setLocalContent] = useState<string | undefined>(undefined);
   const [localReactions, setLocalReactions] = useState<Reaction[]>(message.reactions ?? []);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
-  // Thread state: only top-level messages (no parentMessageId) can have threads
   const isTopLevel = !message.parentMessageId;
   const [isThreadOpen, setIsThreadOpen] = useState(false);
   const [localReplyCount, setLocalReplyCount] = useState(message.replyCount ?? 0);
@@ -643,8 +690,8 @@ export function MessageItem({
   const authorNameClass = 'cursor-pointer font-medium text-white hover:underline';
 
   const handleReplyClick = useCallback(() => {
-    setIsThreadOpen(true);
-  }, []);
+    onReplyClick?.(message);
+  }, [onReplyClick, message]);
 
   const actionBar = (
     <ActionBar
@@ -659,6 +706,38 @@ export function MessageItem({
       onReactionAdd={handleReactionAdd}
     />
   );
+
+  const threadToggle =
+    isTopLevel && serverId ? (
+      <button
+        type='button'
+        onClick={() => setIsThreadOpen(v => !v)}
+        className='mt-1 flex items-center gap-1 text-xs text-[#5865f2] hover:underline'
+        aria-expanded={isThreadOpen}
+        aria-label={
+          isThreadOpen
+            ? 'Hide replies'
+            : `View ${localReplyCount} ${localReplyCount === 1 ? 'reply' : 'replies'}`
+        }
+      >
+        <svg className='h-3 w-3' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+          <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
+        </svg>
+        {isThreadOpen
+          ? 'Hide replies'
+          : `${localReplyCount} ${localReplyCount === 1 ? 'reply' : 'replies'}`}
+      </button>
+    ) : null;
+
+  const threadView =
+    isTopLevel && isThreadOpen && serverId ? (
+      <ThreadView
+        parentMessage={message}
+        channelId={message.channelId}
+        serverId={serverId}
+        onReplyCountChange={delta => setLocalReplyCount(c => c + delta)}
+      />
+    ) : null;
 
   const editUi = (
     <div className='mt-0.5'>
@@ -696,43 +775,13 @@ export function MessageItem({
     </div>
   );
 
-  // "View N replies" / "Hide replies" button shown on top-level messages with replies
-  const threadToggle =
-    isTopLevel && serverId ? (
-      <button
-        type='button'
-        onClick={() => setIsThreadOpen(v => !v)}
-        className='mt-1 flex items-center gap-1 text-xs text-[#5865f2] hover:underline'
-        aria-expanded={isThreadOpen}
-        aria-label={
-          isThreadOpen
-            ? 'Hide replies'
-            : `View ${localReplyCount} ${localReplyCount === 1 ? 'reply' : 'replies'}`
-        }
-      >
-        <svg className='h-3 w-3' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
-          <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
-        </svg>
-        {isThreadOpen
-          ? 'Hide replies'
-          : `${localReplyCount} ${localReplyCount === 1 ? 'reply' : 'replies'}`}
-      </button>
-    ) : null;
-
-  // Inline thread view rendered below message content
-  const threadView =
-    isTopLevel && isThreadOpen && serverId ? (
-      <ThreadView
-        parentMessage={message}
-        channelId={message.channelId}
-        serverId={serverId}
-        onReplyCountChange={delta => setLocalReplyCount(c => c + delta)}
-      />
-    ) : null;
-
   if (!showHeader) {
     return (
-      <div className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'>
+      <div
+        data-message-id={message.id}
+        className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
+      >
+        {message.parentMessage && <div className='ml-14 pt-1'><ReplyBanner parentMessage={message.parentMessage} /></div>}
         <div className='flex gap-4'>
           {!isEditing && actionBar}
           {/* Spacer aligns content with the 40px avatar of the header row */}
@@ -768,7 +817,11 @@ export function MessageItem({
   }
 
   return (
-    <div className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'>
+    <div
+      data-message-id={message.id}
+      className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
+    >
+      {message.parentMessage && <div className='ml-14 pt-1'><ReplyBanner parentMessage={message.parentMessage} /></div>}
       <div className='flex gap-4'>
         {!isEditing && actionBar}
         {/* Avatar */}
