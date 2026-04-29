@@ -147,9 +147,19 @@ describe('requireServerSettingsAccess', () => {
     expect(mockRedirect).not.toHaveBeenCalled();
   });
 
-  it('delegates missing servers to notFound', async () => {
+  it('delegates missing servers to notFound in redirect mode', async () => {
     mockGetServerAuthenticated.mockResolvedValue(null);
 
     await expect(requireServerSettingsAccess('missing-server')).rejects.toThrow('NOT_FOUND');
+    expect(mockNotFound).toHaveBeenCalled();
+  });
+
+  it('throws a plain error for missing servers in throw mode (no notFound)', async () => {
+    mockGetServerAuthenticated.mockResolvedValue(null);
+
+    await expect(requireServerSettingsAccess('missing-server', 'throw')).rejects.toThrow(
+      'Server not found',
+    );
+    expect(mockNotFound).not.toHaveBeenCalled();
   });
 });
