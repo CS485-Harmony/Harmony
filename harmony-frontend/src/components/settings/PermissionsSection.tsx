@@ -4,6 +4,8 @@
  * always reflects the authoritative backend definition.
  */
 
+import React from 'react';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type PermissionMatrix = Record<string, string[]>;
@@ -149,8 +151,8 @@ export function PermissionsSection({ matrix }: PermissionsSectionProps) {
             </thead>
             <tbody>
               {ACTION_GROUPS.map(group => (
-                <>
-                  <tr key={`${group.label}-header`} className='border-t border-white/10 bg-[#25262a]'>
+                <React.Fragment key={group.label}>
+                  <tr className='border-t border-white/10 bg-[#25262a]'>
                     <td
                       colSpan={ROLE_ORDER.length + 1}
                       className='px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500'
@@ -182,7 +184,7 @@ export function PermissionsSection({ matrix }: PermissionsSectionProps) {
                       })}
                     </tr>
                   ))}
-                </>
+                </React.Fragment>
               ))}
             </tbody>
           </table>
