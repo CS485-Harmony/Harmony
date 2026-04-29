@@ -21,7 +21,9 @@
 #
 # ─── Cloud-target usage (GitHub Actions) ────────────────────────────────────
 # The "Run Cloud Integration Tests" job uses the `cloud-integration-tests`
-# GitHub Actions environment. Configure these environment-scoped settings:
+# GitHub Actions environment. On `main`, it waits for the live deploy statuses
+# for the pushed commit (Vercel frontend + Railway backend services) before
+# hitting the shared cloud URLs. Configure these environment-scoped settings:
 #   vars.CLOUD_TEST_BACKEND_URL    required (deployed backend base URL)
 #   vars.CLOUD_TEST_FRONTEND_URL   required (deployed frontend base URL)
 #   vars.CLOUD_TEST_SERVER_SLUG      optional (defaults to test code fallback)
@@ -241,6 +243,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: cloud-integration-tests
+    permissions:
+      contents: read
+      statuses: read
     env:
       TEST_TARGET: cloud
       BACKEND_URL: ${{ vars.CLOUD_TEST_BACKEND_URL }}
@@ -267,6 +272,50 @@ jobs:
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
+
+      - name: Wait for successful frontend and backend deployments
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          required_contexts=(
+            "Vercel"
+            "overflowing-luck - Harmony backend-api"
+            "overflowing-luck - backend-worker"
+          )
+
+          deadline=$(( $(date +%s) + 1800 ))
+
+          while true; do
+            statuses_json=$(gh api "repos/${REPO}/commits/${SHA}/status")
+
+            if python3 -c $'import json\nimport sys\n\npayload = json.loads(sys.argv[1])\nrequired = sys.argv[2:]\nstatuses = {entry[\"context\"]: entry[\"state\"] for entry in payload.get(\"statuses\", [])}\n\nmissing = [context for context in required if context not in statuses]\nfailed = [f\"{context}={statuses[context]}\" for context in required if statuses.get(context) in {\"error\", \"failure\"}]\npending = [f\"{context}={statuses.get(context, \'missing\')}\" for context in required if statuses.get(context) not in {\"success\", \"error\", \"failure\"}]\n\nif failed:\n    print(\"FAILED \" + \", \".join(failed))\n    sys.exit(2)\nif missing or pending:\n    print(\"PENDING \" + \", \".join(missing + pending))\n    sys.exit(1)\nprint(\"READY\")' "$statuses_json" "${required_contexts[@]}"
+            then
+              rc=0
+            else
+              rc=$?
+            fi
+
+            if [ "$rc" -eq 0 ]; then
+              echo "Deployment contexts are green for ${SHA}."
+              break
+            fi
+
+            if [ "$rc" -eq 2 ]; then
+              echo "::error title=Deployment failed::A required frontend/backend deployment status reported failure for ${SHA}."
+              exit 1
+            fi
+
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error title=Deployment wait timed out::Timed out waiting for Vercel and Railway deployment statuses on ${SHA}."
+              exit 1
+            fi
+
+            echo "Waiting 20s for frontend/backend deployment statuses on ${SHA}..."
+            sleep 20
+          done
 
       - name: Set up Node.js (integration tests)
         uses: actions/setup-node@v4
