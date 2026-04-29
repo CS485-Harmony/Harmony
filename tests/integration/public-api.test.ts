@@ -55,7 +55,7 @@ describe('Public API — SSR (cloud-read-only)', () => {
     expect(body.visibility).toBe('PUBLIC_INDEXABLE');
   });
 
-  test('SSRAPI-4: public channel list returns only PUBLIC_INDEXABLE channels with expected fields', async () => {
+  test('SSRAPI-4: public channel list returns public channels with expected fields (no visibility field)', async () => {
     const res = await fetch(`${BACKEND_URL}/api/public/servers/${serverSlug}/channels`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
