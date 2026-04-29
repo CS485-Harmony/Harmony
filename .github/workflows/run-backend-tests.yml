@@ -49,13 +49,11 @@ jobs:
         with:
           filters: |
             relevant:
-              - 'harmony-frontend/**'
               - 'harmony-backend/**'
-              - 'tests/**'
 
       - name: Skip backend tests for non-code changes
         if: steps.changes.outputs.relevant != 'true'
-        run: echo "No changes under harmony-frontend/, harmony-backend/, or tests/; skipping backend tests."
+        run: echo "No changes under harmony-backend/; skipping backend tests."
 
       - uses: actions/setup-node@v4
         if: steps.changes.outputs.relevant == 'true'

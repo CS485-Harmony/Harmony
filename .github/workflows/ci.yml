@@ -26,12 +26,10 @@ jobs:
           filters: |
             relevant:
               - 'harmony-frontend/**'
-              - 'harmony-backend/**'
-              - 'tests/**'
 
       - name: Skip frontend lint/build for non-code changes
         if: steps.changes.outputs.relevant != 'true'
-        run: echo "No changes under harmony-frontend/, harmony-backend/, or tests/; skipping frontend lint/build."
+        run: echo "No changes under harmony-frontend/; skipping frontend lint/build."
 
       - uses: actions/setup-node@v4
         if: steps.changes.outputs.relevant == 'true'
@@ -67,13 +65,11 @@ jobs:
         with:
           filters: |
             relevant:
-              - 'harmony-frontend/**'
               - 'harmony-backend/**'
-              - 'tests/**'
 
       - name: Skip backend lint/build for non-code changes
         if: steps.changes.outputs.relevant != 'true'
-        run: echo "No changes under harmony-frontend/, harmony-backend/, or tests/; skipping backend lint/build."
+        run: echo "No changes under harmony-backend/; skipping backend lint/build."
 
       - uses: actions/setup-node@v4
         if: steps.changes.outputs.relevant == 'true'
