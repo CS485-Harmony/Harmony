@@ -12,6 +12,8 @@ jest.mock('next/headers', () => ({
   cookies: jest.fn().mockResolvedValue({ get: mockCookiesGet }),
 }));
 
+import { cookies } from 'next/headers';
+
 // Minimal NextRequest / NextResponse shims
 jest.mock('next/server', () => ({
   NextRequest: class {
@@ -56,6 +58,8 @@ describe('GET /api/tenor', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    // jest.resetAllMocks() wipes mockResolvedValue on the cookies factory; restore it.
+    (cookies as jest.Mock).mockResolvedValue({ get: mockCookiesGet });
     process.env = { ...OLD_ENV, TENOR_API_KEY: 'test-key' };
     // Default: authenticated user
     mockCookiesGet.mockReturnValue({ value: 'token-abc' });
