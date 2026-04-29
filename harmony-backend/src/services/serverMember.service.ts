@@ -1,9 +1,32 @@
 import { Prisma, RoleType, ServerMember } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { prisma } from '../db/prisma';
+import { redis } from '../db/redis';
 import { eventBus, EventChannels } from '../events/eventBus';
 import { serverRepository } from '../repositories/server.repository';
 import { serverMemberRepository } from '../repositories/serverMember.repository';
+
+const _parsedLimit = parseInt(process.env.JOIN_RATE_LIMIT ?? '', 10);
+export const JOIN_RATE_MAX = Number.isFinite(_parsedLimit) && _parsedLimit > 0 ? _parsedLimit : 10;
+export const JOIN_RATE_WINDOW_SECS = 60;
+
+/** Lua: INCR key and set expiry atomically on first increment. Returns new count. */
+const INCR_WITH_EXPIRE_LUA = `
+  local n = redis.call('INCR', KEYS[1])
+  if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+  return n
+`;
+
+export async function enforceJoinRateLimit(userId: string): Promise<void> {
+  const key = `rl:join:${userId}`;
+  const count = (await redis.eval(INCR_WITH_EXPIRE_LUA, 1, key, String(JOIN_RATE_WINDOW_SECS))) as number;
+  if (count > JOIN_RATE_MAX) {
+    throw new TRPCError({
+      code: 'TOO_MANY_REQUESTS',
+      message: 'Too many server joins. Please wait before joining another server.',
+    });
+  }
+}
 
 export interface ServerMemberWithUser {
   userId: string;
@@ -47,6 +70,8 @@ export const serverMemberService = {
    * Throws CONFLICT if already a member. Rejects private servers.
    */
   async joinServer(userId: string, serverId: string): Promise<ServerMember> {
+    await enforceJoinRateLimit(userId);
+
     const server = await serverRepository.findById(serverId);
     if (!server) throw new TRPCError({ code: 'NOT_FOUND', message: 'Server not found' });
     if (!server.isPublic) {

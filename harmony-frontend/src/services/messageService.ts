@@ -40,6 +40,32 @@ function toFrontendMessage(raw: Record<string, unknown>, fallbackChannelId = '')
           size: typeof a.sizeBytes === 'number' ? a.sizeBytes : 0,
         }))
       : undefined,
+    parentMessageId: (raw.parentMessageId ?? raw.parent_message_id ?? null) as
+      | string
+      | null
+      | undefined,
+    parentMessage: (() => {
+      const p = (raw.parentMessage ?? raw.parent) as Record<string, unknown> | null | undefined;
+      if (!p) return null;
+      const pa = p.author as Record<string, unknown> | undefined;
+      return {
+        id: p.id as string,
+        content: (p.content ?? '') as string,
+        isDeleted: (p.isDeleted ?? p.is_deleted ?? false) as boolean,
+        author: {
+          id: (pa?.id ?? '') as string,
+          username: (pa?.username ?? '') as string,
+          displayName: (pa?.displayName ?? pa?.display_name) as string | undefined,
+          avatarUrl: (pa?.avatarUrl ?? pa?.avatar_url) as string | undefined,
+        },
+      };
+    })(),
+    replyCount:
+      typeof raw.replyCount === 'number'
+        ? raw.replyCount
+        : typeof raw.reply_count === 'number'
+          ? raw.reply_count
+          : 0,
   };
 }
 
@@ -73,9 +99,8 @@ export async function getMessages(
     });
     if (data === null)
       throw new Error(`getMessages: tRPC returned no data for channelId=${channelId}`);
-    // tRPC returns oldest-first; reverse so callers get newest-first.
     return {
-      messages: [...data.messages].reverse().map(m => toFrontendMessage(m, channelId)),
+      messages: data.messages.map(m => toFrontendMessage(m, channelId)),
       hasMore: !!data.nextCursor,
     };
   }
@@ -118,6 +143,22 @@ export async function sendMessage(
 }
 
 /**
+ * Edits a message's content via tRPC. Returns the updated message.
+ */
+export async function editMessage(
+  messageId: string,
+  serverId: string,
+  content: string,
+): Promise<Message> {
+  const data = await trpcMutate<Record<string, unknown>>('message.editMessage', {
+    serverId,
+    messageId,
+    content,
+  });
+  return toFrontendMessage(data);
+}
+
+/**
  * Deletes a message by ID via tRPC. Returns true if deleted.
  */
 export async function deleteMessage(id: string, serverId?: string): Promise<boolean> {
@@ -126,4 +167,49 @@ export async function deleteMessage(id: string, serverId?: string): Promise<bool
   }
   await trpcMutate('message.deleteMessage', { serverId, messageId: id });
   return true;
+}
+
+/**
+ * Creates a reply to a top-level message via tRPC.
+ */
+export async function createReply(
+  parentMessageId: string,
+  channelId: string,
+  serverId: string,
+  content: string,
+): Promise<Message> {
+  const data = await trpcMutate<Record<string, unknown>>('message.createReply', {
+    serverId,
+    channelId,
+    parentMessageId,
+    content,
+  });
+  return toFrontendMessage(data, channelId);
+}
+
+/**
+ * Fetches paginated replies for a message thread via tRPC.
+ */
+export async function getThreadMessages(
+  parentMessageId: string,
+  channelId: string,
+  serverId: string,
+  cursor?: string,
+): Promise<{ replies: Message[]; nextCursor: string | null; hasMore: boolean }> {
+  const data = await trpcQuery<{
+    replies: Record<string, unknown>[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }>('message.getThreadMessages', {
+    serverId,
+    channelId,
+    parentMessageId,
+    limit: 20,
+    ...(cursor ? { cursor } : {}),
+  });
+  return {
+    replies: data.replies.map(r => toFrontendMessage(r, channelId)),
+    nextCursor: data.nextCursor,
+    hasMore: data.hasMore,
+  };
 }

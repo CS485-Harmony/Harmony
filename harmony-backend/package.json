@@ -7,7 +7,7 @@
     "dev:worker": "PORT=4100 tsx watch src/worker.ts",
     "dev:e2e": "NODE_ENV=e2e PORT=4000 tsx src/index.ts",
     "dev:e2e:worker": "NODE_ENV=e2e PORT=4100 tsx src/worker.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/index.js",
     "start:api": "node dist/index.js",
     "start:worker": "node dist/worker.js",
@@ -24,6 +24,7 @@
     "@prisma/client": "^5.22.0",
     "@trpc/server": "^11.0.0",
     "bcryptjs": "^3.0.3",
+    "bullmq": "^5.75.2",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "express-rate-limit": "^8.3.0",
@@ -36,6 +37,7 @@
     "rate-limit-redis": "^4.3.1",
     "serverless-http": "^3.2.0",
     "twilio": "^5.13.0",
+    "web-push": "^3.6.7",
     "zod": "^3.24.2"
   },
   "devDependencies": {
@@ -48,6 +50,7 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^20.17.19",
     "@types/supertest": "^6.0.2",
+    "@types/web-push": "^3.6.4",
     "@typescript-eslint/eslint-plugin": "^8.26.0",
     "@typescript-eslint/parser": "^8.26.0",
     "dotenv": "^17.3.1",

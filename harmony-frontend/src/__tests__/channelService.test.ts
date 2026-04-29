@@ -166,7 +166,6 @@ describe('channelService', () => {
 
       expect(mockedTrpcQuery).toHaveBeenCalledWith('channel.getChannel', {
         serverId: 'srv-1',
-        serverSlug: 'my-server',
         channelSlug: 'general',
       });
       expect(result).toMatchObject({ id: 'ch-1', visibility: 'PRIVATE' });

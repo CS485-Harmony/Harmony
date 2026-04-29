@@ -80,12 +80,13 @@ afterAll(async () => {
 
 describe('indexingService.generateSitemap', () => {
   it('generates a sitemap index that points crawlers at the frontend host', async () => {
+    await cacheService.invalidate('sitemap:index');
     const xml = await indexingService.generateSitemapIndex();
 
     expect(xml).not.toBeNull();
     expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
     expect(xml).toContain('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
-    expect(xml).toContain(`/sitemap/${serverSlug}`);
+    expect(xml).toContain(`/sitemap/${serverSlug}.xml`);
   });
 
   it('returns null for non-existent server', async () => {
@@ -150,7 +151,7 @@ describe('indexingService.onVisibilityChanged', () => {
     expect(invalidateSpy).toHaveBeenCalledWith(expect.stringContaining('sitemap:'));
   });
 
-  it('invalidates sitemap cache when channel leaves PUBLIC_INDEXABLE', async () => {
+  it('invalidates sitemap cache when channel leaves PUBLIC_INDEXABLE → PRIVATE', async () => {
     await indexingService.generateSitemap(serverSlug);
 
     await indexingService.onVisibilityChanged({
@@ -162,7 +163,19 @@ describe('indexingService.onVisibilityChanged', () => {
     expect(invalidateSpy).toHaveBeenCalledWith(expect.stringContaining('sitemap:'));
   });
 
-  it('does not invalidate cache when visibility change does not involve PUBLIC_INDEXABLE', async () => {
+  it('invalidates sitemap cache when channel leaves PUBLIC_INDEXABLE → PUBLIC_NO_INDEX', async () => {
+    await indexingService.generateSitemap(serverSlug);
+
+    await indexingService.onVisibilityChanged({
+      channelId: indexableChannelId,
+      oldVisibility: 'PUBLIC_INDEXABLE',
+      newVisibility: 'PUBLIC_NO_INDEX',
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(expect.stringContaining('sitemap:'));
+  });
+
+  it('does not invalidate sitemap cache for PRIVATE → PUBLIC_NO_INDEX (neither state is PUBLIC_INDEXABLE)', async () => {
     await indexingService.onVisibilityChanged({
       channelId: privateChannelId,
       oldVisibility: 'PRIVATE',
@@ -189,11 +202,12 @@ describe('GET /robots.txt', () => {
 
 describe('GET /sitemap-index.xml', () => {
   it('returns the sitemap index for the frontend host', async () => {
+    await cacheService.invalidate('sitemap:index');
     const res = await request(app).get('/sitemap-index.xml');
 
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/application\/xml/);
-    expect(res.text).toContain(`/sitemap/${serverSlug}`);
+    expect(res.text).toContain(`/sitemap/${serverSlug}.xml`);
   });
 });
 

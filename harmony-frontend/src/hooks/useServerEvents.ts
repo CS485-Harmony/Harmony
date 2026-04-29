@@ -97,6 +97,8 @@ export function useServerEvents({
   const [reconnectKey, setReconnectKey] = useState(0);
   // Tracks how many consecutive reconnect attempts have been made.
   const reconnectCountRef = useRef(0);
+  // Tracks the last SSE event id (ISO timestamp) for Last-Event-ID replay on reconnect.
+  const lastEventIdRef = useRef<string | null>(null);
 
   // Keep stable references to callbacks so the effect doesn't re-run on every render.
   const onCreatedRef = useRef(onChannelCreated);
@@ -132,7 +134,11 @@ export function useServerEvents({
     const token = getAccessToken();
     if (!token) return;
 
-    const url = `${apiUrl}/api/events/server/${serverId}?token=${encodeURIComponent(token)}`;
+    let url = `${apiUrl}/api/events/server/${serverId}?token=${encodeURIComponent(token)}`;
+    // On reconnect, pass the last seen event id so the server can replay missed messages.
+    if (reconnectKey > 0 && lastEventIdRef.current) {
+      url += `&lastEventId=${encodeURIComponent(lastEventIdRef.current)}`;
+    }
     const es = new EventSource(url);
 
     const handleCreated = (event: MessageEvent<string>) => {
@@ -252,6 +258,8 @@ export function useServerEvents({
     const handleMessageCreated = (event: MessageEvent<string>) => {
       try {
         const msg = JSON.parse(event.data) as Message;
+        // Track the last event id for Last-Event-ID replay on reconnect.
+        if (event.lastEventId) lastEventIdRef.current = event.lastEventId;
         onMessageCreatedRef.current?.(msg);
       } catch (error) {
         logger.warn('Dropped malformed server SSE payload', {

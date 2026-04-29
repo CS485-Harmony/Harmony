@@ -5,9 +5,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:sandbox": "next build --webpack",
     "start": "next start",
-    "build:e2e": "NEXT_PUBLIC_API_URL=http://localhost:4000 NEXT_PUBLIC_BASE_URL=http://localhost:3000 next build",
-    "start:e2e": "PORT=3000 NEXT_PUBLIC_API_URL=http://localhost:4000 NEXT_PUBLIC_BASE_URL=http://localhost:3000 next start",
+    "build:local-e2e": "NEXT_PUBLIC_API_URL=http://localhost:4000 NEXT_PUBLIC_BASE_URL=http://localhost:3000 next build",
+    "build:local-e2e:sandbox": "NEXT_PUBLIC_API_URL=http://localhost:4000 NEXT_PUBLIC_BASE_URL=http://localhost:3000 next build --webpack",
+    "start:local-e2e": "PORT=3000 NEXT_PUBLIC_API_URL=http://localhost:4000 NEXT_PUBLIC_BASE_URL=http://localhost:3000 next start",
     "test": "jest --forceExit",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
@@ -16,8 +18,10 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@emoji-mart/data": "^1.2.1",
     "axios": "^1.13.5",
     "clsx": "^2.1.1",
+    "emoji-mart": "^5.6.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -25,8 +29,9 @@
     "twilio-video": "3.0.0-preview.3"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@playwright/test": "^1.55.0",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

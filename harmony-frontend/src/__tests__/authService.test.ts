@@ -14,17 +14,25 @@ jest.mock('@/lib/passwordAuth', () => ({
   derivePasswordVerifier: jest.fn(),
 }));
 
-import { apiClient, setTokens } from '@/lib/api-client';
+import { apiClient, getAccessToken, setTokens } from '@/lib/api-client';
 import { derivePasswordVerifier } from '@/lib/passwordAuth';
-import { login, register } from '@/services/authService';
+import {
+  getCurrentUser,
+  login,
+  register,
+  shouldEnablePresenceTracking,
+  updateCurrentUser,
+} from '@/services/authService';
 
 const mockedApiClient = jest.mocked(apiClient);
+const mockedGetAccessToken = jest.mocked(getAccessToken);
 const mockedSetTokens = jest.mocked(setTokens);
 const mockedDerivePasswordVerifier = jest.mocked(derivePasswordVerifier);
 
 describe('authService password transport hardening', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    window.localStorage.clear();
     mockedDerivePasswordVerifier.mockResolvedValue('derived-password-verifier');
     mockedApiClient.trpcQuery.mockResolvedValue({
       id: 'user-1',
@@ -98,5 +106,102 @@ describe('authService password transport hardening', () => {
       username: 'alice',
       password: 'plain-text-password',
     });
+  });
+
+  it('preserves backend OFFLINE until live presence tracking marks the session online', async () => {
+    mockedGetAccessToken.mockReturnValue('access');
+    mockedApiClient.trpcQuery.mockResolvedValueOnce({
+      id: 'user-1',
+      email: 'user@example.com',
+      username: 'alice',
+      displayName: 'Alice',
+      avatarUrl: null,
+      publicProfile: true,
+      status: 'OFFLINE',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      isSystemAdmin: false,
+    });
+
+    const user = await getCurrentUser();
+
+    expect(user?.status).toBe('offline');
+  });
+
+  it('persists manual offline override when saving settings', async () => {
+    mockedApiClient.trpcMutation.mockResolvedValueOnce({
+      id: 'user-1',
+      email: 'user@example.com',
+      username: 'alice',
+      displayName: 'Alice',
+      avatarUrl: null,
+      publicProfile: true,
+      status: 'OFFLINE',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      isSystemAdmin: false,
+    });
+
+    const updated = await updateCurrentUser({ status: 'offline' });
+
+    expect(updated.status).toBe('offline');
+    expect(window.localStorage.getItem('harmony_manual_status:user-1')).toBe('offline');
+  });
+
+  it('persists manual idle override when saving settings', async () => {
+    mockedApiClient.trpcMutation.mockResolvedValueOnce({
+      id: 'user-1',
+      email: 'user@example.com',
+      username: 'alice',
+      displayName: 'Alice',
+      avatarUrl: null,
+      publicProfile: true,
+      status: 'IDLE',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      isSystemAdmin: false,
+    });
+
+    const updated = await updateCurrentUser({ status: 'idle' });
+
+    expect(updated.status).toBe('idle');
+    expect(window.localStorage.getItem('harmony_manual_status:user-1')).toBe('idle');
+  });
+
+  it('clears manual override when saving online status', async () => {
+    window.localStorage.setItem('harmony_manual_status:user-1', 'offline');
+    mockedApiClient.trpcMutation.mockResolvedValueOnce({
+      id: 'user-1',
+      email: 'user@example.com',
+      username: 'alice',
+      displayName: 'Alice',
+      avatarUrl: null,
+      publicProfile: true,
+      status: 'ONLINE',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      isSystemAdmin: false,
+    });
+
+    const updated = await updateCurrentUser({ status: 'online' });
+
+    expect(updated.status).toBe('online');
+    expect(window.localStorage.getItem('harmony_manual_status:user-1')).toBeNull();
+  });
+
+  it('enables presence tracking for active users even when the backend still says offline', () => {
+    expect(shouldEnablePresenceTracking({ id: 'user-1', status: 'offline' })).toBe(true);
+  });
+
+  it('disables presence tracking when the current browser stored an offline override', () => {
+    window.localStorage.setItem('harmony_manual_status:user-1', 'offline');
+
+    expect(shouldEnablePresenceTracking({ id: 'user-1', status: 'offline' })).toBe(false);
+  });
+
+  it('disables presence tracking when the current browser stored an idle override', () => {
+    window.localStorage.setItem('harmony_manual_status:user-1', 'idle');
+
+    expect(shouldEnablePresenceTracking({ id: 'user-1', status: 'online' })).toBe(false);
+  });
+
+  it('disables presence tracking for dnd status', () => {
+    expect(shouldEnablePresenceTracking({ id: 'user-1', status: 'dnd' })).toBe(false);
   });
 });

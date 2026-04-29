@@ -102,6 +102,7 @@ export function HarmonyShell({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   // Local message state so sent messages appear immediately without a page reload
   const [localMessages, setLocalMessages] = useState<Message[]>(messages);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   // Track previous channel so we can reset localMessages synchronously on channel
   // switch — avoids a one-render flash where old messages show under the new channel header.
   const [prevChannelId, setPrevChannelId] = useState(currentChannel.id);
@@ -110,6 +111,7 @@ export function HarmonyShell({
     setLocalMessages(messages);
     setIsMenuOpen(false);
     setIsPinsOpen(false);
+    setReplyingTo(null);
     // Only auto-close the members sidebar on mobile so desktop keeps it open by default.
     if (typeof window !== 'undefined' && !window.matchMedia('(min-width: 640px)').matches) {
       setIsMembersOpen(false);
@@ -164,15 +166,6 @@ export function HarmonyShell({
     isAdmin: checkIsAdmin,
   } = useAuth();
 
-  // Fallback for guest/unauthenticated view
-  const currentUser: User = authUser ?? {
-    id: 'guest',
-    username: 'Guest',
-    displayName: 'Guest',
-    status: 'online',
-    role: 'guest',
-  };
-
   const router = useRouter();
   const [isCreateServerOpen, setIsCreateServerOpen] = useState(false);
   const [isBrowseServersOpen, setIsBrowseServersOpen] = useState(false);
@@ -185,15 +178,31 @@ export function HarmonyShell({
 
   const { notifyServerCreated, notifyServerJoined } = useServerListSync();
 
+  const currentMemberRecord = useMemo(
+    () => localMembers.find(m => m.id === authUser?.id),
+    [localMembers, authUser?.id],
+  );
+
+  // Fallback for guest/unauthenticated view.
+  const currentUser: User = authUser
+    ? {
+        ...authUser,
+        status: currentMemberRecord?.status ?? authUser.status,
+        role: currentMemberRecord?.role ?? authUser.role,
+      }
+    : {
+        id: 'guest',
+        username: 'Guest',
+        displayName: 'Guest',
+        status: 'online',
+        role: 'guest',
+      };
+
   // Show the pin UI only to users with MODERATOR+ server-scoped role, and never
   // while the channel is locked (pinning would be meaningless/unauthorized anyway).
   // localMembers is populated by toFrontendMember() in serverService.ts, which maps
   // the backend ServerMember.role field (server-scoped) to User.role.
   // System admins bypass membership checks — they are authorized server-side regardless.
-  const currentMemberRecord = useMemo(
-    () => localMembers.find(m => m.id === authUser?.id),
-    [localMembers, authUser?.id],
-  );
   const canPin = useMemo(
     () =>
       isAuthenticated &&
@@ -218,11 +227,20 @@ export function HarmonyShell({
   // Other tabs receive the broadcast and call router.refresh(); the current tab
   // navigates to the new server route which re-renders with the updated servers prop.
 
+  const handleReplyClick = useCallback((message: Message) => {
+    setReplyingTo(message);
+  }, []);
+
+  const handleCancelReply = useCallback(() => {
+    setReplyingTo(null);
+  }, []);
+
   const handleMessageSent = useCallback((msg: Message) => {
     // Dedup: the SSE event for the sender's own message can arrive before the tRPC
     // response (Redis pub/sub on the same backend + established SSE connection beats
     // the HTTP round-trip). Without this check, the message would be added twice.
     setLocalMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+    setReplyingTo(null);
   }, []);
 
   // ── Real-time SSE handlers ────────────────────────────────────────────────
@@ -311,6 +329,19 @@ export function HarmonyShell({
     },
     [],
   );
+
+  const authUserStatusKey = authUser ? `${authUser.id}:${authUser.status}:${authUser.role}` : null;
+  const [prevAuthUserStatusKey, setPrevAuthUserStatusKey] = useState(authUserStatusKey);
+  if (authUserStatusKey !== prevAuthUserStatusKey) {
+    setPrevAuthUserStatusKey(authUserStatusKey);
+    if (authUser?.id) {
+      setLocalMembers(prev =>
+        prev.map(m =>
+          m.id === authUser.id ? { ...m, status: authUser.status, role: authUser.role } : m,
+        ),
+      );
+    }
+  }
 
   // ── Real-time visibility changes ──────────────────────────────────────────
 
@@ -470,6 +501,7 @@ export function HarmonyShell({
                     messages={localMessages}
                     serverId={currentServer.id}
                     canPin={canPin}
+                    onReplyClick={handleReplyClick}
                   />
                   <MessageInput
                     channelId={currentChannel.id}
@@ -477,6 +509,8 @@ export function HarmonyShell({
                     serverId={currentServer.id}
                     isReadOnly={currentUser.role === 'guest'}
                     onMessageSent={handleMessageSent}
+                    replyingTo={replyingTo}
+                    onCancelReply={handleCancelReply}
                   />
                   {!isAuthLoading && !isAuthenticated && (
                     <GuestPromoBanner
@@ -497,7 +531,7 @@ export function HarmonyShell({
               />
             )}
             <MembersSidebar
-              members={members}
+              members={localMembers}
               isOpen={isMembersOpen}
               onClose={() => setIsMembersOpen(false)}
             />

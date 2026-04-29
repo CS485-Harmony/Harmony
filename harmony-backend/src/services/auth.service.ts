@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { serverMemberService } from './serverMember.service';
-import { ADMIN_EMAIL } from '../lib/admin.utils';
+import { ADMIN_EMAIL, RESERVED_EMAILS, RESERVED_USERNAMES } from '../lib/admin.utils';
 import { userRepository } from '../repositories/user.repository';
 import { serverRepository } from '../repositories/server.repository';
 import { serverMemberRepository } from '../repositories/serverMember.repository';
@@ -187,6 +187,14 @@ export const authService = {
     passwordSalt: string,
     passwordVerifier: string,
   ): Promise<AuthTokens> {
+    if (RESERVED_EMAILS.has(email.toLowerCase())) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'This email address is reserved' });
+    }
+
+    if (RESERVED_USERNAMES.has(username.toLowerCase())) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'This username is reserved' });
+    }
+
     const existingEmail = await userRepository.findByEmail(email);
     if (existingEmail) {
       throw new TRPCError({ code: 'CONFLICT', message: 'Email already in use' });

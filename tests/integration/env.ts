@@ -50,6 +50,17 @@ export const localOnlyTest = (name: string, fn: jest.ProvidesCallback, timeout?:
   wrapper(name, fn, timeout);
 };
 
+/**
+ * Convenience wrapper: wraps a test so it skips when running in cloud mode
+ * without a CLOUD_TEST_ACCESS_TOKEN. Keeps the test active in local mode
+ * (where login() always provides a token) and in cloud mode when the token
+ * is provisioned.
+ */
+export const cloudTokenTest = (name: string, fn: jest.ProvidesCallback, timeout?: number): void => {
+  const needsSkip = isCloud && !process.env.CLOUD_TEST_ACCESS_TOKEN;
+  (needsSkip ? test.skip : test)(name, fn, timeout);
+};
+
 // Known mock-seed data used by local tests (harmony-backend/src/dev/mock-seed-data.json).
 // Server server-001 is "harmony-hq".
 export const LOCAL_SEEDS = {
@@ -58,6 +69,7 @@ export const LOCAL_SEEDS = {
   },
   channels: {
     publicIndexable: 'general', // visibility=PUBLIC_INDEXABLE
+    publicIndexableAll: ['general', 'announcements', 'dev-updates'] as const, // 3 channels for AC #357
     publicNoIndex: 'introductions', // visibility=PUBLIC_NO_INDEX
     private: 'staff-only', // visibility=PRIVATE
   },
@@ -78,7 +90,28 @@ export const CLOUD_KNOWN = {
 export type CloudFixture = {
   serverId?: string;
   serverSlug: string;
+  /** First/primary public channel slug (backwards-compat shorthand). */
   publicChannel: string;
+  /**
+   * All discovered public channel slugs for this server (up to 3).
+   * AC-crawler-UA requires testing at least 3 channels in cloud mode.
+   */
+  publicChannels: readonly string[];
+  /**
+   * Up to 3 public channel targets across the discovered public server set.
+   * This lets cloud crawler-UA smoke cover 3 public channels even when the
+   * current deployment spreads them across multiple small servers.
+   */
+  publicChannelTargets: ReadonlyArray<{
+    serverSlug: string;
+    channelSlug: string;
+  }>;
+};
+
+type DiscoveredServerFixture = {
+  serverId?: string;
+  serverSlug: string;
+  publicChannels: string[];
 };
 
 let cloudFixturePromise: Promise<CloudFixture> | null = null;
@@ -95,6 +128,8 @@ async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
     id?: string;
     slug?: string;
   }>;
+  const discoveredFixtures: DiscoveredServerFixture[] = [];
+
   for (const server of servers) {
     if (!server.slug) continue;
 
@@ -104,13 +139,46 @@ async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
     const channelsBody = (await channelsRes.json()) as {
       channels?: Array<{ slug?: string }>;
     };
-    const publicChannel = channelsBody.channels?.find((channel) => channel.slug)?.slug;
-    if (!publicChannel) continue;
+    const publicChannels = (channelsBody.channels ?? [])
+      .filter((ch): ch is { slug: string } => typeof ch.slug === 'string' && ch.slug.length > 0)
+      .slice(0, 3)
+      .map((ch) => ch.slug);
+    if (!publicChannels.length) continue;
 
-    return {
+    discoveredFixtures.push({
       serverId: server.id,
       serverSlug: server.slug,
-      publicChannel,
+      publicChannels,
+    });
+  }
+
+  if (discoveredFixtures.length > 0) {
+    const primaryFixture = discoveredFixtures.reduce((best, candidate) =>
+      candidate.publicChannels.length > best.publicChannels.length ? candidate : best,
+    );
+    const publicChannelTargets: Array<{ serverSlug: string; channelSlug: string }> = [];
+    const prioritizedFixtures = [
+      primaryFixture,
+      ...discoveredFixtures.filter((fixture) => fixture.serverSlug !== primaryFixture.serverSlug),
+    ];
+
+    for (const fixture of prioritizedFixtures) {
+      for (const channelSlug of fixture.publicChannels) {
+        if (publicChannelTargets.length >= 3) break;
+        publicChannelTargets.push({
+          serverSlug: fixture.serverSlug,
+          channelSlug,
+        });
+      }
+      if (publicChannelTargets.length >= 3) break;
+    }
+
+    return {
+      serverId: primaryFixture.serverId,
+      serverSlug: primaryFixture.serverSlug,
+      publicChannel: primaryFixture.publicChannels[0],
+      publicChannels: primaryFixture.publicChannels,
+      publicChannelTargets,
     };
   }
 
@@ -124,21 +192,41 @@ export async function getCloudFixture(): Promise<CloudFixture> {
     return {
       serverSlug: LOCAL_SEEDS.server.slug,
       publicChannel: LOCAL_SEEDS.channels.publicIndexable,
+      publicChannels: LOCAL_SEEDS.channels.publicIndexableAll,
+      publicChannelTargets: LOCAL_SEEDS.channels.publicIndexableAll.map((channelSlug) => ({
+        serverSlug: LOCAL_SEEDS.server.slug,
+        channelSlug,
+      })),
     };
   }
 
   const envServerSlug = process.env.CLOUD_TEST_SERVER_SLUG;
   const envPublicChannel = process.env.CLOUD_TEST_PUBLIC_CHANNEL;
   if (envServerSlug && envPublicChannel) {
+    // CLOUD_TEST_PUBLIC_CHANNELS is a comma-separated list of channel slugs for
+    // the 3-channel crawler-UA requirement. Falls back to the single-channel var.
+    const envPublicChannels = process.env.CLOUD_TEST_PUBLIC_CHANNELS
+      ? process.env.CLOUD_TEST_PUBLIC_CHANNELS.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [envPublicChannel];
     return {
       serverSlug: envServerSlug,
       publicChannel: envPublicChannel,
+      publicChannels: envPublicChannels,
+      publicChannelTargets: envPublicChannels.map((channelSlug) => ({
+        serverSlug: envServerSlug,
+        channelSlug,
+      })),
       serverId: process.env.CLOUD_TEST_SERVER_ID,
     };
   }
 
   if (!cloudFixturePromise) {
-    cloudFixturePromise = resolveCloudFixtureFromPublicApi();
+    cloudFixturePromise = resolveCloudFixtureFromPublicApi().catch((error: unknown) => {
+      cloudFixturePromise = null;
+      throw error;
+    });
   }
   return cloudFixturePromise;
 }

@@ -11,6 +11,7 @@ import { useState, useCallback, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
+import { sanitizeDisplayLabel } from '@/lib/utils';
 
 const DISMISS_KEY = 'harmony_guest_banner_dismissed';
 
@@ -30,14 +31,15 @@ interface GuestPromoBannerProps {
 export function GuestPromoBanner({ serverName, memberCount }: GuestPromoBannerProps) {
   const { isAuthenticated } = useAuth();
   const pathname = usePathname();
+  const safeServerName = sanitizeDisplayLabel(serverName) || 'Server';
   // useSyncExternalStore with a server snapshot of `true` (hidden) prevents
   // hydration mismatch: SSR and initial client render both produce null, then
   // React reconciles with the real client snapshot after hydration — no
   // setState-in-effect needed.
   const storageDismissed = useSyncExternalStore(
-    () => () => {},       // sessionStorage has no change events
+    () => () => {}, // sessionStorage has no change events
     isDismissedInStorage, // client snapshot
-    () => true,           // server snapshot: always hidden
+    () => true, // server snapshot: always hidden
   );
 
   // Tracks in-memory dismiss for the current render cycle, covering the case
@@ -68,12 +70,12 @@ export function GuestPromoBanner({ serverName, memberCount }: GuestPromoBannerPr
           className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#5865f2] text-sm font-bold text-white'
           aria-hidden='true'
         >
-          {serverName[0].toUpperCase()}
+          {safeServerName[0].toUpperCase()}
         </div>
 
         {/* Server info */}
         <div className='min-w-0 flex-1'>
-          <p className='truncate text-sm font-semibold text-white'>{serverName}</p>
+          <p className='truncate text-sm font-semibold text-white'>{safeServerName}</p>
           <p className='text-xs text-gray-400'>{memberCount.toLocaleString()} members</p>
         </div>
 

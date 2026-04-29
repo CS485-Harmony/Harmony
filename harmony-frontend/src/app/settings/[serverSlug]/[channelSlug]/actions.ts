@@ -12,6 +12,15 @@ import { updateChannel, getChannel, getAuditLog } from '@/services/channelServic
 import { getServer } from '@/services/serverService';
 import type { Channel } from '@/types';
 import type { AuditLogPage } from '@/services/channelService';
+import {
+  getMetaTagPreview,
+  getMetaTagRegenerationStatus,
+  triggerMetaTagRegeneration,
+  updateMetaTagOverrides,
+  type MetaTagJobAccepted,
+  type MetaTagJobStatus,
+  type MetaTagPreview,
+} from '@/services/metaTagAdminService';
 
 export async function saveChannelSettings(
   serverSlug: string,
@@ -72,4 +81,51 @@ export async function fetchAuditLog(
 
   // channel.serverId is already resolved by getChannel — no redundant server lookup needed.
   return getAuditLog(channel.serverId, channel.id, options);
+}
+
+async function resolveChannelForSeo(serverSlug: string, channelSlug: string) {
+  const channel = await getChannel(serverSlug, channelSlug);
+  if (!channel) throw new Error('Channel not found');
+  return channel;
+}
+
+export async function fetchSeoPreview(
+  serverSlug: string,
+  channelSlug: string,
+): Promise<MetaTagPreview> {
+  const channel = await resolveChannelForSeo(serverSlug, channelSlug);
+  return getMetaTagPreview(channel.id);
+}
+
+export async function saveSeoOverrides(
+  serverSlug: string,
+  channelSlug: string,
+  overrides: {
+    customTitle?: string | null;
+    customDescription?: string | null;
+    customOgImage?: string | null;
+  },
+): Promise<MetaTagPreview> {
+  const channel = await resolveChannelForSeo(serverSlug, channelSlug);
+  const preview = await updateMetaTagOverrides(channel.id, overrides);
+  revalidatePath(`/c/${serverSlug}/${channelSlug}`);
+  revalidatePath(`/settings/${serverSlug}/${channelSlug}`);
+  return preview;
+}
+
+export async function triggerSeoRegeneration(
+  serverSlug: string,
+  channelSlug: string,
+): Promise<MetaTagJobAccepted> {
+  const channel = await resolveChannelForSeo(serverSlug, channelSlug);
+  return triggerMetaTagRegeneration(channel.id);
+}
+
+export async function fetchSeoRegenerationStatus(
+  serverSlug: string,
+  channelSlug: string,
+  jobId: string,
+): Promise<MetaTagJobStatus> {
+  const channel = await resolveChannelForSeo(serverSlug, channelSlug);
+  return getMetaTagRegenerationStatus(channel.id, jobId);
 }

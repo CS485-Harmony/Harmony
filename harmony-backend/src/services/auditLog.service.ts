@@ -41,6 +41,16 @@ export interface AuditLogPage {
   total: number;
 }
 
+export interface LogChannelAuditActionInput {
+  channelId: string;
+  actorId: string;
+  action: string;
+  oldValue: Prisma.InputJsonObject;
+  newValue: Prisma.InputJsonObject;
+  ipAddress: string;
+  userAgent?: string;
+}
+
 export interface GetAuditLogOptions {
   /** Maximum number of entries to return (default: 20). */
   limit?: number;
@@ -61,11 +71,29 @@ export const auditLogService = {
     input: LogVisibilityChangeInput,
     tx?: Prisma.TransactionClient,
   ): Promise<VisibilityAuditLog> {
+    return auditLogService.logChannelAuditAction(
+      {
+        channelId: input.channelId,
+        actorId: input.actorId,
+        action: 'VISIBILITY_CHANGED',
+        oldValue: input.oldValue,
+        newValue: input.newValue,
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+      },
+      tx,
+    );
+  },
+
+  async logChannelAuditAction(
+    input: LogChannelAuditActionInput,
+    tx?: Prisma.TransactionClient,
+  ): Promise<VisibilityAuditLog> {
     return auditLogRepository.create(
       {
         channel: { connect: { id: input.channelId } },
         actor: { connect: { id: input.actorId } },
-        action: 'VISIBILITY_CHANGED',
+        action: input.action,
         oldValue: input.oldValue,
         newValue: input.newValue,
         ipAddress: input.ipAddress,

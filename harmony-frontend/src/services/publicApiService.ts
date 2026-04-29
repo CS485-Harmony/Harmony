@@ -50,6 +50,16 @@ interface PublicMessagesApiResponse {
   pageSize: number;
 }
 
+export interface PublicMetaTagResponse {
+  title: string;
+  description: string;
+  ogTitle: string;
+  ogDescription: string;
+  ogImage: string;
+  generatedAt: string;
+  visibility: string;
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function mapChannelType(type: string): ChannelType {
@@ -191,3 +201,59 @@ export async function isChannelGuestAccessible(
   const result = await fetchPublicChannel(serverSlug, channelSlug);
   return result !== null && !result.isPrivate;
 }
+
+export interface PublicChannelListItem {
+  id: string;
+  name: string;
+  slug: string;
+  /** Included for channel-type icon rendering in the sidebar. */
+  type: ChannelType;
+  topic?: string;
+}
+
+/**
+ * Fetch all public (PUBLIC_INDEXABLE + PUBLIC_NO_INDEX) channels for a server.
+ * Returns an empty array on error or if the server is not found.
+ * Deduplicated within a single render pass via React `cache`.
+ */
+export const fetchPublicChannels = cache(
+  async (serverSlug: string): Promise<PublicChannelListItem[]> => {
+    try {
+      const res = await fetch(
+        `${API_CONFIG.BASE_URL}/api/public/servers/${encodeURIComponent(serverSlug)}/channels`,
+        { next: { revalidate: CACHE_DURATION.PUBLIC_API_REVALIDATE } },
+      );
+      if (!res.ok) return [];
+      const data: {
+        channels: Array<{ id: string; name: string; slug: string; type: string; topic?: string | null }>;
+      } = await res.json();
+      return data.channels.map(c => ({
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+        type: mapChannelType(c.type),
+        topic: c.topic ?? undefined,
+      }));
+    } catch {
+      return [];
+    }
+  },
+);
+
+export const fetchPublicMetaTags = cache(
+  async (serverSlug: string, channelSlug: string): Promise<PublicMetaTagResponse | null> => {
+    try {
+      const res = await fetch(
+        `${API_CONFIG.BASE_URL}/api/public/servers/${encodeURIComponent(serverSlug)}/channels/${encodeURIComponent(channelSlug)}/meta-tags`,
+        {
+          cache: 'no-store',
+        },
+      );
+
+      if (!res.ok) return null;
+      return (await res.json()) as PublicMetaTagResponse;
+    } catch {
+      return null;
+    }
+  },
+);

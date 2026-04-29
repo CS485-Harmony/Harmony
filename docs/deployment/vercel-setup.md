@@ -74,6 +74,40 @@ preview environments when no explicit value is set. This keeps the dashboard
 configuration minimal and lets `src/lib/runtime-config.ts` remain
 environment-agnostic.
 
+## Sprint 5 SEO env-var inventory
+
+After auditing the merged Sprint 5 SEO implementation on 2026-04-25, the
+feature does **not** introduce any new deploy-time environment variables beyond
+the existing frontend/base-origin and storage settings already used by the
+deployment stack. The SEO pages, admin preview flow, and regeneration jobs reuse
+the variables below.
+
+### Frontend variables used by the SEO surface
+
+| Variable | Service | Example value | Why Sprint 5 SEO uses it |
+| -------- | ------- | ------------- | ------------------------ |
+| `NEXT_PUBLIC_BASE_URL` | `frontend` (Vercel) | `https://harmony-dun-omega.vercel.app` | Drives canonical URLs, `metadataBase`, `robots.txt`, `sitemap.xml`, and absolute public-channel metadata links. |
+| `NEXT_PUBLIC_API_URL` | `frontend` (Vercel) | `https://harmony-production-13e3.up.railway.app` | Used by SSR and server actions to fetch public meta tags and admin SEO preview/regeneration endpoints from `backend-api`. |
+
+### Backend variables the SEO flow depends on
+
+These are configured on Railway, not in Vercel:
+
+| Variable | Service | Example value | Why Sprint 5 SEO uses it |
+| -------- | ------- | ------------- | ------------------------ |
+| `BASE_URL` | `backend-api`, `backend-worker` | `https://harmony-dun-omega.vercel.app` | Canonical frontend origin used by backend-generated public URLs, sitemap references, and admin search previews. |
+| `FRONTEND_URL` | `backend-api` | `https://harmony-dun-omega.vercel.app` | Keeps CORS aligned with the deployed frontend origin used by the SEO admin UI. |
+| `STORAGE_PROVIDER` | `backend-api`, `backend-worker` | `s3` | Governs whether uploaded assets are served from local disk or object storage; relevant when admins use publicly hosted custom social images. |
+| `R2_ACCOUNT_ID` | `backend-api`, `backend-worker` | `cf-account-1234567890` | Existing Cloudflare R2 account identifier used when `STORAGE_PROVIDER=s3`. |
+| `AWS_ACCESS_KEY_ID` | `backend-api`, `backend-worker` | `r2-access-key-id` | Existing R2 credential. |
+| `AWS_SECRET_ACCESS_KEY` | `backend-api`, `backend-worker` | `r2-secret-access-key` | Existing R2 credential. |
+| `S3_BUCKET` | `backend-api`, `backend-worker` | `harmony-attachments` | Existing R2 bucket name. Harmony did not add a separate OG-image bucket env var during Sprint 5. |
+| `R2_PUBLIC_URL` | `backend-api`, `backend-worker` | `https://pub-example.r2.dev` | Existing public asset base URL; can be reused if the team wants custom OG/social images hosted under managed storage. |
+
+If the team later adds real NLP providers or a dedicated OG-image generation
+pipeline, document those new env vars here and in the root README at the same
+time. As of 2026-04-25, the shipped Sprint 5 code does not require them.
+
 ## Deploy Flow
 
 - **Preview:** pushing a commit to any non-default branch (or opening a PR)

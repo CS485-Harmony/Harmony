@@ -20,6 +20,14 @@ const ATTACHMENT_SELECT = {
 export const MESSAGE_INCLUDE = {
   author: { select: AUTHOR_SELECT },
   attachments: { select: ATTACHMENT_SELECT },
+  parent: {
+    select: {
+      id: true,
+      content: true,
+      isDeleted: true,
+      author: { select: AUTHOR_SELECT },
+    },
+  },
 } as const;
 
 export const messageRepository = {

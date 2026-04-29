@@ -44,6 +44,29 @@ describe('Guest Public Channel — cloud-read-only', () => {
     // canonical link
     expect(html).toMatch(/<link[^>]+rel=["']canonical["']/i);
     expect(html).toContain(`/c/${serverSlug}/${publicIndexableSlug}`);
+    // Open Graph tags
+    expect(html).toMatch(/<meta[^>]+property=["']og:title["']/i);
+    expect(html).toMatch(/<meta[^>]+property=["']og:url["']/i);
+    // Twitter card tags
+    expect(html).toMatch(/twitter:card/i);
+    expect(html).toMatch(/twitter:title/i);
+    // JSON-LD structured data
+    const ldMatch = html.match(
+      /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i,
+    );
+    expect(ldMatch).not.toBeNull();
+    const jsonLd = JSON.parse(ldMatch![1]);
+    expect(jsonLd['@type']).toBe('DiscussionForumPosting');
+    expect(jsonLd.author).toEqual(
+      expect.objectContaining({
+        '@type': 'Organization',
+      }),
+    );
+    expect(typeof jsonLd.author.name).toBe('string');
+    expect(jsonLd.author.name.length).toBeGreaterThan(0);
+    expect(jsonLd.headline).toBe(jsonLd.name);
+    expect(typeof jsonLd.text).toBe('string');
+    expect(jsonLd.text.length).toBeGreaterThan(0);
   });
 
   test('GPC-3: PUBLIC_NO_INDEX channel renders with HTTP 200 and noindex meta', async () => {
@@ -56,6 +79,9 @@ describe('Guest Public Channel — cloud-read-only', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toMatch(/noindex/i);
+    // JSON-LD must be absent for non-indexable channels
+    expect(html).not.toMatch(/<script[^>]+type=["']application\/ld\+json["']/i);
+    expect(html).not.toContain('DiscussionForumPosting');
   });
 
   test('GPC-5: messages pagination — page=2 returns page field equal to 2', async () => {
@@ -76,6 +102,54 @@ describe('Guest Public Channel — cloud-read-only', () => {
   });
 });
 
+// GPC-2b: AC #357 — assert SEO tags on at least 3 representative PUBLIC_INDEXABLE channels
+localOnlyDescribe(
+  'Guest Public Channel — SEO tags across 3 PUBLIC_INDEXABLE channels (AC #357)',
+  () => {
+    const serverSlug = LOCAL_SEEDS.server.slug;
+
+    test.each([...LOCAL_SEEDS.channels.publicIndexableAll])(
+      'GPC-2b: SSR metadata and structured data present for channel %s',
+      async (channelSlug) => {
+        const res = await fetch(`${FRONTEND_URL}/c/${serverSlug}/${channelSlug}`);
+        expect(res.status).toBe(200);
+        const html = await res.text();
+
+        expect(html).toMatch(/<title[^>]*>/i);
+        expect(html).toMatch(/index,\s*follow/i);
+        expect(html).toMatch(/<link[^>]+rel=["']canonical["']/i);
+        expect(html).toContain(`/c/${serverSlug}/${channelSlug}`);
+        expect(html).toMatch(/<meta[^>]+property=["']og:title["']/i);
+        expect(html).toMatch(/twitter:card/i);
+
+        // Validate JSON-LD structure (Google Rich Results required fields)
+        const ldMatch = html.match(
+          /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i,
+        );
+        expect(ldMatch).not.toBeNull();
+        const jsonLd = JSON.parse(ldMatch![1]);
+        expect(jsonLd['@context']).toBe('https://schema.org');
+        expect(jsonLd['@type']).toBe('DiscussionForumPosting');
+        expect(typeof jsonLd.name).toBe('string');
+        expect(jsonLd.name.length).toBeGreaterThan(0);
+        expect(jsonLd.headline).toBe(jsonLd.name);
+        expect(typeof jsonLd.url).toBe('string');
+        expect(jsonLd.url).toContain(`/c/${serverSlug}/${channelSlug}`);
+        expect(jsonLd.author).toEqual(
+          expect.objectContaining({
+            '@type': 'Organization',
+          }),
+        );
+        expect(typeof jsonLd.author.name).toBe('string');
+        expect(jsonLd.author.name.length).toBeGreaterThan(0);
+        expect(typeof jsonLd.text).toBe('string');
+        expect(jsonLd.text.length).toBeGreaterThan(0);
+      },
+      20000,
+    );
+  },
+);
+
 // GPC-4 and GPC-6 need seeded PRIVATE channel data — local-only
 localOnlyDescribe('Guest Public Channel — local-only (PRIVATE access)', () => {
   const privateSlug = LOCAL_SEEDS.channels.private;
@@ -88,6 +162,9 @@ localOnlyDescribe('Guest Public Channel — local-only (PRIVATE access)', () => 
     // The access-denied component renders a lock icon / login CTA — no channel content
     // We verify absence of channel-specific content. The page should NOT redirect.
     expect(html).not.toMatch(/<meta[^>]+content=["']index,\s*follow["']/i);
+    // JSON-LD must be absent for PRIVATE channels
+    expect(html).not.toMatch(/<script[^>]+type=["']application\/ld\+json["']/i);
+    expect(html).not.toContain('DiscussionForumPosting');
   });
 
   test('GPC-6: public messages endpoint returns 404 for PRIVATE channel', async () => {

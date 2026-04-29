@@ -121,6 +121,18 @@ export function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength) + '...';
 }
 
+export function sanitizeDisplayLabel(text: string): string {
+  return text
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map(segment => segment.trim())
+    .filter(segment => segment.length > 0 && segment !== '.' && segment !== '..')
+    .join(' / ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Generate a canonical URL for a public channel
  */

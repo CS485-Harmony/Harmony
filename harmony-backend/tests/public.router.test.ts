@@ -25,8 +25,16 @@ jest.mock('../src/db/prisma', () => ({
   },
 }));
 
+jest.mock('../src/services/metaTag/metaTagService', () => ({
+  metaTagService: {
+    getMetaTagsForPreview: jest.fn(),
+    getFallbackMetaTagsForPreview: jest.fn(),
+  },
+}));
+
 import { prisma } from '../src/db/prisma';
 import { cacheService } from '../src/services/cache.service';
+import { metaTagService } from '../src/services/metaTag/metaTagService';
 
 const mockCacheService = cacheService as unknown as {
   get: jest.Mock;
@@ -38,6 +46,11 @@ const mockPrisma = prisma as unknown as {
   server: { findUnique: jest.Mock; findMany: jest.Mock };
   channel: { findUnique: jest.Mock; findMany: jest.Mock; findFirst: jest.Mock };
   message: { findMany: jest.Mock; findFirst: jest.Mock };
+};
+
+const mockMetaTagService = metaTagService as unknown as {
+  getMetaTagsForPreview: jest.Mock;
+  getFallbackMetaTagsForPreview: jest.Mock;
 };
 
 // ─── Mock cacheService (bypass Redis) ────────────────────────────────────────
@@ -148,32 +161,54 @@ describe('GET /api/public/servers/:serverSlug', () => {
     expect(res.status).toBe(404);
     expect(res.body).toHaveProperty('error');
   });
+
+  it('CWE-862: returns 404 for a private server slug (isPublic filter enforced)', async () => {
+    // Prisma returns null because isPublic: true is in the where clause and server is private
+    mockPrisma.server.findUnique.mockResolvedValue(null);
+
+    const res = await request(app).get('/api/public/servers/private-server');
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty('error', 'Server not found');
+    expect(mockPrisma.server.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ isPublic: true }) }),
+    );
+  });
 });
 
 // ─── GET /api/public/servers/:serverSlug/channels ────────────────────────────
 
+const NO_INDEX_CHANNEL = {
+  id: 'chn-0000-0000-0000-000000000002',
+  serverId: SERVER.id,
+  name: 'announcements',
+  slug: 'announcements',
+  type: ChannelType.TEXT,
+  topic: null,
+  visibility: ChannelVisibility.PUBLIC_NO_INDEX,
+  position: 1,
+};
+
 describe('GET /api/public/servers/:serverSlug/channels', () => {
-  it('returns 200 with PUBLIC_INDEXABLE channels when the server exists', async () => {
+  it('returns 200 with PUBLIC_INDEXABLE and PUBLIC_NO_INDEX channels', async () => {
     mockPrisma.server.findUnique.mockResolvedValue({ id: SERVER.id });
     mockPrisma.channel.findMany.mockResolvedValue([
-      {
-        id: CHANNEL.id,
-        name: CHANNEL.name,
-        slug: CHANNEL.slug,
-        type: CHANNEL.type,
-        topic: CHANNEL.topic,
-      },
+      { id: CHANNEL.id, name: CHANNEL.name, slug: CHANNEL.slug, type: CHANNEL.type, topic: CHANNEL.topic },
+      { id: NO_INDEX_CHANNEL.id, name: NO_INDEX_CHANNEL.name, slug: NO_INDEX_CHANNEL.slug, type: NO_INDEX_CHANNEL.type, topic: null },
     ]);
 
     const res = await request(app).get(`/api/public/servers/${SERVER.slug}/channels`);
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('channels');
-    expect(res.body.channels).toHaveLength(1);
+    expect(res.body.channels).toHaveLength(2);
     expect(res.body.channels[0]).toMatchObject({ id: CHANNEL.id, name: CHANNEL.name });
+    expect(res.body.channels[1]).toMatchObject({ id: NO_INDEX_CHANNEL.id, name: NO_INDEX_CHANNEL.name });
+    expect(res.body.channels[0]).not.toHaveProperty('visibility');
+    expect(res.body.channels[1]).not.toHaveProperty('visibility');
     expect(mockPrisma.channel.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ visibility: ChannelVisibility.PUBLIC_INDEXABLE }),
+        where: expect.objectContaining({ visibility: { in: [ChannelVisibility.PUBLIC_INDEXABLE, ChannelVisibility.PUBLIC_NO_INDEX] } }),
       }),
     );
   });
@@ -195,6 +230,18 @@ describe('GET /api/public/servers/:serverSlug/channels', () => {
 
     expect(res.status).toBe(404);
     expect(res.body).toHaveProperty('error');
+  });
+
+  it('CWE-862: returns 404 for a private server (isPublic filter enforced on channels endpoint)', async () => {
+    mockPrisma.server.findUnique.mockResolvedValue(null);
+
+    const res = await request(app).get('/api/public/servers/private-server/channels');
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty('error', 'Server not found');
+    expect(mockPrisma.server.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ isPublic: true }) }),
+    );
   });
 });
 
@@ -282,16 +329,17 @@ describe('GET /api/public/channels/:channelId/messages', () => {
     expect(res.body).toHaveProperty('error');
   });
 
-  it('returns 404 when the channel is PUBLIC_NO_INDEX', async () => {
+  it('returns 200 for a PUBLIC_NO_INDEX channel (guest-navigable but not indexed)', async () => {
     mockPrisma.channel.findUnique.mockResolvedValue({
       id: CHANNEL.id,
       visibility: ChannelVisibility.PUBLIC_NO_INDEX,
     });
+    mockPrisma.message.findMany.mockResolvedValue([]);
 
     const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages`);
 
-    expect(res.status).toBe(404);
-    expect(res.body).toHaveProperty('error');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('messages');
   });
 });
 
@@ -324,16 +372,17 @@ describe('GET /api/public/channels/:channelId/messages/:messageId', () => {
     expect(res.body).toHaveProperty('error');
   });
 
-  it('returns 404 when the channel is PUBLIC_NO_INDEX', async () => {
+  it('returns 200 for a PUBLIC_NO_INDEX channel (guest-navigable but not indexed)', async () => {
     mockPrisma.channel.findUnique.mockResolvedValue({
       id: CHANNEL.id,
       visibility: ChannelVisibility.PUBLIC_NO_INDEX,
     });
+    mockPrisma.message.findFirst.mockResolvedValue(MESSAGE);
 
     const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`);
 
-    expect(res.status).toBe(404);
-    expect(res.body).toHaveProperty('error');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: MESSAGE.id });
   });
 
   it('returns 404 when the channel does not exist', async () => {
@@ -790,6 +839,18 @@ describe('GET /api/public/servers/:serverSlug/channels/:channelSlug', () => {
     expect(res.body).toHaveProperty('error', 'Server not found');
   });
 
+  it('CWE-862: returns 404 for a private server on channel slug lookup (isPublic filter enforced)', async () => {
+    mockPrisma.server.findUnique.mockResolvedValue(null);
+
+    const res = await request(app).get('/api/public/servers/private-server/channels/general');
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty('error', 'Server not found');
+    expect(mockPrisma.server.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ isPublic: true }) }),
+    );
+  });
+
   it('PR-45: returns 404 when the channel slug does not exist within the server', async () => {
     mockPrisma.server.findUnique.mockResolvedValue({ id: SERVER.id });
     mockPrisma.channel.findFirst.mockResolvedValue(null);
@@ -824,6 +885,92 @@ describe('GET /api/public/servers/:serverSlug/channels/:channelSlug', () => {
 
     expect(res.status).toBe(500);
     expect(res.body).toHaveProperty('error', 'Internal server error');
+  });
+});
+
+// ─── GET /api/public/servers/:serverSlug/channels/:channelSlug/meta-tags ─────
+
+describe('GET /api/public/servers/:serverSlug/channels/:channelSlug/meta-tags', () => {
+  const preview = {
+    title: 'General - Test Server | Harmony',
+    description: 'General discussion in Test Server.',
+    ogTitle: 'General - Test Server | Harmony',
+    ogDescription: 'General discussion in Test Server.',
+    ogImage: 'https://harmony.test/og.png',
+    keywords: ['general'],
+    generatedAt: '2026-04-28T00:00:00.000Z',
+    isFallbackPreview: false,
+    isCustom: false,
+    generatedTitle: 'General - Test Server | Harmony',
+    generatedDescription: 'General discussion in Test Server.',
+    customTitle: null,
+    customDescription: null,
+    customOgImage: null,
+    searchPreview: {
+      title: 'General - Test Server | Harmony',
+      description: 'General discussion in Test Server.',
+      url: 'https://harmony.test/c/test-server/general',
+    },
+    socialPreview: {
+      title: 'General - Test Server | Harmony',
+      description: 'General discussion in Test Server.',
+      image: 'https://harmony.test/og.png',
+    },
+  };
+
+  it('returns 200 with preview metadata for a guest-accessible public channel', async () => {
+    mockPrisma.channel.findFirst.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockMetaTagService.getMetaTagsForPreview.mockResolvedValue(preview);
+
+    const res = await request(app).get(
+      `/api/public/servers/${SERVER.slug}/channels/${CHANNEL.slug}/meta-tags`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      title: preview.title,
+      generatedTitle: preview.generatedTitle,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    expect(mockMetaTagService.getFallbackMetaTagsForPreview).not.toHaveBeenCalled();
+  });
+
+  it('falls back to ephemeral preview generation when cached/persisted preview lookup fails', async () => {
+    mockPrisma.channel.findFirst.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockMetaTagService.getMetaTagsForPreview.mockRejectedValue(
+      new Error('generated_meta_tags missing'),
+    );
+    mockMetaTagService.getFallbackMetaTagsForPreview.mockResolvedValue(preview);
+
+    const res = await withSilencedConsoleError(() =>
+      request(app).get(`/api/public/servers/${SERVER.slug}/channels/${CHANNEL.slug}/meta-tags`),
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      title: preview.title,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    expect(mockMetaTagService.getFallbackMetaTagsForPreview).toHaveBeenCalledWith(CHANNEL.id);
+  });
+
+  it('returns 404 when the channel is missing or private', async () => {
+    mockPrisma.channel.findFirst.mockResolvedValue(null);
+
+    const res = await request(app).get(
+      `/api/public/servers/${SERVER.slug}/channels/${CHANNEL.slug}/meta-tags`,
+    );
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty('error', 'Channel not found');
+    expect(mockMetaTagService.getMetaTagsForPreview).not.toHaveBeenCalled();
+    expect(mockMetaTagService.getFallbackMetaTagsForPreview).not.toHaveBeenCalled();
   });
 });
 

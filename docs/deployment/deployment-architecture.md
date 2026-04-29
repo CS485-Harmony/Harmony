@@ -433,3 +433,27 @@ The `generated_meta_tags` table (managed by Prisma) persists SEO meta tags gener
 **AC-7 invariant:** Background regeneration writes via `metaTagRepository.saveGeneratedFields` are gated by `WHERE custom_title IS NULL AND custom_description IS NULL`. Rows with a non-null `custom_title` or `custom_description` are skipped, so generated title/description content cannot silently replace admin-curated text.
 
 Full schema definition: `docs/dev-spec-seo-meta-tag-generation.md §11.1 D6.3`.
+
+## 12. Sprint 5 SEO Integration Test Isolation
+
+### 12.1 Classification
+
+Sprint 5 (Issue #360) extends the integration test suite with cases for AC-1 through AC-10 in the SEO meta tag generation spec (`docs/dev-spec-seo-meta-tag-generation.md §14`). Tests are classified per the rules in `docs/test-specs/integration-test-spec.md §2`:
+
+| AC | Description | Classification |
+|----|-------------|----------------|
+| AC-1 | Tags present on public channel pages | cloud-read-only |
+| AC-2 | Length bounds on generated title/description | cloud-read-only |
+| AC-3 | Override limit enforcement | local-only |
+| AC-4 | Visibility→PRIVATE invalidates MetaTag cache | local-only |
+| AC-5 | Regeneration job API (jobId + status polling) | local-only |
+| AC-6 | Idempotency key deduplication | local-only |
+| AC-7 | Custom overrides survive background regen | local-only |
+| AC-8 | No PII/profanity in fixture-safe channel tags | cloud-read-only |
+| AC-9 | NLP failure returns fallback + needsRegeneration | local-only (test.todo — requires fault injection) |
+| AC-10 | De-index workflow on public→private transition | local-only |
+| Crawler-UA | Googlebot fetch returns title, description, JSON-LD | cloud-read-only |
+
+### 12.2 Write-path isolation fallback
+
+An isolated Sprint 5 staging environment (separate Railway project, isolated Postgres, isolated Redis, dedicated Vercel preview) was not provisioned before the April 29 deadline. Per `docs/test-specs/integration-test-spec.md §2.2`, write-path ACs (AC-3 through AC-7, AC-9, AC-10) fall back to **local-only** evidence as the CI source of truth. The `run-integration-tests.yml` local job covers the full AC-1..AC-10 matrix on seeded data and is the required passing status check for this feature.

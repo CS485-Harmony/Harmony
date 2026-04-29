@@ -1,6 +1,6 @@
 /**
  * Channel Component: MembersSidebar
- * Right-side panel listing server members grouped by role with status indicators.
+ * Right-side panel listing server members with Discord-style online/offline sections.
  * Toggleable from TopBar; renders as an overlay on mobile.
  * Ref: dev-spec-guest-public-channel-view.md — C1.7 MembersSidebar
  */
@@ -32,43 +32,62 @@ function StatusDot({ status }: { status: UserStatus }) {
 // ─── Role ordering and labels ─────────────────────────────────────────────────
 
 const ROLE_ORDER: UserRole[] = ['owner', 'admin', 'moderator', 'member', 'guest'];
-
 const ROLE_LABEL: Record<UserRole, string> = {
-  owner: 'Owner',
-  admin: 'Admin',
-  moderator: 'Moderator',
+  owner: 'Owners',
+  admin: 'Admins',
+  moderator: 'Moderators',
   member: 'Members',
   guest: 'Guests',
 };
 
-// ─── Group members by role, online-first within each group ───────────────────
+const ONLINE_STATUSES: UserStatus[] = ['online', 'idle', 'dnd'];
 
-function groupMembers(members: User[]): { role: UserRole; users: User[] }[] {
-  const map = new Map<UserRole, User[]>();
+type RoleGroup = {
+  key: UserRole;
+  label: string;
+  users: User[];
+};
 
-  for (const user of members) {
-    const group = map.get(user.role) ?? [];
-    group.push(user);
-    map.set(user.role, group);
-  }
+type MemberSection = {
+  key: 'online' | 'offline';
+  label: 'Online' | 'Offline';
+  roleGroups: RoleGroup[];
+};
 
-  // Within each group: online/idle/dnd first, offline last
-  const ONLINE_STATUSES: UserStatus[] = ['online', 'idle', 'dnd'];
-  for (const [role, users] of map) {
-    map.set(
-      role,
-      users.sort((a, b) => {
-        const aOnline = ONLINE_STATUSES.includes(a.status) ? 0 : 1;
-        const bOnline = ONLINE_STATUSES.includes(b.status) ? 0 : 1;
-        return aOnline - bOnline;
-      }),
-    );
-  }
+function roleRank(role: UserRole): number {
+  return ROLE_ORDER.indexOf(role);
+}
 
-  return ROLE_ORDER.filter(r => map.has(r)).map(role => ({
-    role,
-    users: map.get(role)!,
-  }));
+function compareMembers(a: User, b: User): number {
+  const roleDelta = roleRank(a.role) - roleRank(b.role);
+  if (roleDelta !== 0) return roleDelta;
+
+  const aName = (a.displayName ?? a.username).toLowerCase();
+  const bName = (b.displayName ?? b.username).toLowerCase();
+  return aName.localeCompare(bName);
+}
+
+function groupMembersByRole(members: User[]): RoleGroup[] {
+  return ROLE_ORDER.map(role => {
+    const users = members.filter(member => member.role === role).sort(compareMembers);
+    return {
+      key: role,
+      label: ROLE_LABEL[role],
+      users,
+    };
+  }).filter(group => group.users.length > 0);
+}
+
+function groupMembers(members: User[]): MemberSection[] {
+  const onlineUsers = members.filter(member => ONLINE_STATUSES.includes(member.status));
+  const offlineUsers = members.filter(member => member.status === 'offline');
+
+  const sections: MemberSection[] = [
+    { key: 'online', label: 'Online', roleGroups: groupMembersByRole(onlineUsers) },
+    { key: 'offline', label: 'Offline', roleGroups: groupMembersByRole(offlineUsers) },
+  ];
+
+  return sections.filter(section => section.roleGroups.length > 0);
 }
 
 // ─── Member row ───────────────────────────────────────────────────────────────
@@ -170,18 +189,25 @@ export function MembersSidebar({ members, isOpen, onClose }: MembersSidebarProps
 
         {/* Member groups */}
         <div className='flex-1 overflow-y-auto p-3'>
-          {groups.map(({ role, users }) => (
-            <div key={role} className='mb-4'>
+          {groups.map(({ key, label, roleGroups }) => (
+            <div key={key} className='mb-4'>
               <p className='mb-1 px-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400'>
-                {ROLE_LABEL[role]} — {users.length}
+                {label} — {roleGroups.reduce((count, group) => count + group.users.length, 0)}
               </p>
-              <ul className='list-none space-y-0.5'>
-                {users.map(user => (
-                  <li key={user.id}>
-                    <MemberRow user={user} />
-                  </li>
-                ))}
-              </ul>
+              {roleGroups.map(group => (
+                <div key={`${key}-${group.key}`} className='mb-3 last:mb-0'>
+                  <p className='mb-1 px-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500'>
+                    {group.label} — {group.users.length}
+                  </p>
+                  <ul className='list-none space-y-0.5'>
+                    {group.users.map(user => (
+                      <li key={user.id}>
+                        <MemberRow user={user} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
           ))}
 

@@ -3011,11 +3011,20 @@ This section needed reprompting to ensure alignment across the data schemas in e
 
 | Filter Type | Implementation | Purpose |
 |-------------|----------------|---------|
-| PII Detection | Regex for emails, phones, names | Prevent personal info in search results |
-| Profanity Filter | Word list + pattern matching | Prevent inappropriate previews |
-| Private Mention Redaction | Remove @mentions of private users | Respect user privacy settings |
+| PII Detection | Regex for emails, phones, @mentions — `ContentFilter.filterPII` | Prevent personal info in search results |
+| Profanity Filter | Word list + pattern matching, replaced with asterisks matching the word length (e.g., `damn` → `****`) — `ContentFilter.filterProfanity` | Prevent inappropriate previews |
+| Private Mention Redaction | `@mention` → `[user]` via `ContentFilter.filterPII` | Respect user privacy settings |
 | URL Sanitization | Remove internal/private links | Prevent link leakage |
-| HTML Entity Encoding | Encode special characters | Prevent XSS |
+| HTML Entity Encoding | `ContentFilter.escapeHtml` / `ContentFilter.sanitizeForHead` | Prevent XSS in `<head>` |
+
+**Implementation:** `src/services/metaTag/contentFilter.ts` exports `ContentFilter` with:
+- `filterPII(text)` — redacts emails, phone numbers, @mentions
+- `filterProfanity(text)` — replaces word-list matches with asterisks
+- `filterContent(text)` — runs PII then profanity pipeline (used in `metaTagService.generateMetaTagsFromContext`)
+- `escapeHtml(text)` — HTML-entity-encodes `& < > " ' /`
+- `sanitizeForHead(text)` — strips HTML tags then calls `escapeHtml`; used by `metaTagService.sanitizeCustomOverride` on write path
+
+**Tests:** `tests/contentFilter.test.ts` covers PII/profanity fixture corpus (AC-8), XSS attribute-injection fixtures, and `<head>` output snapshots.
 
 ### 12.2 Data Flow Security
 
@@ -3059,7 +3068,7 @@ Message Content                 Content Analysis              Meta Tag Output
 ### 12.3 Admin Override Security
 
 - Only server admins can set custom meta tags
-- Custom tags still undergo sanitization
+- Custom tags still undergo sanitization via `metaTagService.sanitizeCustomOverride` (strips HTML, filters PII/profanity, HTML-entity-encodes) before being stored or served
 - Audit log records all custom tag changes
 - Rate limiting on regeneration requests
 

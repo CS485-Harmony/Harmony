@@ -164,6 +164,53 @@ describe('POST /api/auth/register', () => {
   });
 });
 
+describe('POST /api/auth/register — reserved identities (issue #466)', () => {
+  it('rejects registration with the reserved admin email', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: 'admin@harmony.dev',
+        username: 'notadmin',
+        passwordSalt: PASSWORD_SALT,
+        passwordVerifier: derivePasswordVerifier('password123'),
+      });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/reserved/i);
+  });
+
+  it('rejects registration with the reserved admin email regardless of case', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: 'Admin@Harmony.Dev',
+        username: 'notadmin',
+        passwordSalt: PASSWORD_SALT,
+        passwordVerifier: derivePasswordVerifier('password123'),
+      });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/reserved/i);
+  });
+
+  it('rejects registration with the reserved username "admin"', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: 'someone@example.com',
+        username: 'admin',
+        passwordSalt: PASSWORD_SALT,
+        passwordVerifier: derivePasswordVerifier('password123'),
+      });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/reserved/i);
+  });
+});
+
 describe('POST /api/auth/login/challenge', () => {
   it('returns the stored password salt for existing users', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(mockUser);

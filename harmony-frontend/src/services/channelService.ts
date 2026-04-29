@@ -101,7 +101,6 @@ export const getChannel = cache(
     try {
       const data = await trpcQuery<Record<string, unknown>>('channel.getChannel', {
         serverId,
-        serverSlug,
         channelSlug,
       });
       if (!data) return null;

@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
-import { serverMemberService } from '../src/services/serverMember.service';
+import { redis } from '../src/db/redis';
+import { serverMemberService, JOIN_RATE_MAX, JOIN_RATE_WINDOW_SECS } from '../src/services/serverMember.service';
 
 describe('serverMemberService (integration)', () => {
   const prisma = new PrismaClient();
@@ -120,6 +121,70 @@ describe('serverMemberService (integration)', () => {
         .catch((e: TRPCError) => e);
       expect(err).toBeInstanceOf(TRPCError);
       expect((err as TRPCError).code).toBe('FORBIDDEN');
+    });
+  });
+
+  // ─── Join Rate Limiting ─────────────────────────────────────────────────────
+
+  describe('joinServer rate limiting', () => {
+    let rateLimitUserId: string;
+    const rateLimitKey = () => `rl:join:${rateLimitUserId}`;
+    // Non-existent serverId so we can test rate limiting without DB side effects.
+    // The rate limit check runs before the server lookup, so NOT_FOUND means the limit passed.
+    const NON_EXISTENT_SERVER = '00000000-0000-0000-0000-000000000000';
+
+    beforeAll(async () => {
+      const ts = Date.now();
+      const user = await prisma.user.create({
+        data: {
+          email: `sm-ratelimit-${ts}@example.com`,
+          username: `sm_ratelimit_${ts}`,
+          passwordHash: '$2a$12$placeholderHashForTestingOnly000000000000000000000000000',
+          displayName: 'SM RateLimit',
+        },
+      });
+      rateLimitUserId = user.id;
+    });
+
+    afterAll(async () => {
+      await redis.del(rateLimitKey());
+      await prisma.user.delete({ where: { id: rateLimitUserId } }).catch(() => {});
+    });
+
+    beforeEach(async () => {
+      await redis.del(rateLimitKey());
+    });
+
+    it('allows joins up to the rate limit', async () => {
+      // Set counter to one below the limit; next call increments to JOIN_RATE_MAX (still allowed)
+      await redis.set(rateLimitKey(), JOIN_RATE_MAX - 1, 'EX', JOIN_RATE_WINDOW_SECS);
+
+      const err = await serverMemberService
+        .joinServer(rateLimitUserId, NON_EXISTENT_SERVER)
+        .catch((e: TRPCError) => e);
+      expect(err).toBeInstanceOf(TRPCError);
+      expect((err as TRPCError).code).toBe('NOT_FOUND'); // rate limit passed; server lookup failed
+    });
+
+    it('blocks the (JOIN_RATE_MAX + 1)th join with TOO_MANY_REQUESTS', async () => {
+      // Pre-fill the counter at the limit; next INCR pushes it over
+      await redis.set(rateLimitKey(), JOIN_RATE_MAX, 'EX', JOIN_RATE_WINDOW_SECS);
+
+      const err = await serverMemberService
+        .joinServer(rateLimitUserId, NON_EXISTENT_SERVER)
+        .catch((e: TRPCError) => e);
+      expect(err).toBeInstanceOf(TRPCError);
+      expect((err as TRPCError).code).toBe('TOO_MANY_REQUESTS');
+    });
+
+    it('rate limit resets after the window expires', async () => {
+      // Simulate an expired key — no Redis key means counter starts fresh
+      // (key was cleared in beforeEach)
+      const err = await serverMemberService
+        .joinServer(rateLimitUserId, NON_EXISTENT_SERVER)
+        .catch((e: TRPCError) => e);
+      expect(err).toBeInstanceOf(TRPCError);
+      expect((err as TRPCError).code).toBe('NOT_FOUND'); // rate limit passed; server lookup failed
     });
   });
 

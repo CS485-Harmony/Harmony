@@ -21,6 +21,17 @@ export interface Message {
   reactions?: Reaction[];
   /** True when this message has been pinned in its channel. */
   pinned?: boolean;
+  /** ID of the parent message when this is a reply; null/undefined for top-level messages. */
+  parentMessageId?: string | null;
+  /** Snapshot of the parent message for inline reply preview. Null for top-level messages. */
+  parentMessage?: {
+    id: string;
+    content: string;
+    isDeleted: boolean;
+    author: Author;
+  } | null;
+  /** Number of non-deleted replies on a top-level message. */
+  replyCount?: number;
 }
 
 /**

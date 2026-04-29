@@ -48,6 +48,8 @@ interface BackendUser {
   isSystemAdmin?: boolean;
 }
 
+const MANUAL_STATUS_KEY_PREFIX = 'harmony_manual_status';
+
 // ─── Mapping helpers ──────────────────────────────────────────────────────────
 
 /** Convert backend uppercase UserStatus to frontend lowercase. */
@@ -71,6 +73,43 @@ function mapBackendUser(b: BackendUser): User {
   };
 }
 
+function getManualStatusStorageKey(userId: string): string {
+  return `${MANUAL_STATUS_KEY_PREFIX}:${userId}`;
+}
+
+export function getManualStatusOverride(
+  userId: string,
+): Extract<UserStatus, 'idle' | 'dnd' | 'offline'> | null {
+  if (typeof window === 'undefined') return null;
+  const stored = window.localStorage.getItem(getManualStatusStorageKey(userId));
+  return stored === 'idle' || stored === 'dnd' || stored === 'offline' ? stored : null;
+}
+
+function writeManualStatusOverride(userId: string, status: UserStatus | undefined): void {
+  if (typeof window === 'undefined') return;
+  const key = getManualStatusStorageKey(userId);
+  if (status === 'idle' || status === 'dnd' || status === 'offline') {
+    window.localStorage.setItem(key, status);
+    return;
+  }
+  window.localStorage.removeItem(key);
+}
+
+function applyStoredManualStatusOverride(user: User): User {
+  const manualOverride = getManualStatusOverride(user.id);
+  if (manualOverride) {
+    return { ...user, status: manualOverride };
+  }
+  return user;
+}
+
+export function shouldEnablePresenceTracking(user: Pick<User, 'id' | 'status'> | null): boolean {
+  if (!user) return false;
+  if (getManualStatusOverride(user.id)) return false;
+  if (user.status === 'dnd') return false;
+  return true;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 /**
@@ -84,7 +123,7 @@ export async function getCurrentUser(): Promise<User | null> {
   if (!getAccessToken() && !getRefreshToken()) return null;
   try {
     const user = await apiClient.trpcQuery<BackendUser>('user.getCurrentUser');
-    return mapBackendUser(user);
+    return applyStoredManualStatusOverride(mapBackendUser(user));
   } catch {
     return null;
   }
@@ -109,7 +148,7 @@ export async function login(email: string, password: string): Promise<User> {
   setTokens(tokens.accessToken, tokens.refreshToken);
 
   const user = await apiClient.trpcQuery<BackendUser>('user.getCurrentUser');
-  return mapBackendUser(user);
+  return applyStoredManualStatusOverride(mapBackendUser(user));
 }
 
 /**
@@ -142,7 +181,7 @@ export async function register(
     user = await apiClient.trpcMutation<BackendUser>('user.updateUser', { displayName });
   }
 
-  return mapBackendUser(user);
+  return applyStoredManualStatusOverride(mapBackendUser(user));
 }
 
 /**
@@ -175,7 +214,11 @@ export async function updateCurrentUser(
   }
 
   const updated = await apiClient.trpcMutation<BackendUser>('user.updateUser', input);
-  return mapBackendUser(updated);
+  const mapped = mapBackendUser(updated);
+  if (patch.status !== undefined) {
+    writeManualStatusOverride(mapped.id, patch.status);
+  }
+  return applyStoredManualStatusOverride(mapped);
 }
 
 /**

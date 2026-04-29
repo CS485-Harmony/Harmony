@@ -4,20 +4,37 @@
  * Supports a full variant (avatar + author + timestamp + content) and a
  * compact variant (no avatar/name) for grouped follow-up messages.
  *
- * ActionBar: appears on hover/focus. Shows Reply and Add Reaction stubs for
- * all users. Shows a "More" (⋯) dropdown with "Pin/Unpin Message" for users
- * with message:pin permission (MODERATOR, ADMIN, OWNER).
+ * ActionBar: appears on hover/focus. Shows Reply (functional) and Add Reaction
+ * stub for all users. Shows a "More" (⋯) dropdown with "Pin/Unpin Message" for
+ * users with message:pin permission (MODERATOR, ADMIN, OWNER), and "Edit
+ * Message" for the message's own author.
+ *
+ * Replies: messages with a parentMessage show a Discord-style inline reply
+ * banner above the content. Clicking the banner scrolls to the parent message.
  */
 
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { useRouter, usePathname } from 'next/navigation';
-import { formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
+import { cn, formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
 import { pinMessageAction, unpinMessageAction } from '@/app/actions/pinMessage';
+import { editMessageAction } from '@/app/actions/editMessage';
 import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/hooks/useToast';
+import { ThreadView } from '@/components/message/ThreadView';
+import { apiClient } from '@/lib/api-client';
 import type { Message, Reaction } from '@/types';
+
+const EmojiPickerPopover = dynamic(
+  () =>
+    import('@/components/channel/EmojiPickerPopover').then(m => ({
+      default: m.EmojiPickerPopover,
+    })),
+  { ssr: false },
+);
 
 // ─── AttachmentList ───────────────────────────────────────────────────────────
 
@@ -29,7 +46,13 @@ function AttachmentList({ attachments }: { attachments: Message['attachments'] }
         const isImage = a.type?.startsWith('image/');
         if (isImage) {
           return (
-            <a key={a.id} href={a.url} target='_blank' rel='noopener noreferrer' className='inline-block max-w-sm'>
+            <a
+              key={a.id}
+              href={a.url}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='inline-block max-w-sm'
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={a.url} alt={a.filename} className='max-h-64 rounded-md object-contain' />
             </a>
@@ -43,7 +66,14 @@ function AttachmentList({ attachments }: { attachments: Message['attachments'] }
             rel='noopener noreferrer'
             className='flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-blue-400 hover:bg-white/10 hover:text-blue-300 transition-colors w-fit'
           >
-            <svg className='h-4 w-4 flex-shrink-0' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={2} aria-hidden='true'>
+            <svg
+              className='h-4 w-4 flex-shrink-0'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth={2}
+              aria-hidden='true'
+            >
               <path d='M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48' />
             </svg>
             <span className='truncate max-w-xs'>{a.filename}</span>
@@ -56,22 +86,79 @@ function AttachmentList({ attachments }: { attachments: Message['attachments'] }
 
 // ─── ReactionList ─────────────────────────────────────────────────────────────
 
-function ReactionList({ reactions, messageId }: { reactions: Reaction[]; messageId: string }) {
+function ReactionList({
+  reactions,
+  messageId,
+  userId,
+  onReactionClick,
+}: {
+  reactions: Reaction[];
+  messageId: string;
+  userId?: string;
+  onReactionClick?: (emoji: string, alreadyReacted: boolean) => void;
+}) {
   if (!reactions || reactions.length === 0) return null;
   return (
     <div className='mt-1 flex flex-wrap gap-1'>
-      {reactions.map(r => (
-        <button
-          key={`${r.emoji}-${messageId}`}
-          type='button'
-          aria-label={`React with ${r.emoji} (${r.count} ${r.count !== 1 ? 'reactions' : 'reaction'})`}
-          className='flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-gray-300 hover:bg-white/10'
-        >
-          <span>{r.emoji}</span>
-          <span>{r.count}</span>
-        </button>
-      ))}
+      {reactions.map(r => {
+        const alreadyReacted = !!userId && r.userIds.includes(userId);
+        return (
+          <button
+            key={`${r.emoji}-${messageId}`}
+            type='button'
+            aria-label={`React with ${r.emoji} (${r.count} ${r.count !== 1 ? 'reactions' : 'reaction'})${alreadyReacted ? ' — click to remove' : ''}`}
+            aria-pressed={alreadyReacted}
+            onClick={() => onReactionClick?.(r.emoji, alreadyReacted)}
+            className={cn(
+              'flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors',
+              alreadyReacted
+                ? 'border-[#5865f2]/60 bg-[#5865f2]/20 text-[#5865f2] hover:bg-[#5865f2]/30'
+                : 'border-white/10 bg-white/5 text-gray-300 hover:bg-white/10',
+            )}
+          >
+            <span>{r.emoji}</span>
+            <span>{r.count}</span>
+          </button>
+        );
+      })}
     </div>
+  );
+}
+
+// ─── ReplyBanner ──────────────────────────────────────────────────────────────
+
+function ReplyBanner({ parentMessage }: { parentMessage: NonNullable<Message['parentMessage']> }) {
+  const handleClick = () => {
+    const el = document.querySelector(`[data-message-id="${parentMessage.id}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const label = parentMessage.isDeleted
+    ? 'Original message deleted'
+    : `${parentMessage.author.displayName ?? parentMessage.author.username}: ${parentMessage.content}`;
+
+  return (
+    <button
+      type='button'
+      onClick={handleClick}
+      title={label}
+      className='mb-0.5 flex min-w-0 items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors max-w-full'
+      aria-label={`Jump to replied message from ${parentMessage.author.displayName ?? parentMessage.author.username}`}
+    >
+      <svg className='h-3 w-3 flex-shrink-0 rotate-180' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+        <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
+      </svg>
+      {parentMessage.isDeleted ? (
+        <span className='italic text-gray-500'>Original message deleted</span>
+      ) : (
+        <>
+          <span className='font-medium text-gray-300 flex-shrink-0'>
+            {parentMessage.author.displayName ?? parentMessage.author.username}
+          </span>
+          <span className='min-w-0 truncate'>{parentMessage.content}</span>
+        </>
+      )}
+    </button>
   );
 }
 
@@ -79,7 +166,14 @@ function ReactionList({ reactions, messageId }: { reactions: Reaction[]; message
 
 function PinMenuIcon() {
   return (
-    <svg className='h-3.5 w-3.5 flex-shrink-0' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={2} aria-hidden='true'>
+    <svg
+      className='h-3.5 w-3.5 flex-shrink-0'
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth={2}
+      aria-hidden='true'
+    >
       <path d='M12 17v5' />
       <path d='M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z' />
     </svg>
@@ -92,29 +186,44 @@ type PinState = 'idle' | 'loading' | 'success' | 'error';
 
 /**
  * Hover/focus-within action bar for a message.
- * Reply and Add Reaction are stubs (future issues).
- * More (⋯) is only rendered when canPin is true, and opens a dropdown with
- * Pin/Unpin — which calls the backend and tracks state locally.
+ * Reply triggers onReplyClick (opens thread for authenticated users).
+ * More (⋯) is rendered when canPin or isOwnMessage is true, and opens a
+ * dropdown with Pin/Unpin (canPin) and Edit Message (isOwnMessage).
  */
 function ActionBar({
   messageId,
   serverId,
+  channelId,
   canPin,
   initialPinned,
+  isOwnMessage,
+  onEditClick,
+  onReplyClick,
+  onReactionAdd,
 }: {
   messageId: string;
   serverId?: string;
+  channelId?: string;
   canPin?: boolean;
   initialPinned?: boolean;
+  isOwnMessage?: boolean;
+  onEditClick?: () => void;
+  onReplyClick?: () => void;
+  onReactionAdd?: (emoji: string) => void;
 }) {
   const { isAuthenticated } = useAuth();
+  const { showToast } = useToast();
   const router = useRouter();
   const pathname = usePathname();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const [openUpward, setOpenUpward] = useState(false);
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
   const [pinErrorMsg, setPinErrorMsg] = useState('');
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const moreTriggerRef = useRef<HTMLButtonElement>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -137,6 +246,41 @@ function ActionBar({
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [isMoreOpen]);
 
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    function onClickOutside(e: MouseEvent) {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [showEmojiPicker]);
+
+  const handleEmojiSelect = useCallback(
+    async (emoji: { native: string }) => {
+      setShowEmojiPicker(false);
+      if (!channelId || !serverId) return;
+      try {
+        await apiClient.trpcMutation('reaction.addReaction', {
+          serverId,
+          channelId,
+          messageId,
+          emoji: emoji.native,
+        });
+        onReactionAdd?.(emoji.native);
+      } catch (err: unknown) {
+        const code = (
+          err as { response?: { data?: { error?: { json?: { code?: string } } } } }
+        )?.response?.data?.error?.json?.code;
+        if (code !== 'CONFLICT') {
+          showToast({ message: 'Failed to add reaction. Please try again.', type: 'error' });
+        }
+      }
+    },
+    [channelId, serverId, messageId, onReactionAdd, showToast],
+  );
+
   const handlePinToggle = useCallback(async () => {
     if (!serverId) return;
     setIsMoreOpen(false);
@@ -158,14 +302,20 @@ function ActionBar({
         setPinErrorMsg(msg);
         setPinState('error');
         if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-        errorTimerRef.current = setTimeout(() => { setPinState('idle'); setPinErrorMsg(''); }, 3000);
+        errorTimerRef.current = setTimeout(() => {
+          setPinState('idle');
+          setPinErrorMsg('');
+        }, 3000);
       }
     } catch {
       const msg = `Failed to ${verb} message. Please try again.`;
       setPinErrorMsg(msg);
       setPinState('error');
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-      errorTimerRef.current = setTimeout(() => { setPinState('idle'); setPinErrorMsg(''); }, 3000);
+      errorTimerRef.current = setTimeout(() => {
+        setPinState('idle');
+        setPinErrorMsg('');
+      }, 3000);
     }
   }, [isPinned, messageId, serverId]);
 
@@ -175,63 +325,132 @@ function ActionBar({
       {pinState === 'success' && (
         <span className='px-2 text-xs text-green-400'>{isPinned ? '📌 Pinned' : 'Unpinned'}</span>
       )}
-      {pinState === 'error' && (
-        <span className='px-2 text-xs text-red-400'>{pinErrorMsg}</span>
-      )}
+      {pinState === 'error' && <span className='px-2 text-xs text-red-400'>{pinErrorMsg}</span>}
 
-      {/* Reply — redirects guests to login; stub for authenticated users */}
+      {/* Reply — redirects guests to login; opens thread for authenticated users */}
       <button
         type='button'
         aria-label='Reply'
         title='Reply'
-        onClick={!isAuthenticated ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`) : undefined}
+        onClick={
+          !isAuthenticated
+            ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`)
+            : onReplyClick
+        }
         className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
       >
-        <svg className='h-4 w-4' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true' focusable='false'>
+        <svg
+          className='h-4 w-4'
+          viewBox='0 0 24 24'
+          fill='currentColor'
+          aria-hidden='true'
+          focusable='false'
+        >
           <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
         </svg>
       </button>
 
-      {/* Add Reaction — redirects guests to login; stub for authenticated users */}
-      <button
-        type='button'
-        aria-label='Add Reaction'
-        title='Add Reaction'
-        onClick={!isAuthenticated ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`) : undefined}
-        className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
-      >
-        <svg className='h-4 w-4' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true' focusable='false'>
-          <path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22C6.486 22 2 17.514 2 12S6.486 2 12 2s10 4.486 10 10-4.486 10-10 10zm-3.5-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm1.476 2.37a.75.75 0 0 0-1.06-1.06 4.5 4.5 0 0 1-6.832 0 .75.75 0 0 0-1.061 1.06 6 6 0 0 0 8.953 0z' />
-        </svg>
-      </button>
+      {/* Add Reaction — redirects guests to login; opens emoji picker for authenticated users */}
+      <div ref={emojiPickerRef} className='relative'>
+        <button
+          type='button'
+          aria-label='Add Reaction'
+          title='Add Reaction'
+          aria-expanded={isAuthenticated ? showEmojiPicker : undefined}
+          aria-haspopup={isAuthenticated ? 'dialog' : undefined}
+          onClick={
+            !isAuthenticated
+              ? () => router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`)
+              : () => setShowEmojiPicker(prev => !prev)
+          }
+          className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+        >
+          <svg
+            className='h-4 w-4'
+            viewBox='0 0 24 24'
+            fill='currentColor'
+            aria-hidden='true'
+            focusable='false'
+          >
+            <path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22C6.486 22 2 17.514 2 12S6.486 2 12 2s10 4.486 10 10-4.486 10-10 10zm-3.5-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm1.476 2.37a.75.75 0 0 0-1.06-1.06 4.5 4.5 0 0 1-6.832 0 .75.75 0 0 0-1.061 1.06 6 6 0 0 0 8.953 0z' />
+          </svg>
+        </button>
+        {isAuthenticated && showEmojiPicker && (
+          <div
+            role='dialog'
+            aria-label='Emoji picker'
+            className='absolute bottom-full right-0 z-50 mb-2'
+          >
+            <EmojiPickerPopover onEmojiSelect={handleEmojiSelect} />
+          </div>
+        )}
+      </div>
 
-      {/* More — only rendered when user has pin permission */}
-      {canPin && (
+      {/* More — rendered when user can pin or is the message author */}
+      {(canPin || isOwnMessage) && (
         <div ref={moreRef} className='relative'>
           <button
             type='button'
             aria-label='More actions'
             title='More'
+            ref={moreTriggerRef}
             aria-expanded={isMoreOpen}
-            onClick={() => setIsMoreOpen(v => !v)}
+            onClick={() => {
+              if (!isMoreOpen && moreTriggerRef.current) {
+                const rect = moreTriggerRef.current.getBoundingClientRect();
+                setOpenUpward(window.innerHeight - rect.bottom < 180);
+              }
+              setIsMoreOpen(v => !v);
+            }}
             className='flex h-8 w-8 items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors'
           >
-            <svg className='h-4 w-4' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true' focusable='false'>
+            <svg
+              className='h-4 w-4'
+              viewBox='0 0 24 24'
+              fill='currentColor'
+              aria-hidden='true'
+              focusable='false'
+            >
               <path d='M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z' />
             </svg>
           </button>
 
           {isMoreOpen && (
-            <div className='absolute right-0 top-full mt-1 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20'>
-              <button
-                type='button'
-                onClick={handlePinToggle}
-                disabled={pinState === 'loading'}
-                className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-gray-200 hover:bg-[#5865f2] hover:text-white disabled:opacity-50 transition-colors'
-              >
-                <PinMenuIcon />
-                {isPinned ? 'Unpin Message' : 'Pin Message'}
-              </button>
+            <div className={`absolute right-0 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+              {isOwnMessage && (
+                <button
+                  type='button'
+                  onClick={() => {
+                    setIsMoreOpen(false);
+                    onEditClick?.();
+                  }}
+                  className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-gray-200 hover:bg-[#5865f2] hover:text-white transition-colors'
+                >
+                  <svg
+                    className='h-3.5 w-3.5 flex-shrink-0'
+                    viewBox='0 0 24 24'
+                    fill='none'
+                    stroke='currentColor'
+                    strokeWidth={2}
+                    aria-hidden='true'
+                  >
+                    <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7' />
+                    <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z' />
+                  </svg>
+                  Edit Message
+                </button>
+              )}
+              {canPin && (
+                <button
+                  type='button'
+                  onClick={handlePinToggle}
+                  disabled={pinState === 'loading'}
+                  className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-gray-200 hover:bg-[#5865f2] hover:text-white disabled:opacity-50 transition-colors'
+                >
+                  <PinMenuIcon />
+                  {isPinned ? 'Unpin Message' : 'Pin Message'}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -247,6 +466,7 @@ export function MessageItem({
   showHeader = true,
   canPin,
   serverId,
+  onReplyClick,
 }: {
   message: Message;
   /** Set to false for grouped follow-up messages from the same author. Hides the avatar and author line. */
@@ -255,8 +475,24 @@ export function MessageItem({
   canPin?: boolean;
   /** Required for pin actions. Passed alongside canPin. */
   serverId?: string;
+  /** Called when the user clicks Reply on this message. */
+  onReplyClick?: (message: Message) => void;
 }) {
+  const { user, isAuthenticated } = useAuth();
+  const { showToast } = useToast();
+  const router = useRouter();
+  const pathname = usePathname();
   const [avatarError, setAvatarError] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(message.content);
+  const [isSaving, setIsSaving] = useState(false);
+  const [localContent, setLocalContent] = useState<string | undefined>(undefined);
+  const [localReactions, setLocalReactions] = useState<Reaction[]>(message.reactions ?? []);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const isTopLevel = !message.parentMessageId;
+  const [isThreadOpen, setIsThreadOpen] = useState(false);
+  const [localReplyCount, setLocalReplyCount] = useState(message.replyCount ?? 0);
+
   // Render-phase derived-state reset: when the avatar URL changes (including A→B→A),
   // reset avatarError so the new URL is always attempted.
   const [prevAvatarUrl, setPrevAvatarUrl] = useState(message.author.avatarUrl);
@@ -264,6 +500,182 @@ export function MessageItem({
     setPrevAvatarUrl(message.author.avatarUrl);
     if (avatarError) setAvatarError(false);
   }
+
+  // Keep editContent in sync when message content changes externally (e.g. via SSE)
+  const [prevContent, setPrevContent] = useState(message.content);
+  if (!isEditing && prevContent !== message.content) {
+    setPrevContent(message.content);
+    setEditContent(message.content);
+    if (localContent !== undefined) setLocalContent(undefined);
+  }
+
+  // Sync localReactions when message.reactions changes externally (e.g. via SSE)
+  const [prevReactions, setPrevReactions] = useState(message.reactions);
+  if (prevReactions !== message.reactions) {
+    setPrevReactions(message.reactions);
+    setLocalReactions(message.reactions ?? []);
+  }
+
+  const isOwnMessage = !!user && user.id === message.author.id;
+
+  const handleReactionAdd = useCallback(
+    (emoji: string) => {
+      setLocalReactions(prev => {
+        const existing = prev.find(r => r.emoji === emoji);
+        if (existing) {
+          return prev.map(r =>
+            r.emoji === emoji
+              ? {
+                  ...r,
+                  count: r.count + 1,
+                  userIds: user?.id ? [...r.userIds, user.id] : r.userIds,
+                }
+              : r,
+          );
+        }
+        return [...prev, { emoji, count: 1, userIds: user?.id ? [user.id] : [] }];
+      });
+    },
+    [user],
+  );
+
+  // Called when user clicks an existing reaction pill to add or remove their reaction.
+  const handleReactionToggle = useCallback(
+    async (emoji: string, alreadyReacted: boolean) => {
+      if (!isAuthenticated) {
+        router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`);
+        return;
+      }
+      if (!serverId) return;
+
+      const channelId = message.channelId;
+      const messageId = message.id;
+      const uid = user?.id;
+
+      if (alreadyReacted) {
+        // Optimistic remove
+        setLocalReactions(prev =>
+          prev
+            .map(r =>
+              r.emoji === emoji
+                ? { ...r, count: r.count - 1, userIds: r.userIds.filter(id => id !== uid) }
+                : r,
+            )
+            .filter(r => r.count > 0),
+        );
+        try {
+          await apiClient.trpcMutation('reaction.removeReaction', {
+            serverId,
+            channelId,
+            messageId,
+            emoji,
+          });
+        } catch {
+          // Revert: add the reaction back
+          setLocalReactions(prev => {
+            const existing = prev.find(r => r.emoji === emoji);
+            if (existing) {
+              return prev.map(r =>
+                r.emoji === emoji
+                  ? { ...r, count: r.count + 1, userIds: uid ? [...r.userIds, uid] : r.userIds }
+                  : r,
+              );
+            }
+            return [...prev, { emoji, count: 1, userIds: uid ? [uid] : [] }];
+          });
+          showToast({ message: 'Failed to remove reaction. Please try again.', type: 'error' });
+        }
+      } else {
+        // Optimistic add
+        setLocalReactions(prev => {
+          const existing = prev.find(r => r.emoji === emoji);
+          if (existing) {
+            return prev.map(r =>
+              r.emoji === emoji
+                ? { ...r, count: r.count + 1, userIds: uid ? [...r.userIds, uid] : r.userIds }
+                : r,
+            );
+          }
+          return [...prev, { emoji, count: 1, userIds: uid ? [uid] : [] }];
+        });
+        try {
+          await apiClient.trpcMutation('reaction.addReaction', {
+            serverId,
+            channelId,
+            messageId,
+            emoji,
+          });
+        } catch (err: unknown) {
+          const code = (err as { response?: { data?: { error?: { json?: { code?: string } } } } })
+            ?.response?.data?.error?.json?.code;
+          if (code === 'CONFLICT') return; // already reacted — optimistic state is correct
+          // Revert: remove the optimistic reaction
+          setLocalReactions(prev =>
+            prev
+              .map(r =>
+                r.emoji === emoji
+                  ? { ...r, count: r.count - 1, userIds: r.userIds.filter(id => id !== uid) }
+                  : r,
+              )
+              .filter(r => r.count > 0),
+          );
+          showToast({ message: 'Failed to add reaction. Please try again.', type: 'error' });
+        }
+      }
+    },
+    [isAuthenticated, serverId, message, user, showToast, router, pathname],
+  );
+
+  const handleEditClick = useCallback(() => {
+    const current = localContent ?? message.content;
+    setEditContent(current);
+    setIsEditing(true);
+    setTimeout(() => {
+      const el = editTextareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }
+    }, 0);
+  }, [localContent, message.content]);
+
+  const handleEditCancel = useCallback(() => {
+    setIsEditing(false);
+    setEditContent(localContent ?? message.content);
+  }, [localContent, message.content]);
+
+  const handleEditSave = useCallback(async () => {
+    const trimmed = editContent.trim();
+    const currentContent = localContent ?? message.content;
+    if (!trimmed || trimmed === currentContent || !serverId) {
+      setIsEditing(false);
+      return;
+    }
+    setIsSaving(true);
+    const result = await editMessageAction(message.id, serverId, trimmed);
+    setIsSaving(false);
+    if (result.ok) {
+      setIsEditing(false);
+      setLocalContent(result.message.content);
+    } else {
+      const msg = result.forbidden
+        ? "You don't have permission to edit this message."
+        : 'Failed to edit message. Please try again.';
+      showToast({ message: msg, type: 'error' });
+    }
+  }, [editContent, localContent, message.content, message.id, serverId, showToast]);
+
+  const handleEditKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleEditSave();
+      } else if (e.key === 'Escape') {
+        handleEditCancel();
+      }
+    },
+    [handleEditSave, handleEditCancel],
+  );
 
   // Trim first to guard against empty-string usernames — || catches "" where ?? would not.
   const trimmedUsername = message.author.username?.trim();
@@ -277,75 +689,190 @@ export function MessageItem({
   //   moderator → #3ba55c (green), member/guest → text-white
   const authorNameClass = 'cursor-pointer font-medium text-white hover:underline';
 
+  const handleReplyClick = useCallback(() => {
+    onReplyClick?.(message);
+  }, [onReplyClick, message]);
+
   const actionBar = (
     <ActionBar
       messageId={message.id}
       serverId={serverId}
+      channelId={message.channelId}
       canPin={canPin}
       initialPinned={!!message.pinned}
+      isOwnMessage={isOwnMessage}
+      onEditClick={handleEditClick}
+      onReplyClick={isTopLevel ? handleReplyClick : undefined}
+      onReactionAdd={handleReactionAdd}
     />
+  );
+
+  const threadToggle =
+    isTopLevel && serverId ? (
+      <button
+        type='button'
+        onClick={() => setIsThreadOpen(v => !v)}
+        className='mt-1 flex items-center gap-1 text-xs text-[#5865f2] hover:underline'
+        aria-expanded={isThreadOpen}
+        aria-label={
+          isThreadOpen
+            ? 'Hide replies'
+            : `View ${localReplyCount} ${localReplyCount === 1 ? 'reply' : 'replies'}`
+        }
+      >
+        <svg className='h-3 w-3' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+          <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
+        </svg>
+        {isThreadOpen
+          ? 'Hide replies'
+          : `${localReplyCount} ${localReplyCount === 1 ? 'reply' : 'replies'}`}
+      </button>
+    ) : null;
+
+  const threadView =
+    isTopLevel && isThreadOpen && serverId ? (
+      <ThreadView
+        parentMessage={message}
+        channelId={message.channelId}
+        serverId={serverId}
+        onReplyCountChange={delta => setLocalReplyCount(c => c + delta)}
+      />
+    ) : null;
+
+  const editUi = (
+    <div className='mt-0.5'>
+      <textarea
+        ref={editTextareaRef}
+        value={editContent}
+        onChange={e => setEditContent(e.target.value)}
+        onKeyDown={handleEditKeyDown}
+        disabled={isSaving}
+        rows={3}
+        className='w-full resize-none rounded-md bg-[#40444b] px-3 py-2 text-sm text-[#dcddde] outline-none focus:ring-1 focus:ring-[#5865f2] disabled:opacity-50'
+        aria-label='Edit message'
+      />
+      <div className='mt-1 flex items-center gap-2 text-xs text-gray-400'>
+        <span>
+          escape to{' '}
+          <button
+            type='button'
+            onClick={handleEditCancel}
+            className='text-[#5865f2] hover:underline'
+          >
+            cancel
+          </button>
+          {' · '}enter to{' '}
+          <button
+            type='button'
+            onClick={handleEditSave}
+            disabled={isSaving}
+            className='text-[#5865f2] hover:underline disabled:opacity-50'
+          >
+            save
+          </button>
+        </span>
+      </div>
+    </div>
   );
 
   if (!showHeader) {
     return (
-      <div className='group relative flex gap-4 px-4 py-0.5 hover:bg-white/[0.02]'>
-        {actionBar}
-        {/* Spacer aligns content with the 40px avatar of the header row */}
-        <div className='w-10 flex-shrink-0 text-right'>
-          <span className='invisible text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
-            {formatTimeOnly(message.timestamp)}
-          </span>
+      <div
+        data-message-id={message.id}
+        className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
+      >
+        {message.parentMessage && <div className='ml-14 pt-1'><ReplyBanner parentMessage={message.parentMessage} /></div>}
+        <div className='flex gap-4'>
+          {!isEditing && actionBar}
+          {/* Spacer aligns content with the 40px avatar of the header row */}
+          <div className='w-10 flex-shrink-0 text-right'>
+            <span className='invisible whitespace-nowrap text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
+              {formatTimeOnly(message.timestamp)}
+            </span>
+          </div>
+          <div className='min-w-0 flex-1'>
+            {isEditing ? (
+              editUi
+            ) : (
+              <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
+                {localContent ?? message.content}
+                {(message.editedAt || localContent !== undefined) && (
+                  <span className='ml-1 text-[10px] text-gray-500'>(edited)</span>
+                )}
+              </p>
+            )}
+            <AttachmentList attachments={message.attachments} />
+            <ReactionList
+                reactions={localReactions}
+                messageId={message.id}
+                userId={user?.id}
+                onReactionClick={handleReactionToggle}
+              />
+            {localReplyCount > 0 && threadToggle}
+          </div>
         </div>
-        <div className='min-w-0 flex-1'>
-          <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-            {message.content}
-            {message.editedAt && <span className='ml-1 text-[10px] text-gray-500'>(edited)</span>}
-          </p>
-          <AttachmentList attachments={message.attachments} />
-          <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
-        </div>
+        {threadView}
       </div>
     );
   }
 
   return (
-    <div className='group relative flex gap-4 px-4 py-0.5 hover:bg-white/[0.02]'>
-      {actionBar}
-      {/* Avatar */}
-      <div className='mt-0.5 flex-shrink-0'>
-        {message.author.avatarUrl && !avatarError ? (
-          <Image
-            src={message.author.avatarUrl}
-            alt={message.author.username}
-            width={40}
-            height={40}
-            unoptimized
-            className='h-10 w-10 rounded-full'
-            onError={() => setAvatarError(true)}
-          />
-        ) : (
-          <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#5865f2] text-sm font-bold text-white'>
-            {authorInitial}
-          </div>
-        )}
-      </div>
-      {/* Content */}
-      <div className='min-w-0 flex-1'>
-        <div className='flex items-baseline gap-2'>
-          <span className={authorNameClass}>
-            {message.author.displayName ?? message.author.username}
-          </span>
-          <span className='text-[11px] text-gray-400'>
-            {formatMessageTimestamp(message.timestamp)}
-          </span>
-          {message.editedAt && <span className='text-[10px] text-gray-500'>(edited)</span>}
+    <div
+      data-message-id={message.id}
+      className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
+    >
+      {message.parentMessage && <div className='ml-14 pt-1'><ReplyBanner parentMessage={message.parentMessage} /></div>}
+      <div className='flex gap-4'>
+        {!isEditing && actionBar}
+        {/* Avatar */}
+        <div className='mt-0.5 flex-shrink-0'>
+          {message.author.avatarUrl && !avatarError ? (
+            <Image
+              src={message.author.avatarUrl}
+              alt={message.author.username}
+              width={40}
+              height={40}
+              unoptimized
+              className='h-10 w-10 rounded-full'
+              onError={() => setAvatarError(true)}
+            />
+          ) : (
+            <div className='flex h-10 w-10 items-center justify-center rounded-full bg-[#5865f2] text-sm font-bold text-white'>
+              {authorInitial}
+            </div>
+          )}
         </div>
-        <p className='mt-0.5 whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-          {message.content}
-        </p>
-        <AttachmentList attachments={message.attachments} />
-        <ReactionList reactions={message.reactions ?? []} messageId={message.id} />
+        {/* Content */}
+        <div className='min-w-0 flex-1'>
+          <div className='flex items-baseline gap-2'>
+            <span className={authorNameClass}>
+              {message.author.displayName ?? message.author.username}
+            </span>
+            <span className='whitespace-nowrap text-[11px] text-gray-400'>
+              {formatMessageTimestamp(message.timestamp)}
+            </span>
+            {(message.editedAt || localContent !== undefined) && (
+              <span className='text-[10px] text-gray-500'>(edited)</span>
+            )}
+          </div>
+          {isEditing ? (
+            editUi
+          ) : (
+            <p className='mt-0.5 whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
+              {localContent ?? message.content}
+            </p>
+          )}
+          <AttachmentList attachments={message.attachments} />
+          <ReactionList
+                reactions={localReactions}
+                messageId={message.id}
+                userId={user?.id}
+                onReactionClick={handleReactionToggle}
+              />
+          {localReplyCount > 0 && threadToggle}
+        </div>
       </div>
+      {threadView}
     </div>
   );
 }
