@@ -7,7 +7,7 @@
     "dev:worker": "PORT=4100 tsx watch src/worker.ts",
     "dev:e2e": "NODE_ENV=e2e PORT=4000 tsx src/index.ts",
     "dev:e2e:worker": "NODE_ENV=e2e PORT=4100 tsx src/worker.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/index.js",
     "start:api": "node dist/index.js",
     "start:worker": "node dist/worker.js",

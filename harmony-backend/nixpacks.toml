@@ -1,0 +1,6 @@
+[phases.install]
+# NODE_ENV=production in the Railway environment causes nixpacks to generate
+# "npm ci --omit=dev", which skips devDependencies. The build requires them
+# (typescript, @types/node, @types/express, etc.), so we override the install
+# command to always include all deps regardless of NODE_ENV.
+cmds = ["npm ci --include=dev"]
