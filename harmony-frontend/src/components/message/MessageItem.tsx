@@ -545,7 +545,7 @@ export function MessageItem({
           {!isEditing && actionBar}
           {/* Spacer aligns content with the 40px avatar of the header row */}
           <div className='w-10 flex-shrink-0 text-right'>
-            <span className='invisible text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
+            <span className='invisible whitespace-nowrap text-[10px] text-gray-500 group-hover:visible group-focus-within:visible'>
               {formatTimeOnly(message.timestamp)}
             </span>
           </div>
@@ -600,7 +600,7 @@ export function MessageItem({
             <span className={authorNameClass}>
               {message.author.displayName ?? message.author.username}
             </span>
-            <span className='text-[11px] text-gray-400'>
+            <span className='whitespace-nowrap text-[11px] text-gray-400'>
               {formatMessageTimestamp(message.timestamp)}
             </span>
             {(message.editedAt || localContent !== undefined) && (
