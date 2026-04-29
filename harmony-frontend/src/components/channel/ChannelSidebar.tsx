@@ -7,38 +7,22 @@
 
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { cn } from '@/lib/utils';
+import { cn, getUserErrorMessage } from '@/lib/utils';
 import { UserStatusBar } from '@/components/channel/UserStatusBar';
 import { ChannelVisibility, ChannelType } from '@/types';
 import type { Server, Channel, User } from '@/types';
 import { useVoiceOptional } from '@/contexts/VoiceContext';
+import { useToast } from '@/hooks/useToast';
+import { apiClient } from '@/lib/api-client';
 
 // ─── Colour tokens (Discord palette) ─────────────────────────────────────────
 
 const BG_SIDEBAR = 'bg-[#2f3136]';
 const BG_ACTIVE = 'bg-[#3d4148]';
-
-// ─── Gear icon ────────────────────────────────────────────────────────────────
-
-function GearIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={cn('h-4 w-4', className)}
-      viewBox='0 0 24 24'
-      fill='none'
-      stroke='currentColor'
-      strokeWidth={2}
-      aria-hidden='true'
-      focusable='false'
-    >
-      <path d='M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z' />
-      <circle cx='12' cy='12' r='3' />
-    </svg>
-  );
-}
 
 // ─── Channel type icons ───────────────────────────────────────────────────────
 
@@ -132,7 +116,17 @@ function CategoryHeader({
           aria-label={addLabel ?? `Add channel`}
           className='ml-auto rounded p-0.5 text-gray-400 opacity-0 transition-opacity hover:text-gray-200 group-hover/cat:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5865f2]'
         >
-          <svg className='h-3.5 w-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={2.5} strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+          <svg
+            className='h-3.5 w-3.5'
+            viewBox='0 0 24 24'
+            fill='none'
+            stroke='currentColor'
+            strokeWidth={2.5}
+            strokeLinecap='round'
+            strokeLinejoin='round'
+            aria-hidden='true'
+            focusable='false'
+          >
             <path d='M12 5v14M5 12h14' />
           </svg>
         </button>
@@ -181,6 +175,12 @@ export function ChannelSidebar({
 }: ChannelSidebarProps) {
   const [textCollapsed, setTextCollapsed] = useState(false);
   const [voiceCollapsed, setVoiceCollapsed] = useState(false);
+  const [isServerMenuOpen, setIsServerMenuOpen] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [isLeavingServer, setIsLeavingServer] = useState(false);
+  const serverMenuRef = useRef<HTMLDivElement | null>(null);
+  const router = useRouter();
+  const { showToast } = useToast();
 
   const voice = useVoiceOptional();
   const connectedChannelId = voice?.connectedChannelId ?? null;
@@ -191,13 +191,47 @@ export function ChannelSidebar({
   const joinChannel = voice?.joinChannel;
 
   // Precompute userId → User map to avoid O(members × participants) lookups on every render.
-  const memberMap = useMemo(
-    () => new Map(members?.map(m => [m.id, m]) ?? []),
-    [members],
-  );
+  const memberMap = useMemo(() => new Map(members?.map(m => [m.id, m]) ?? []), [members]);
 
   const isAdmin =
     isAuthenticated && (currentUser.isSystemAdmin || currentUser.id === server.ownerId);
+  const hasServerSettingsAccess =
+    isAuthenticated &&
+    (currentUser.isSystemAdmin ||
+      currentUser.id === server.ownerId ||
+      currentUser.role === 'owner' ||
+      currentUser.role === 'admin');
+  const canLeaveServer =
+    isAuthenticated &&
+    currentUser.role !== 'guest' &&
+    currentUser.role !== 'owner' &&
+    !isLeavingServer;
+
+  useEffect(() => {
+    function handleOutsideClick(event: MouseEvent) {
+      if (serverMenuRef.current && !serverMenuRef.current.contains(event.target as Node)) {
+        setIsServerMenuOpen(false);
+      }
+    }
+    if (isServerMenuOpen) document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isServerMenuOpen]);
+
+  async function handleLeaveServerConfirm() {
+    try {
+      setIsLeavingServer(true);
+      await apiClient.trpcMutation('serverMember.leaveServer', { serverId: server.id });
+      showToast({ message: `You left ${server.name}.`, type: 'success' });
+      setShowLeaveConfirm(false);
+      setIsServerMenuOpen(false);
+      router.replace('/channels');
+      router.refresh();
+    } catch (err) {
+      showToast({ message: getUserErrorMessage(err, 'Could not leave server.'), type: 'error' });
+    } finally {
+      setIsLeavingServer(false);
+    }
+  }
 
   const textChannels = channels.filter(
     c =>
@@ -205,7 +239,9 @@ export function ChannelSidebar({
       (isAuthenticated || c.visibility !== ChannelVisibility.PRIVATE),
   );
   const voiceChannels = channels.filter(
-    c => c.type === ChannelType.VOICE && (isAuthenticated || c.visibility !== ChannelVisibility.PRIVATE),
+    c =>
+      c.type === ChannelType.VOICE &&
+      (isAuthenticated || c.visibility !== ChannelVisibility.PRIVATE),
   );
 
   return (
@@ -233,28 +269,59 @@ export function ChannelSidebar({
         {/* Server name header */}
         <div className='flex h-12 flex-shrink-0 items-center border-b border-black/20 px-4 font-semibold text-white shadow-sm'>
           <span className='truncate'>{server.name}</span>
-          {isAdmin ? (
-            <Link
-              href={`/settings/${server.slug}`}
-              title='Server settings'
-              aria-label='Server settings'
-              className='ml-auto flex-shrink-0 rounded p-0.5 text-gray-400 transition-colors hover:bg-white/10 hover:text-gray-200'
+          <div className='relative ml-auto' ref={serverMenuRef}>
+            <button
+              type='button'
+              aria-haspopup='menu'
+              aria-expanded={isServerMenuOpen}
+              aria-label='Open server menu'
+              onClick={() => setIsServerMenuOpen(v => !v)}
+              className='flex flex-shrink-0 items-center rounded p-0.5 text-gray-400 transition-colors hover:bg-white/10 hover:text-gray-200'
             >
-              <GearIcon />
-            </Link>
-          ) : (
-            <svg
-              className='ml-auto h-4 w-4 flex-shrink-0 text-gray-400'
-              viewBox='0 0 24 24'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth={2}
-              aria-hidden='true'
-              focusable='false'
-            >
-              <path d='m6 9 6 6 6-6' />
-            </svg>
-          )}
+              <svg
+                className='h-4 w-4'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+                aria-hidden='true'
+                focusable='false'
+              >
+                <path d='m6 9 6 6 6-6' />
+              </svg>
+            </button>
+            {isServerMenuOpen && (
+              <div
+                role='menu'
+                aria-label='Server actions'
+                className='absolute right-0 top-full z-20 mt-1 w-44 rounded-md border border-black/30 bg-[#18191c] p-1 shadow-lg'
+              >
+                {hasServerSettingsAccess && (
+                  <Link
+                    href={`/settings/${server.slug}`}
+                    role='menuitem'
+                    onClick={() => setIsServerMenuOpen(false)}
+                    className='block rounded px-2 py-1.5 text-sm text-gray-200 hover:bg-white/10'
+                  >
+                    Server settings
+                  </Link>
+                )}
+                {canLeaveServer && (
+                  <button
+                    type='button'
+                    role='menuitem'
+                    onClick={() => {
+                      setShowLeaveConfirm(true);
+                      setIsServerMenuOpen(false);
+                    }}
+                    className='block w-full rounded px-2 py-1.5 text-left text-sm text-red-300 hover:bg-red-500/20'
+                  >
+                    Leave server
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Channel list */}
@@ -265,7 +332,9 @@ export function ChannelSidebar({
                 label='Text Channels'
                 isCollapsed={textCollapsed}
                 onToggle={() => setTextCollapsed(v => !v)}
-                onAdd={isAdmin && onCreateChannel ? () => onCreateChannel(ChannelType.TEXT) : undefined}
+                onAdd={
+                  isAdmin && onCreateChannel ? () => onCreateChannel(ChannelType.TEXT) : undefined
+                }
                 addLabel='Add text channel'
               />
               {!textCollapsed && (
@@ -311,7 +380,9 @@ export function ChannelSidebar({
                 label='Voice Channels'
                 isCollapsed={voiceCollapsed}
                 onToggle={() => setVoiceCollapsed(v => !v)}
-                onAdd={isAdmin && onCreateChannel ? () => onCreateChannel(ChannelType.VOICE) : undefined}
+                onAdd={
+                  isAdmin && onCreateChannel ? () => onCreateChannel(ChannelType.VOICE) : undefined
+                }
                 addLabel='Add voice channel'
               />
               {!voiceCollapsed && (
@@ -360,7 +431,8 @@ export function ChannelSidebar({
                                   <div
                                     className={cn(
                                       'h-5 w-5 flex-shrink-0 overflow-hidden rounded-full',
-                                      isSpeaking && 'ring-2 ring-green-400 ring-offset-1 ring-offset-[#2f3136]',
+                                      isSpeaking &&
+                                        'ring-2 ring-green-400 ring-offset-1 ring-offset-[#2f3136]',
                                     )}
                                   >
                                     {member?.avatar ? (
@@ -378,7 +450,12 @@ export function ChannelSidebar({
                                       </div>
                                     )}
                                   </div>
-                                  <span className={cn('flex-1 truncate', isSpeaking && 'text-green-400')}>
+                                  <span
+                                    className={cn(
+                                      'flex-1 truncate',
+                                      isSpeaking && 'text-green-400',
+                                    )}
+                                  >
                                     {displayName}
                                   </span>
                                   {p.muted && (
@@ -401,6 +478,42 @@ export function ChannelSidebar({
         {/* User status bar */}
         <UserStatusBar currentUser={currentUser} isAuthenticated={isAuthenticated} />
       </nav>
+
+      {showLeaveConfirm && (
+        <div className='fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4'>
+          <div
+            role='dialog'
+            aria-modal='true'
+            aria-labelledby='leave-server-title'
+            className='w-full max-w-md rounded-lg border border-black/30 bg-[#2f3136] p-4 text-gray-100 shadow-xl'
+          >
+            <h2 id='leave-server-title' className='text-base font-semibold'>
+              Leave server?
+            </h2>
+            <p className='mt-2 text-sm text-gray-300'>
+              You are about to leave <span className='font-medium text-white'>{server.name}</span>.
+            </p>
+            <div className='mt-4 flex items-center justify-end gap-2'>
+              <button
+                type='button'
+                onClick={() => setShowLeaveConfirm(false)}
+                className='rounded px-3 py-1.5 text-sm text-gray-200 hover:bg-white/10'
+                disabled={isLeavingServer}
+              >
+                Cancel
+              </button>
+              <button
+                type='button'
+                onClick={() => void handleLeaveServerConfirm()}
+                className='rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60'
+                disabled={isLeavingServer}
+              >
+                {isLeavingServer ? 'Leaving...' : 'Leave server'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
