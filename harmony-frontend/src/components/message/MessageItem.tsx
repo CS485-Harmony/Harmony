@@ -20,7 +20,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { useRouter, usePathname } from 'next/navigation';
-import { formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
+import { cn, formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
 import { pinMessageAction, unpinMessageAction } from '@/app/actions/pinMessage';
 import { editMessageAction } from '@/app/actions/editMessage';
 import { useAuth } from '@/hooks/useAuth';
@@ -87,21 +87,41 @@ function AttachmentList({ attachments }: { attachments: Message['attachments'] }
 
 // ─── ReactionList ─────────────────────────────────────────────────────────────
 
-function ReactionList({ reactions, messageId }: { reactions: Reaction[]; messageId: string }) {
+function ReactionList({
+  reactions,
+  messageId,
+  userId,
+  onReactionClick,
+}: {
+  reactions: Reaction[];
+  messageId: string;
+  userId?: string;
+  onReactionClick?: (emoji: string, alreadyReacted: boolean) => void;
+}) {
   if (!reactions || reactions.length === 0) return null;
   return (
     <div className='mt-1 flex flex-wrap gap-1'>
-      {reactions.map(r => (
-        <button
-          key={`${r.emoji}-${messageId}`}
-          type='button'
-          aria-label={`React with ${r.emoji} (${r.count} ${r.count !== 1 ? 'reactions' : 'reaction'})`}
-          className='flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-gray-300 hover:bg-white/10'
-        >
-          <span>{r.emoji}</span>
-          <span>{r.count}</span>
-        </button>
-      ))}
+      {reactions.map(r => {
+        const alreadyReacted = !!userId && r.userIds.includes(userId);
+        return (
+          <button
+            key={`${r.emoji}-${messageId}`}
+            type='button'
+            aria-label={`React with ${r.emoji} (${r.count} ${r.count !== 1 ? 'reactions' : 'reaction'})${alreadyReacted ? ' — click to remove' : ''}`}
+            aria-pressed={alreadyReacted}
+            onClick={() => onReactionClick?.(r.emoji, alreadyReacted)}
+            className={cn(
+              'flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors',
+              alreadyReacted
+                ? 'border-[#5865f2]/60 bg-[#5865f2]/20 text-[#5865f2] hover:bg-[#5865f2]/30'
+                : 'border-white/10 bg-white/5 text-gray-300 hover:bg-white/10',
+            )}
+          >
+            <span>{r.emoji}</span>
+            <span>{r.count}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -410,8 +430,10 @@ export function MessageItem({
   /** Required for pin actions. Passed alongside canPin. */
   serverId?: string;
 }) {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { showToast } = useToast();
+  const router = useRouter();
+  const pathname = usePathname();
   const [avatarError, setAvatarError] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
@@ -468,6 +490,93 @@ export function MessageItem({
       });
     },
     [user],
+  );
+
+  // Called when user clicks an existing reaction pill to add or remove their reaction.
+  const handleReactionToggle = useCallback(
+    async (emoji: string, alreadyReacted: boolean) => {
+      if (!isAuthenticated) {
+        router.push(`/auth/login?returnUrl=${encodeURIComponent(pathname)}`);
+        return;
+      }
+      if (!serverId) return;
+
+      const channelId = message.channelId;
+      const messageId = message.id;
+      const uid = user?.id;
+
+      if (alreadyReacted) {
+        // Optimistic remove
+        setLocalReactions(prev =>
+          prev
+            .map(r =>
+              r.emoji === emoji
+                ? { ...r, count: r.count - 1, userIds: r.userIds.filter(id => id !== uid) }
+                : r,
+            )
+            .filter(r => r.count > 0),
+        );
+        try {
+          await apiClient.trpcMutation('reaction.removeReaction', {
+            serverId,
+            channelId,
+            messageId,
+            emoji,
+          });
+        } catch {
+          // Revert: add the reaction back
+          setLocalReactions(prev => {
+            const existing = prev.find(r => r.emoji === emoji);
+            if (existing) {
+              return prev.map(r =>
+                r.emoji === emoji
+                  ? { ...r, count: r.count + 1, userIds: uid ? [...r.userIds, uid] : r.userIds }
+                  : r,
+              );
+            }
+            return [...prev, { emoji, count: 1, userIds: uid ? [uid] : [] }];
+          });
+          showToast({ message: 'Failed to remove reaction. Please try again.', type: 'error' });
+        }
+      } else {
+        // Optimistic add
+        setLocalReactions(prev => {
+          const existing = prev.find(r => r.emoji === emoji);
+          if (existing) {
+            return prev.map(r =>
+              r.emoji === emoji
+                ? { ...r, count: r.count + 1, userIds: uid ? [...r.userIds, uid] : r.userIds }
+                : r,
+            );
+          }
+          return [...prev, { emoji, count: 1, userIds: uid ? [uid] : [] }];
+        });
+        try {
+          await apiClient.trpcMutation('reaction.addReaction', {
+            serverId,
+            channelId,
+            messageId,
+            emoji,
+          });
+        } catch (err: unknown) {
+          const code = (err as { response?: { data?: { error?: { json?: { code?: string } } } } })
+            ?.response?.data?.error?.json?.code;
+          if (code === 'CONFLICT') return; // already reacted — optimistic state is correct
+          // Revert: remove the optimistic reaction
+          setLocalReactions(prev =>
+            prev
+              .map(r =>
+                r.emoji === emoji
+                  ? { ...r, count: r.count - 1, userIds: r.userIds.filter(id => id !== uid) }
+                  : r,
+              )
+              .filter(r => r.count > 0),
+          );
+          showToast({ message: 'Failed to add reaction. Please try again.', type: 'error' });
+        }
+      }
+    },
+    [isAuthenticated, serverId, message, user, showToast, router, pathname],
   );
 
   const handleEditClick = useCallback(() => {
@@ -644,7 +753,12 @@ export function MessageItem({
               </p>
             )}
             <AttachmentList attachments={message.attachments} />
-            <ReactionList reactions={localReactions} messageId={message.id} />
+            <ReactionList
+                reactions={localReactions}
+                messageId={message.id}
+                userId={user?.id}
+                onReactionClick={handleReactionToggle}
+              />
             {localReplyCount > 0 && threadToggle}
           </div>
         </div>
@@ -696,7 +810,12 @@ export function MessageItem({
             </p>
           )}
           <AttachmentList attachments={message.attachments} />
-          <ReactionList reactions={localReactions} messageId={message.id} />
+          <ReactionList
+                reactions={localReactions}
+                messageId={message.id}
+                userId={user?.id}
+                onReactionClick={handleReactionToggle}
+              />
           {localReplyCount > 0 && threadToggle}
         </div>
       </div>
