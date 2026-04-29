@@ -98,6 +98,7 @@ export function HarmonyShell({
   const setIsMembersOpen = useCallback((val: boolean) => setMembersOverride(val), []);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPinsOpen, setIsPinsOpen] = useState(false);
+  const [pinsRefreshKey, setPinsRefreshKey] = useState(0);
   // #c25: track mobile channel-sidebar state so aria-expanded on hamburger reflects reality
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   // Local message state so sent messages appear immediately without a page reload
@@ -231,6 +232,17 @@ export function HarmonyShell({
     setReplyingTo(message);
   }, []);
 
+  const handlePinActionStart = useCallback(() => {
+    setIsPinsOpen(false);
+  }, []);
+
+  const handlePinToggle = useCallback((messageId: string, pinned: boolean) => {
+    setLocalMessages(prev =>
+      prev.map(message => (message.id === messageId ? { ...message, pinned } : message)),
+    );
+    setPinsRefreshKey(prev => prev + 1);
+  }, []);
+
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
   }, []);
@@ -259,7 +271,15 @@ export function HarmonyShell({
   const handleRealTimeEdited = useCallback(
     (msg: Message) => {
       if (msg.channelId !== currentChannel.id) return;
-      setLocalMessages(prev => prev.map(m => (m.id === msg.id ? msg : m)));
+      let pinStateChanged = false;
+      setLocalMessages(prev =>
+        prev.map(m => {
+          if (m.id !== msg.id) return m;
+          pinStateChanged = Boolean(m.pinned) !== Boolean(msg.pinned);
+          return msg;
+        }),
+      );
+      if (pinStateChanged) setPinsRefreshKey(prev => prev + 1);
     },
     [currentChannel.id],
   );
@@ -502,6 +522,8 @@ export function HarmonyShell({
                     serverId={currentServer.id}
                     canPin={canPin}
                     onReplyClick={handleReplyClick}
+                    onPinActionStart={handlePinActionStart}
+                    onPinToggle={handlePinToggle}
                   />
                   <MessageInput
                     channelId={currentChannel.id}
@@ -527,6 +549,7 @@ export function HarmonyShell({
                 serverId={currentServer.id}
                 channelName={currentChannel.name}
                 isOpen={isPinsOpen}
+                refreshKey={pinsRefreshKey}
                 onClose={() => setIsPinsOpen(false)}
               />
             )}

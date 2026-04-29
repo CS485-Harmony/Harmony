@@ -114,7 +114,12 @@ function ReplyBanner({ parentMessage }: { parentMessage: NonNullable<Message['pa
       className='mb-0.5 flex min-w-0 items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors max-w-full'
       aria-label={`Jump to replied message from ${parentMessage.author.displayName ?? parentMessage.author.username}`}
     >
-      <svg className='h-3 w-3 flex-shrink-0 rotate-180' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+      <svg
+        className='h-3 w-3 flex-shrink-0 rotate-180'
+        viewBox='0 0 24 24'
+        fill='currentColor'
+        aria-hidden='true'
+      >
         <path d='M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z' />
       </svg>
       {parentMessage.isDeleted ? (
@@ -167,6 +172,8 @@ function ActionBar({
   isOwnMessage,
   onEditClick,
   onReplyClick,
+  onPinActionStart,
+  onPinToggle,
 }: {
   messageId: string;
   serverId?: string;
@@ -175,6 +182,8 @@ function ActionBar({
   isOwnMessage?: boolean;
   onEditClick?: () => void;
   onReplyClick?: () => void;
+  onPinActionStart?: () => void;
+  onPinToggle?: (messageId: string, pinned: boolean) => void;
 }) {
   const { isAuthenticated } = useAuth();
   const router = useRouter();
@@ -210,6 +219,8 @@ function ActionBar({
 
   const handlePinToggle = useCallback(async () => {
     if (!serverId) return;
+    const nextPinned = !isPinned;
+    onPinActionStart?.();
     setIsMoreOpen(false);
     setPinState('loading');
     const verb = isPinned ? 'unpin' : 'pin';
@@ -218,7 +229,8 @@ function ActionBar({
         ? await unpinMessageAction(messageId, serverId)
         : await pinMessageAction(messageId, serverId);
       if (result.ok) {
-        setIsPinned(prev => !prev);
+        setIsPinned(nextPinned);
+        onPinToggle?.(messageId, nextPinned);
         setPinState('success');
         if (successTimerRef.current) clearTimeout(successTimerRef.current);
         successTimerRef.current = setTimeout(() => setPinState('idle'), 2000);
@@ -244,7 +256,7 @@ function ActionBar({
         setPinErrorMsg('');
       }, 3000);
     }
-  }, [isPinned, messageId, serverId]);
+  }, [isPinned, messageId, onPinActionStart, onPinToggle, serverId]);
 
   return (
     <div className='absolute -top-3 right-4 z-10 flex items-center rounded-md border border-white/10 bg-[#2f3136] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'>
@@ -330,7 +342,9 @@ function ActionBar({
           </button>
 
           {isMoreOpen && (
-            <div className={`absolute right-0 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+            <div
+              className={`absolute right-0 min-w-[160px] rounded-md border border-white/10 bg-[#18191c] py-1 shadow-xl z-20 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+            >
               {isOwnMessage && (
                 <button
                   type='button'
@@ -381,6 +395,8 @@ export function MessageItem({
   canPin,
   serverId,
   onReplyClick,
+  onPinActionStart,
+  onPinToggle,
 }: {
   message: Message;
   /** Set to false for grouped follow-up messages from the same author. Hides the avatar and author line. */
@@ -391,6 +407,10 @@ export function MessageItem({
   serverId?: string;
   /** Called when the user clicks Reply on this message. */
   onReplyClick?: (message: Message) => void;
+  /** Called as soon as the user clicks pin/unpin for this message. */
+  onPinActionStart?: () => void;
+  /** Called when the user triggers a pin/unpin action for this message. */
+  onPinToggle?: (messageId: string, pinned: boolean) => void;
 }) {
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -495,6 +515,8 @@ export function MessageItem({
       isOwnMessage={isOwnMessage}
       onEditClick={handleEditClick}
       onReplyClick={handleReplyClick}
+      onPinActionStart={onPinActionStart}
+      onPinToggle={onPinToggle}
     />
   );
 
@@ -540,7 +562,11 @@ export function MessageItem({
         data-message-id={message.id}
         className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
       >
-        {message.parentMessage && <div className='ml-14 pt-1'><ReplyBanner parentMessage={message.parentMessage} /></div>}
+        {message.parentMessage && (
+          <div className='ml-14 pt-1'>
+            <ReplyBanner parentMessage={message.parentMessage} />
+          </div>
+        )}
         <div className='flex gap-4'>
           {!isEditing && actionBar}
           {/* Spacer aligns content with the 40px avatar of the header row */}
@@ -573,7 +599,11 @@ export function MessageItem({
       data-message-id={message.id}
       className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
     >
-      {message.parentMessage && <div className='ml-14 pt-1'><ReplyBanner parentMessage={message.parentMessage} /></div>}
+      {message.parentMessage && (
+        <div className='ml-14 pt-1'>
+          <ReplyBanner parentMessage={message.parentMessage} />
+        </div>
+      )}
       <div className='flex gap-4'>
         {!isEditing && actionBar}
         {/* Avatar */}
