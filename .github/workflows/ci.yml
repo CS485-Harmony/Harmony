@@ -19,36 +19,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Detect non-log changes
+      - name: Detect relevant code/test changes
         id: changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            non_log:
-              - '!llm-logs/**'
-              - '**'
+            relevant:
+              - 'harmony-frontend/**'
+              - 'harmony-backend/**'
+              - 'tests/**'
 
-      - name: Skip frontend lint/build for llm-logs-only changes
-        if: steps.changes.outputs.non_log != 'true'
-        run: echo "llm-logs-only change detected; skipping frontend lint/build."
+      - name: Skip frontend lint/build for non-code changes
+        if: steps.changes.outputs.relevant != 'true'
+        run: echo "No changes under harmony-frontend/, harmony-backend/, or tests/; skipping frontend lint/build."
 
       - uses: actions/setup-node@v4
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: harmony-frontend/package-lock.json
 
       - name: Install dependencies
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: npm ci
 
       - name: Lint
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: npm run lint
 
       - name: Build
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: npm run build
 
   backend-lint-build:
@@ -60,38 +61,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Detect non-log changes
+      - name: Detect relevant code/test changes
         id: changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            non_log:
-              - '!llm-logs/**'
-              - '**'
+            relevant:
+              - 'harmony-frontend/**'
+              - 'harmony-backend/**'
+              - 'tests/**'
 
-      - name: Skip backend lint/build for llm-logs-only changes
-        if: steps.changes.outputs.non_log != 'true'
-        run: echo "llm-logs-only change detected; skipping backend lint/build."
+      - name: Skip backend lint/build for non-code changes
+        if: steps.changes.outputs.relevant != 'true'
+        run: echo "No changes under harmony-frontend/, harmony-backend/, or tests/; skipping backend lint/build."
 
       - uses: actions/setup-node@v4
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: harmony-backend/package-lock.json
 
       - name: Install dependencies
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: npm ci
 
       - name: Lint
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: npm run lint
 
       - name: Generate Prisma client
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: npx prisma generate
 
       - name: Build
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: npm run build

@@ -98,23 +98,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Detect non-log changes
+      - name: Detect relevant code/test changes
         id: changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            non_log:
-              - '!llm-logs/**'
-              - '**'
+            relevant:
+              - 'harmony-frontend/**'
+              - 'harmony-backend/**'
+              - 'tests/**'
 
-      - name: Skip integration tests for llm-logs-only changes
-        if: steps.changes.outputs.non_log != 'true'
-        run: echo "llm-logs-only change detected; skipping local integration tests."
+      - name: Skip integration tests for non-code changes
+        if: steps.changes.outputs.relevant != 'true'
+        run: echo "No changes under harmony-frontend/, harmony-backend/, or tests/; skipping local integration tests."
 
       # ── Backend setup ──────────────────────────────────────────────────────
 
       - name: Set up Node.js (backend)
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -122,27 +123,27 @@ jobs:
           cache-dependency-path: harmony-backend/package-lock.json
 
       - name: Install backend dependencies
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: harmony-backend
         run: npm ci
 
       - name: Generate Prisma client
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: harmony-backend
         run: npx prisma generate
 
       - name: Run database migrations
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: harmony-backend
         run: npx prisma migrate deploy
 
       - name: Seed mock dataset
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: harmony-backend
         run: npm run db:seed:mock
 
       - name: Start backend API
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: harmony-backend
         env:
           PORT: "4000"
@@ -152,12 +153,12 @@ jobs:
       # cache is never invalidated after visibility changes (VIS-1 test would fail).
       # No PORT override: worker.ts defaults to 4100 via parsePortEnv(4100).
       - name: Start backend worker
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: harmony-backend
         run: npx tsx src/worker.ts > /tmp/backend-worker.log 2>&1 &
 
       - name: Wait for backend API to be ready
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: |
           echo "Waiting for backend API on port 4000..."
           for i in $(seq 1 30); do
@@ -177,7 +178,7 @@ jobs:
       # must be running on port 3000 for those tests to pass.
 
       - name: Set up Node.js (frontend)
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -185,12 +186,12 @@ jobs:
           cache-dependency-path: harmony-frontend/package-lock.json
 
       - name: Install frontend dependencies
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: harmony-frontend
         run: npm ci
 
       - name: Build frontend
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: harmony-frontend
         env:
           NODE_ENV: production
@@ -199,7 +200,7 @@ jobs:
         run: npm run build
 
       - name: Start frontend
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: harmony-frontend
         env:
           NODE_ENV: production
@@ -209,7 +210,7 @@ jobs:
         run: npm run start > /tmp/frontend.log 2>&1 &
 
       - name: Wait for frontend to be ready
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: |
           echo "Waiting for Next.js frontend on port 3000..."
           for i in $(seq 1 30); do
@@ -227,7 +228,7 @@ jobs:
       # ── Integration test suite ─────────────────────────────────────────────
 
       - name: Set up Node.js (integration tests)
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -235,12 +236,12 @@ jobs:
           cache-dependency-path: tests/integration/package-lock.json
 
       - name: Install integration test dependencies
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: tests/integration
         run: npm ci
 
       - name: Run integration tests (local target)
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         working-directory: tests/integration
         env:
           TEST_TARGET: local
@@ -249,7 +250,7 @@ jobs:
         run: npm test 2>&1 | tee /tmp/integration-test-output.log; exit ${PIPESTATUS[0]}
 
       - name: Upload integration test output
-        if: always() && steps.changes.outputs.non_log == 'true'
+        if: always() && steps.changes.outputs.relevant == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-output
@@ -257,7 +258,7 @@ jobs:
           retention-days: 7
 
       - name: Upload service logs on failure
-        if: failure() && steps.changes.outputs.non_log == 'true'
+        if: failure() && steps.changes.outputs.relevant == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: service-logs

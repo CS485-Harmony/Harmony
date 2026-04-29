@@ -17,30 +17,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Detect non-log changes
+      - name: Detect relevant code/test changes
         id: changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            non_log:
-              - '!llm-logs/**'
-              - '**'
+            relevant:
+              - 'harmony-frontend/**'
+              - 'harmony-backend/**'
+              - 'tests/**'
 
-      - name: Skip frontend tests for llm-logs-only changes
-        if: steps.changes.outputs.non_log != 'true'
-        run: echo "llm-logs-only change detected; skipping frontend tests."
+      - name: Skip frontend tests for non-code changes
+        if: steps.changes.outputs.relevant != 'true'
+        run: echo "No changes under harmony-frontend/, harmony-backend/, or tests/; skipping frontend tests."
 
       - uses: actions/setup-node@v4
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: harmony-frontend/package-lock.json
 
       - name: Install dependencies
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: npm ci
 
       - name: Run frontend tests
-        if: steps.changes.outputs.non_log == 'true'
+        if: steps.changes.outputs.relevant == 'true'
         run: npm test
