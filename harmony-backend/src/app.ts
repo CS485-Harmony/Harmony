@@ -20,6 +20,40 @@ import { presenceService } from './services/presence.service';
 
 const logger = createLogger({ component: 'app', instanceId });
 
+function buildSendMessageLogContext(input: unknown) {
+  if (!input || typeof input !== 'object') {
+    return {};
+  }
+
+  const obj = input as {
+    serverId?: unknown;
+    channelId?: unknown;
+    content?: unknown;
+    attachments?: unknown;
+  };
+
+  const attachments = Array.isArray(obj.attachments) ? obj.attachments : [];
+
+  return {
+    serverId: typeof obj.serverId === 'string' ? obj.serverId : undefined,
+    channelId: typeof obj.channelId === 'string' ? obj.channelId : undefined,
+    contentLength: typeof obj.content === 'string' ? obj.content.length : undefined,
+    attachmentCount: attachments.length,
+    attachmentOrigins: attachments
+      .map((att) => {
+        if (!att || typeof att !== 'object') return null;
+        const url = (att as { url?: unknown }).url;
+        if (typeof url !== 'string') return null;
+        try {
+          return new URL(url).origin;
+        } catch {
+          return 'invalid-url';
+        }
+      })
+      .filter((origin): origin is string => origin !== null),
+  };
+}
+
 /**
  * Creates one Redis store per rate-limit route in production.
  * Each store gets a unique prefix so login/register/refresh counters don't
@@ -175,7 +209,19 @@ export function createApp(options: CreateAppOptions = {}) {
     createExpressMiddleware({
       router: appRouter,
       createContext,
-      onError({ error, path }) {
+      onError({ error, path, input }) {
+        if (path === 'message.sendMessage' && error.code === 'BAD_REQUEST') {
+          logger.warn(
+            {
+              path,
+              trpcCode: error.code,
+              errorMessage: error.message,
+              ...buildSendMessageLogContext(input),
+            },
+            'message.sendMessage rejected with BAD_REQUEST',
+          );
+        }
+
         // Only log unexpected server errors; auth/validation errors (4xx) are routine
         if (error.code === 'INTERNAL_SERVER_ERROR') {
           logger.error({ err: error, path }, 'Unhandled tRPC error');
