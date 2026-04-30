@@ -210,6 +210,17 @@ export function createApp(options: CreateAppOptions = {}) {
       router: appRouter,
       createContext,
       onError({ error, path, input }) {
+        if (error.code !== 'INTERNAL_SERVER_ERROR') {
+          logger.warn(
+            {
+              path,
+              trpcCode: error.code,
+              errorMessage: error.message,
+            },
+            'tRPC request failed',
+          );
+        }
+
         if (path === 'message.sendMessage' && error.code === 'BAD_REQUEST') {
           logger.warn(
             {
@@ -222,7 +233,7 @@ export function createApp(options: CreateAppOptions = {}) {
           );
         }
 
-        // Only log unexpected server errors; auth/validation errors (4xx) are routine
+        // Unexpected server errors include stack/cause via serializer.
         if (error.code === 'INTERNAL_SERVER_ERROR') {
           logger.error({ err: error, path }, 'Unhandled tRPC error');
         }
