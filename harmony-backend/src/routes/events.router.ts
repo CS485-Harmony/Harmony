@@ -64,15 +64,25 @@ function ticketKey(nonce: string): string {
 }
 
 /**
+ * Atomically read and delete the ticket key so concurrent requests cannot both
+ * redeem the same one-shot nonce. Lua works on all Redis versions (GETDEL alone is 6.2+).
+ */
+const REDEEM_TICKET_LUA = `
+local v = redis.call('GET', KEYS[1])
+if v == false then return false end
+redis.call('DEL', KEYS[1])
+return v
+`;
+
+/**
  * Exchange a one-shot nonce for the userId it was issued for, then delete it.
  * Returns null if the nonce does not exist or has expired.
  */
 async function redeemTicket(nonce: string): Promise<string | null> {
   const key = ticketKey(nonce);
-  const userId = await redis.get(key);
-  if (!userId) return null;
-  await redis.del(key);
-  return userId;
+  const raw = (await redis.eval(REDEEM_TICKET_LUA, 1, key)) as string | boolean | null;
+  if (raw === false || raw == null) return null;
+  return typeof raw === 'string' ? raw : String(raw);
 }
 
 // ─── Ticket issuance endpoint ─────────────────────────────────────────────────

@@ -10,11 +10,12 @@ import request from 'supertest';
 import { createApp } from '../src/app';
 import { eventBus } from '../src/events/eventBus';
 import { prisma } from '../src/db/prisma';
+import { redis } from '../src/db/redis';
 import { createDeferred, waitFor } from './helpers/async';
+import { seedSseTestTicket, SSE_TEST_TICKET } from './helpers/redisTicketJestMock';
 import type { Express } from 'express';
 import type { ChannelCreatedPayload, MessageCreatedPayload } from '../src/events/eventTypes';
 
-const VALID_TOKEN = 'valid-token';
 const VALID_SERVER_ID = '550e8400-e29b-41d4-a716-446655440001';
 const CREATED_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440009';
 
@@ -80,6 +81,12 @@ jest.mock('../src/middleware/rate-limit.middleware', () => ({
   createPublicRateLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
+jest.mock('../src/db/redis', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Jest mock factory must resolve after hoisting
+  const { redisTicketMockFactory } = require('./helpers/redisTicketJestMock');
+  return redisTicketMockFactory();
+});
+
 // ─── SSE helper ───────────────────────────────────────────────────────────────
 
 function sseGet(
@@ -133,6 +140,7 @@ afterAll((done) => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  seedSseTestTicket(redis as unknown as { set: jest.Mock });
   mockSubscribe.mockReturnValue({ unsubscribe: jest.fn(), ready: Promise.resolve() });
   (prisma.server.findUnique as jest.Mock).mockResolvedValue({ id: VALID_SERVER_ID });
   (prisma.serverMember.findFirst as jest.Mock).mockResolvedValue({ userId: 'test-user-id' });
@@ -155,7 +163,7 @@ beforeEach(() => {
 // ─── SSE headers ──────────────────────────────────────────────────────────────
 
 describe('GET /api/events/server/:serverId — SSE headers', () => {
-  const sseUrl = (id: string) => `/api/events/server/${id}?token=${VALID_TOKEN}`;
+  const sseUrl = (id: string) => `/api/events/server/${id}?ticket=${SSE_TEST_TICKET}`;
 
   it('sets Content-Type: text/event-stream', async () => {
     const { headers } = await sseGet(server, sseUrl(VALID_SERVER_ID));
@@ -188,7 +196,7 @@ describe('GET /api/events/server/:serverId — SSE headers', () => {
 });
 
 describe('GET /api/events/server/:serverId — subscription readiness', () => {
-  const sseUrl = `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}`;
+  const sseUrl = `/api/events/server/${VALID_SERVER_ID}?ticket=${SSE_TEST_TICKET}`;
 
   it('waits for all server-scoped subscriptions before flushing SSE headers', async () => {
     const ready = createDeferred<void>();
@@ -364,7 +372,7 @@ describe('GET /api/events/server/:serverId — Last-Event-ID replay', () => {
   const REPLAY_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440020';
   const REPLAY_MESSAGE_ID = '550e8400-e29b-41d4-a716-446655440021';
   const lastEventId = '2026-04-19T09:59:00.000Z';
-  const sseUrlWithReplay = `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}&lastEventId=${encodeURIComponent(lastEventId)}`;
+  const sseUrlWithReplay = `/api/events/server/${VALID_SERVER_ID}?ticket=${SSE_TEST_TICKET}&lastEventId=${encodeURIComponent(lastEventId)}`;
 
   it('replays message:created events missed during the reconnect gap', async () => {
     (prisma.channel.findMany as jest.Mock).mockResolvedValue([{ id: REPLAY_CHANNEL_ID }]);
@@ -509,7 +517,7 @@ describe('GET /api/events/server/:serverId — input validation', () => {
   it('accepts a valid UUID-formatted serverId and returns 200', async () => {
     const { statusCode } = await sseGet(
       server,
-      `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}`,
+      `/api/events/server/${VALID_SERVER_ID}?ticket=${SSE_TEST_TICKET}`,
     );
     expect(statusCode).toBe(200);
   });
@@ -518,18 +526,15 @@ describe('GET /api/events/server/:serverId — input validation', () => {
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 describe('GET /api/events/server/:serverId — auth', () => {
-  it('returns 401 when token is missing', async () => {
+  it('returns 401 when ticket is missing', async () => {
     const res = await request(app).get(`/api/events/server/${VALID_SERVER_ID}`);
     expect(res.status).toBe(401);
   });
 
-  it('returns 401 when token is invalid', async () => {
-    const { authService } = await import('../src/services/auth.service');
-    (authService.verifyAccessToken as jest.Mock).mockImplementationOnce(() => {
-      throw new Error('invalid token');
-    });
-
-    const res = await request(app).get(`/api/events/server/${VALID_SERVER_ID}?token=bad-token`);
+  it('returns 401 when ticket is invalid or already redeemed', async () => {
+    const res = await request(app).get(
+      `/api/events/server/${VALID_SERVER_ID}?ticket=11111111-1111-4111-8111-111111111111`,
+    );
     expect(res.status).toBe(401);
   });
 });
@@ -541,7 +546,7 @@ describe('GET /api/events/server/:serverId — authorisation', () => {
     (prisma.server.findUnique as jest.Mock).mockResolvedValueOnce(null);
 
     const res = await request(app).get(
-      `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}`,
+      `/api/events/server/${VALID_SERVER_ID}?ticket=${SSE_TEST_TICKET}`,
     );
     expect(res.status).toBe(404);
   });
@@ -550,7 +555,7 @@ describe('GET /api/events/server/:serverId — authorisation', () => {
     (prisma.serverMember.findFirst as jest.Mock).mockResolvedValueOnce(null);
 
     const res = await request(app).get(
-      `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}`,
+      `/api/events/server/${VALID_SERVER_ID}?ticket=${SSE_TEST_TICKET}`,
     );
     expect(res.status).toBe(403);
   });
@@ -565,7 +570,7 @@ describe('GET /api/events/server/:serverId — subscription readiness', () => {
     mockSubscribe.mockReturnValue({ unsubscribe: jest.fn(), ready: Promise.resolve() });
 
     const res = await request(app).get(
-      `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}`,
+      `/api/events/server/${VALID_SERVER_ID}?ticket=${SSE_TEST_TICKET}`,
     );
 
     expect(res.status).toBe(503);
@@ -588,7 +593,7 @@ describe('GET /api/events/server/:serverId — subscription readiness', () => {
     mockSubscribe.mockReturnValue({ unsubscribe: jest.fn(), ready: Promise.resolve() });
 
     const res = await request(app).get(
-      `/api/events/server/${VALID_SERVER_ID}?token=${VALID_TOKEN}`,
+      `/api/events/server/${VALID_SERVER_ID}?ticket=${SSE_TEST_TICKET}`,
     );
 
     // Headers must NOT have been flushed — client receives a proper 503 JSON response.

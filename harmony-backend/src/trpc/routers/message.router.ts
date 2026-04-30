@@ -15,6 +15,30 @@ function getAllowedAttachmentBase(): string | null {
   return process.env.LOCAL_UPLOAD_BASE_URL ?? 'http://localhost:4000';
 }
 
+/**
+ * Reject prefix-stripping tricks (e.g. https://allowed.example.com.evil/...) by
+ * comparing URL origins and, when the allowlist has a path, requiring a path prefix.
+ */
+function isAllowedAttachmentUrl(attUrl: string, allowedBase: string): boolean {
+  let allowed: URL;
+  let candidate: URL;
+  try {
+    allowed = new URL(allowedBase);
+    candidate = new URL(attUrl);
+  } catch {
+    return false;
+  }
+  if (candidate.origin !== allowed.origin) {
+    return false;
+  }
+  const basePath = allowed.pathname.replace(/\/$/, '') || '';
+  if (!basePath) {
+    return true;
+  }
+  const p = candidate.pathname;
+  return p === basePath || p.startsWith(`${basePath}/`);
+}
+
 // sizeBytes is accepted as a plain number (JSON-safe).
 // The service layer casts it to BigInt before writing to Prisma.
 const AttachmentInputSchema = z.object({
@@ -62,7 +86,7 @@ export const messageRouter = router({
         const allowedBase = getAllowedAttachmentBase();
         if (allowedBase) {
           for (const att of input.attachments) {
-            if (!att.url.startsWith(allowedBase)) {
+            if (!isAllowedAttachmentUrl(att.url, allowedBase)) {
               throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid attachment URL' });
             }
           }

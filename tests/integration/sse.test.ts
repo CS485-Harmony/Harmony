@@ -10,18 +10,32 @@
 import { BACKEND_URL, LOCAL_SEEDS, localOnlyDescribe } from './env';
 import { login, register } from './helpers/auth';
 
+/** One-shot SSE nonce from POST /api/events/ticket (JWT cannot live in query strings). */
+async function getSseTicket(accessToken: string): Promise<string> {
+  const res = await fetch(`${BACKEND_URL}/api/events/ticket`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`SSE ticket issuance failed: HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as { ticket?: string };
+  if (!body.ticket) throw new Error('SSE ticket response missing ticket field');
+  return body.ticket;
+}
+
 // ─── Cloud-read-only smoke ────────────────────────────────────────────────────
 
 describe('SSE Smoke (cloud-read-only)', () => {
   // SSE-SMOKE-1: verify the SSE server endpoint responds with correct headers.
   // We can only test a known server ID in cloud mode if CLOUD_TEST_SERVER_ID is set.
-  test('SSE-SMOKE-1: SSE server endpoint returns correct response headers when token provided', async () => {
+  test('SSE-SMOKE-1: SSE server endpoint returns correct response headers when ticket provided', async () => {
     const serverId = process.env.CLOUD_TEST_SERVER_ID;
     const token = process.env.CLOUD_TEST_ACCESS_TOKEN;
 
     if (!serverId || !token) {
       // Without a known server ID and token, only verify the endpoint is mounted.
-      // Send a request without token to check it returns 401 (not 404).
+      // Send a request without ticket to check it returns 401 (not 404).
       const fakeServerId = '00000000-0000-0000-0000-000000000000';
       const res = await fetch(
         `${BACKEND_URL}/api/events/server/${fakeServerId}`,
@@ -38,8 +52,9 @@ describe('SSE Smoke (cloud-read-only)', () => {
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
     try {
+      const ticket = await getSseTicket(token);
       const res = await fetch(
-        `${BACKEND_URL}/api/events/server/${serverId}?token=${token}`,
+        `${BACKEND_URL}/api/events/server/${serverId}?ticket=${encodeURIComponent(ticket)}`,
         { signal: controller.signal },
       );
       clearTimeout(timeoutId);
@@ -86,8 +101,9 @@ localOnlyDescribe('SSE (local-only)', () => {
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
     try {
+      const ticket = await getSseTicket(accessToken);
       const res = await fetch(
-        `${BACKEND_URL}/api/events/channel/${channelId}?token=${accessToken}`,
+        `${BACKEND_URL}/api/events/channel/${channelId}?ticket=${encodeURIComponent(ticket)}`,
         { signal: controller.signal },
       );
       clearTimeout(timeoutId);
@@ -132,6 +148,7 @@ localOnlyDescribe('SSE (local-only)', () => {
       freshUsername,
       'TestPass123!',
     );
+    const freshTicket = await getSseTicket(freshToken);
 
     // Look up a channel from open-source-hub (not auto-joined on registration).
     const nonDefaultChannelRes = await fetch(
@@ -148,7 +165,7 @@ localOnlyDescribe('SSE (local-only)', () => {
 
     try {
       const res = await fetch(
-        `${BACKEND_URL}/api/events/channel/${nonDefaultChannelId}?token=${freshToken}`,
+        `${BACKEND_URL}/api/events/channel/${nonDefaultChannelId}?ticket=${encodeURIComponent(freshTicket)}`,
         { signal: controller.signal },
       );
       clearTimeout(timeoutId);
@@ -174,8 +191,9 @@ localOnlyDescribe('SSE (local-only)', () => {
 
     return new Promise<void>(async (resolve, reject) => {
       try {
+        const ticket = await getSseTicket(accessToken);
         const res = await fetch(
-          `${BACKEND_URL}/api/events/channel/${channelId}?token=${accessToken}`,
+          `${BACKEND_URL}/api/events/channel/${channelId}?ticket=${encodeURIComponent(ticket)}`,
           { signal: controller.signal },
         );
 
@@ -242,8 +260,9 @@ localOnlyDescribe('SSE (local-only)', () => {
 
     return new Promise<void>(async (resolve, reject) => {
       try {
+        const ticket = await getSseTicket(accessToken);
         const res = await fetch(
-          `${BACKEND_URL}/api/events/server/${serverId}?token=${accessToken}`,
+          `${BACKEND_URL}/api/events/server/${serverId}?ticket=${encodeURIComponent(ticket)}`,
           { signal: controller.signal },
         );
 
@@ -310,8 +329,9 @@ localOnlyDescribe('SSE (local-only)', () => {
 
     return new Promise<void>(async (resolve, reject) => {
       try {
+        const ticket = await getSseTicket(accessToken);
         const res = await fetch(
-          `${BACKEND_URL}/api/events/channel/${channelId}?token=${accessToken}`,
+          `${BACKEND_URL}/api/events/channel/${channelId}?ticket=${encodeURIComponent(ticket)}`,
           { signal: controller.signal },
         );
 
