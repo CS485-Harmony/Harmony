@@ -207,11 +207,13 @@ function ReactionList({
             aria-pressed={alreadyReacted}
             onClick={() => onReactionClick?.(r.emoji, alreadyReacted)}
             className={cn(
-              'flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors',
-              alreadyReacted
-                ? 'border-[#5865f2]/60 bg-[#5865f2]/20 text-[#5865f2] hover:bg-[#5865f2]/30'
-                : 'border-white/10 bg-white/5 text-gray-300 hover:bg-white/10',
-              isHighlighted && 'animate-bounce',
+              'flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors duration-300',
+              alreadyReacted && !isHighlighted &&
+                'border-[#5865f2]/60 bg-[#5865f2]/20 text-[#5865f2] hover:bg-[#5865f2]/30',
+              alreadyReacted && isHighlighted &&
+                'border-[#5865f2] bg-[#5865f2]/50 text-white',
+              !alreadyReacted &&
+                'border-white/10 bg-white/5 text-gray-300 hover:bg-white/10',
             )}
           >
             <span>{r.emoji}</span>
