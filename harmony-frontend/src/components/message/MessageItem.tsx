@@ -46,12 +46,27 @@ function getEmbedVideoUrl(url: string): string | null {
   }
 }
 
-function MessageContent({ content }: { content: string }) {
+function MessageContent({
+  content,
+  currentUsername,
+  channels,
+  serverSlug,
+}: {
+  content: string;
+  currentUsername?: string;
+  channels?: { slug: string; name: string }[];
+  serverSlug?: string;
+}) {
   const matches = [...content.matchAll(URL_PATTERN)];
   if (matches.length === 0) {
     return (
       <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-        <MentionText content={content} currentUsername={undefined} />
+        <MentionText
+          content={content}
+          currentUsername={currentUsername}
+          channels={channels}
+          serverSlug={serverSlug}
+        />
       </p>
     );
   }
@@ -82,7 +97,12 @@ function MessageContent({ content }: { content: string }) {
     <div className='mt-0.5'>
       {textContent && (
         <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-          <MentionText content={textContent} currentUsername={undefined} />
+          <MentionText
+            content={textContent}
+            currentUsername={currentUsername}
+            channels={channels}
+            serverSlug={serverSlug}
+          />
         </p>
       )}
       {videoEmbeds.length > 0 && (
@@ -579,6 +599,9 @@ export function MessageItem({
   showHeader = true,
   canPin,
   serverId,
+  currentUsername,
+  channels,
+  serverSlug,
   onReplyClick,
   onPinToggle,
 }: {
@@ -589,6 +612,12 @@ export function MessageItem({
   canPin?: boolean;
   /** Required for pin actions. Passed alongside canPin. */
   serverId?: string;
+  /** The authenticated user's username — used for self-mention detection and highlight. */
+  currentUsername?: string;
+  /** Channels in the current server — used to resolve #channel-name pills. */
+  channels?: { slug: string; name: string }[];
+  /** Current server slug — used for #channel pill hrefs. */
+  serverSlug?: string;
   /** Called when the user clicks Reply on this message. */
   onReplyClick?: (message: Message) => void;
   /** Called when the user triggers a pin/unpin action for this message. */
@@ -634,6 +663,11 @@ export function MessageItem({
   }
 
   const isOwnMessage = !!user && user.id === message.author.id;
+  const isMentioned =
+    !!currentUsername &&
+    (localContent ?? message.content)
+      .toLowerCase()
+      .includes('@' + currentUsername.toLowerCase());
 
   const handleReactionAdd = useCallback(
     (emoji: string) => {
@@ -901,7 +935,10 @@ export function MessageItem({
     return (
       <div
         data-message-id={message.id}
-        className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
+        className={cn(
+          'group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]',
+          isMentioned && 'border-l-2 border-yellow-400 bg-yellow-500/[0.06] hover:bg-yellow-500/[0.08]',
+        )}
       >
         {message.parentMessage && (
           <div className='ml-14 pt-1'>
@@ -921,7 +958,12 @@ export function MessageItem({
               editUi
             ) : (
               <div>
-                <MessageContent content={localContent ?? message.content} />
+                <MessageContent
+                  content={localContent ?? message.content}
+                  currentUsername={currentUsername}
+                  channels={channels}
+                  serverSlug={serverSlug}
+                />
                 {(message.editedAt || localContent !== undefined) && (
                   <span className='ml-1 text-[10px] text-gray-500'>(edited)</span>
                 )}
@@ -945,7 +987,10 @@ export function MessageItem({
   return (
     <div
       data-message-id={message.id}
-      className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
+      className={cn(
+        'group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]',
+        isMentioned && 'border-l-2 border-yellow-400 bg-yellow-500/[0.06] hover:bg-yellow-500/[0.08]',
+      )}
     >
       {message.parentMessage && (
         <div className='ml-14 pt-1'>
@@ -994,7 +1039,12 @@ export function MessageItem({
           {isEditing ? (
             editUi
           ) : (
-            <MessageContent content={localContent ?? message.content} />
+            <MessageContent
+              content={localContent ?? message.content}
+              currentUsername={currentUsername}
+              channels={channels}
+              serverSlug={serverSlug}
+            />
           )}
           <AttachmentList attachments={message.attachments} />
           <ReactionList

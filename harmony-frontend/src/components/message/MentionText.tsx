@@ -1,55 +1,94 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 
 export interface MentionTextProps {
   content: string;
   /** Current user's username — self-mentions get the accent highlight. */
   currentUsername?: string;
+  /** Channels in the current server — used to resolve #channel-name pills. */
+  channels?: { slug: string; name: string }[];
+  /** Current server slug — used to build href for #channel pills. */
+  serverSlug?: string;
 }
 
 /**
- * Renders message content with @username tokens styled as inline mention pills.
- * Self-mentions receive an accent background; other mentions are styled subtly.
- * Pass `currentUsername` from a parent component that already holds auth state.
+ * Renders message content with @username and #channel-name tokens styled as pills.
+ * Self-mentions get an accent background. #channel pills are clickable when the
+ * channel exists in the current server; otherwise they render non-navigable.
  */
-export function MentionText({ content, currentUsername }: MentionTextProps) {
-  if (!content.includes('@')) {
+export function MentionText({ content, currentUsername, channels, serverSlug }: MentionTextProps) {
+  if (!content.includes('@') && !content.includes('#')) {
     return <>{content}</>;
   }
 
+  const channelMap = new Map(channels?.map((c) => [c.slug.toLowerCase(), c]) ?? []);
+
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
   let key = 0;
-  // Create a fresh regex per call so lastIndex state never bleeds between renders.
-  const re = /@([\w]{1,32})/g;
-  while ((match = re.exec(content)) !== null) {
-    const [full, username] = match;
-    const start = match.index;
 
+  // Single pass: match both @username and #channel-name tokens in source order.
+  const re = /(?:@([\w]{1,32})|#([\w-]{1,100}))/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = re.exec(content)) !== null) {
+    const start = match.index;
     if (start > lastIndex) {
       parts.push(content.slice(lastIndex, start));
     }
 
-    const isSelf =
-      currentUsername && username.toLowerCase() === currentUsername.toLowerCase();
+    if (match[1] !== undefined) {
+      // @username pill
+      const username = match[1];
+      const isSelf =
+        !!currentUsername && username.toLowerCase() === currentUsername.toLowerCase();
+      parts.push(
+        <span
+          key={key++}
+          className={
+            isSelf
+              ? 'rounded px-0.5 font-semibold text-white bg-indigo-500/70 hover:bg-indigo-500 cursor-default'
+              : 'rounded px-0.5 font-semibold text-indigo-300 bg-indigo-500/20 hover:bg-indigo-500/40 cursor-default'
+          }
+          title={`@${username}`}
+        >
+          @{username}
+        </span>,
+      );
+    } else {
+      // #channel-name pill
+      const rawSlug = match[2];
+      const channel = channelMap.get(rawSlug.toLowerCase());
+      const pillClass =
+        'rounded px-0.5 font-semibold text-indigo-300 bg-indigo-500/20 hover:bg-indigo-500/40';
 
-    parts.push(
-      <span
-        key={key++}
-        className={
-          isSelf
-            ? 'rounded px-0.5 font-semibold text-white bg-indigo-500/70 hover:bg-indigo-500 cursor-default'
-            : 'rounded px-0.5 font-semibold text-indigo-300 bg-indigo-500/20 hover:bg-indigo-500/40 cursor-default'
-        }
-        title={`@${username}`}
-      >
-        {full}
-      </span>,
-    );
+      if (channel && serverSlug) {
+        parts.push(
+          <Link
+            key={key++}
+            href={`/c/${serverSlug}/${channel.slug}`}
+            className={`${pillClass} cursor-pointer`}
+            title={`#${channel.name}`}
+          >
+            #{rawSlug}
+          </Link>,
+        );
+      } else {
+        parts.push(
+          <span
+            key={key++}
+            className={`${pillClass} cursor-default`}
+            title={`#${rawSlug}`}
+          >
+            #{rawSlug}
+          </span>,
+        );
+      }
+    }
 
-    lastIndex = start + full.length;
+    lastIndex = match.index + match[0].length;
   }
 
   if (lastIndex < content.length) {

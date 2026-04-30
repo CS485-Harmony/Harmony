@@ -73,6 +73,12 @@ interface MessageListProps {
   serverId?: string;
   /** When true, shows the pin/unpin option on message hover. Grant to MODERATOR+. */
   canPin?: boolean;
+  /** Authenticated user's username — forwarded to MessageItem for self-mention highlight. */
+  currentUsername?: string;
+  /** Channels in the current server — forwarded for #channel pill resolution. */
+  channels?: { slug: string; name: string }[];
+  /** Current server slug — forwarded for #channel pill hrefs. */
+  serverSlug?: string;
   /** Called when the user clicks Reply on a message. */
   onReplyClick?: (message: Message) => void;
   /** Called when the user clicks pin/unpin on a message. */
@@ -84,6 +90,9 @@ export function MessageList({
   messages,
   serverId,
   canPin,
+  currentUsername,
+  channels,
+  serverSlug,
   onReplyClick,
   onPinToggle,
 }: MessageListProps) {
@@ -165,6 +174,9 @@ export function MessageList({
                   showHeader={mi === 0}
                   serverId={serverId}
                   canPin={canPin}
+                  currentUsername={currentUsername}
+                  channels={channels}
+                  serverSlug={serverSlug}
                   onReplyClick={onReplyClick}
                   onPinToggle={onPinToggle}
                 />

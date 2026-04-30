@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { getAccessToken, fetchSseTicket } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
@@ -19,6 +20,7 @@ interface Notification {
     isDeleted: boolean;
     author: { id: string; username: string; displayName: string; avatarUrl: string | null };
   };
+  channel?: { slug: string; name: string; server: { slug: string; name: string } };
 }
 
 interface NotificationBellProps {
@@ -54,6 +56,7 @@ function formatRelativeTime(ts: string): string {
 }
 
 export function NotificationBell({ userId }: NotificationBellProps) {
+  const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
@@ -243,42 +246,63 @@ export function NotificationBell({ userId }: NotificationBellProps) {
               </li>
             )}
             {!isLoading &&
-              notifications.map((n) => (
-                <li
-                  key={n.id}
-                  className={cn(
-                    'flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white/5',
-                    !n.read && 'bg-indigo-500/10',
-                  )}
-                >
-                  <div className='flex-1 min-w-0'>
-                    <p className='text-xs text-gray-300'>
-                      <span className='font-semibold text-white'>
-                        @{n.message.author.username}
-                      </span>{' '}
-                      mentioned you
-                    </p>
-                    {n.message.content && !n.message.isDeleted && (
-                      <p className='mt-0.5 truncate text-xs text-gray-400'>
-                        {n.message.content}
-                      </p>
-                    )}
-                    <p className='mt-0.5 text-[10px] text-gray-500'>
-                      {formatRelativeTime(n.createdAt)}
-                    </p>
-                  </div>
-                  {!n.read && (
+              notifications.map((n) => {
+                const serverSlug = n.channel?.server?.slug;
+                const channelSlug = n.channel?.slug;
+                const isNavigable = !!(serverSlug && channelSlug);
+                const handleRowClick = () => {
+                  if (!n.read) markAsRead(n.id);
+                  setIsOpen(false);
+                  if (isNavigable) router.push(`/c/${serverSlug}/${channelSlug}`);
+                };
+                return (
+                  <li key={n.id}>
                     <button
                       type='button'
-                      onClick={() => markAsRead(n.id)}
-                      title='Mark as read'
-                      className='mt-0.5 flex-shrink-0 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors'
+                      onClick={handleRowClick}
+                      className={cn(
+                        'flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5',
+                        !n.read && 'bg-indigo-500/10',
+                        isNavigable ? 'cursor-pointer' : 'cursor-default',
+                      )}
                     >
-                      ✓
+                      <div className='flex-1 min-w-0'>
+                        <p className='text-xs text-gray-300'>
+                          <span className='font-semibold text-white'>
+                            @{n.message.author.username}
+                          </span>{' '}
+                          mentioned you
+                        </p>
+                        {n.channel && (
+                          <p className='mt-0.5 text-[10px] text-indigo-300'>
+                            in #{n.channel.name} · {n.channel.server.name}
+                          </p>
+                        )}
+                        {n.message.content && !n.message.isDeleted && (
+                          <p className='mt-0.5 truncate text-xs text-gray-400'>
+                            {n.message.content}
+                          </p>
+                        )}
+                        <p className='mt-0.5 text-[10px] text-gray-500'>
+                          {formatRelativeTime(n.createdAt)}
+                        </p>
+                      </div>
+                      {!n.read && (
+                        <span
+                          onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}
+                          role='button'
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); markAsRead(n.id); } }}
+                          title='Mark as read'
+                          className='mt-0.5 flex-shrink-0 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors'
+                        >
+                          ✓
+                        </span>
+                      )}
                     </button>
-                  )}
-                </li>
-              ))}
+                  </li>
+                );
+              })}
           </ul>
         </div>
       )}
