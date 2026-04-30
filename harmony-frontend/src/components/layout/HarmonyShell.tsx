@@ -272,7 +272,8 @@ export function HarmonyShell({
         prev.map(m => {
           if (m.id !== msg.id) return m;
           pinStateChanged = Boolean(m.pinned) !== Boolean(msg.pinned);
-          return msg;
+          // Preserve existing reactions — message:edited SSE doesn't carry them
+          return { ...msg, reactions: m.reactions };
         }),
       );
       if (pinStateChanged) setPinsRefreshKey(prev => prev + 1);
@@ -293,6 +294,59 @@ export function HarmonyShell({
       prev.map(s => (s.id === updatedServer.id ? { ...s, ...updatedServer } : s)),
     );
   }, []);
+
+  const handleReactionAdded = useCallback(
+    (data: { messageId: string; channelId: string; userId: string; emoji: string }) => {
+      if (data.channelId !== currentChannel.id) return;
+      setLocalMessages(prev =>
+        prev.map(m => {
+          if (m.id !== data.messageId) return m;
+          const existing = m.reactions?.find(r => r.emoji === data.emoji);
+          if (existing) {
+            // Guard against duplicate SSE delivery (e.g. optimistic update already applied)
+            if (existing.userIds.includes(data.userId)) return m;
+            return {
+              ...m,
+              reactions: m.reactions!.map(r =>
+                r.emoji === data.emoji
+                  ? { ...r, count: r.count + 1, userIds: [...r.userIds, data.userId] }
+                  : r,
+              ),
+            };
+          }
+          return {
+            ...m,
+            reactions: [...(m.reactions ?? []), { emoji: data.emoji, count: 1, userIds: [data.userId] }],
+          };
+        }),
+      );
+    },
+    [currentChannel.id],
+  );
+
+  const handleReactionRemoved = useCallback(
+    (data: { messageId: string; channelId: string; userId: string; emoji: string }) => {
+      if (data.channelId !== currentChannel.id) return;
+      setLocalMessages(prev =>
+        prev.map(m => {
+          if (m.id !== data.messageId) return m;
+          const existing = m.reactions?.find(r => r.emoji === data.emoji);
+          if (!existing) return m;
+          // Guard against duplicate SSE delivery
+          if (!existing.userIds.includes(data.userId)) return m;
+          const updated = existing.count <= 1
+            ? (m.reactions ?? []).filter(r => r.emoji !== data.emoji)
+            : m.reactions!.map(r =>
+                r.emoji === data.emoji
+                  ? { ...r, count: r.count - 1, userIds: r.userIds.filter(id => id !== data.userId) }
+                  : r,
+              );
+          return { ...m, reactions: updated };
+        }),
+      );
+    },
+    [currentChannel.id],
+  );
 
   // ── Real-time channel list updates ────────────────────────────────────────
 
@@ -419,6 +473,8 @@ export function HarmonyShell({
     onMessageEdited: isChannelLocked ? undefined : handleRealTimeEdited,
     onMessageDeleted: isChannelLocked ? undefined : handleRealTimeDeleted,
     onServerUpdated: handleServerUpdated,
+    onReactionAdded: isChannelLocked ? undefined : handleReactionAdded,
+    onReactionRemoved: isChannelLocked ? undefined : handleReactionRemoved,
     enabled: isAuthenticated,
   });
 

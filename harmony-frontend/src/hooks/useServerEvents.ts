@@ -73,6 +73,10 @@ export interface UseServerEventsOptions {
   onMessageDeleted?: (messageId: string, channelId: string) => void;
   /** Called when server metadata (name, icon, description) changes. Optional. */
   onServerUpdated?: (server: Server) => void;
+  /** Called when a reaction is added to a message in any channel of the server. Optional. */
+  onReactionAdded?: (data: { messageId: string; channelId: string; userId: string; emoji: string }) => void;
+  /** Called when a reaction is removed from a message in any channel of the server. Optional. */
+  onReactionRemoved?: (data: { messageId: string; channelId: string; userId: string; emoji: string }) => void;
   /** Set to false to disable the connection (e.g. for unauthenticated guests). Defaults to true. */
   enabled?: boolean;
 }
@@ -90,6 +94,8 @@ export function useServerEvents({
   onMessageEdited,
   onMessageDeleted,
   onServerUpdated,
+  onReactionAdded,
+  onReactionRemoved,
   enabled = true,
 }: UseServerEventsOptions): void {
   // Incrementing this triggers the effect to re-run with a fresh token after a
@@ -112,6 +118,8 @@ export function useServerEvents({
   const onMessageEditedRef = useRef(onMessageEdited);
   const onMessageDeletedRef = useRef(onMessageDeleted);
   const onServerUpdatedRef = useRef(onServerUpdated);
+  const onReactionAddedRef = useRef(onReactionAdded);
+  const onReactionRemovedRef = useRef(onReactionRemoved);
 
   useLayoutEffect(() => {
     onCreatedRef.current = onChannelCreated;
@@ -125,6 +133,8 @@ export function useServerEvents({
     onMessageEditedRef.current = onMessageEdited;
     onMessageDeletedRef.current = onMessageDeleted;
     onServerUpdatedRef.current = onServerUpdated;
+    onReactionAddedRef.current = onReactionAdded;
+    onReactionRemovedRef.current = onReactionRemoved;
   });
 
   useEffect(() => {
@@ -343,6 +353,48 @@ export function useServerEvents({
       }
     };
 
+    const handleReactionAdded = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          messageId: string;
+          channelId: string;
+          userId: string;
+          emoji: string;
+        };
+        onReactionAddedRef.current?.(payload);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'reaction:added',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
+    const handleReactionRemoved = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          messageId: string;
+          channelId: string;
+          userId: string;
+          emoji: string;
+        };
+        onReactionRemovedRef.current?.(payload);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'reaction:removed',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
       es.addEventListener('channel:created', handleCreated);
       es.addEventListener('channel:updated', handleUpdated);
       es.addEventListener('channel:deleted', handleDeleted);
@@ -354,6 +406,8 @@ export function useServerEvents({
       es.addEventListener('message:edited', handleMessageEdited);
       es.addEventListener('message:deleted', handleMessageDeleted);
       es.addEventListener('server:updated', handleServerUpdated);
+      es.addEventListener('reaction:added', handleReactionAdded);
+      es.addEventListener('reaction:removed', handleReactionRemoved);
       activeHandlers.push(
         ['channel:created', handleCreated],
         ['channel:updated', handleUpdated],
@@ -366,6 +420,8 @@ export function useServerEvents({
         ['message:edited', handleMessageEdited],
         ['message:deleted', handleMessageDeleted],
         ['server:updated', handleServerUpdated],
+        ['reaction:added', handleReactionAdded],
+        ['reaction:removed', handleReactionRemoved],
       );
 
       let everOpened = false;

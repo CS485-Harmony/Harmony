@@ -65,6 +65,21 @@ const logger = createLogger({ component: 'message-service' });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Group flat reaction rows into the `{ emoji, count, userIds }` shape expected by the frontend. */
+function groupReactions(raw: { emoji: string; userId: string }[]) {
+  const map = new Map<string, string[]>();
+  for (const r of raw) {
+    const users = map.get(r.emoji);
+    if (users) users.push(r.userId);
+    else map.set(r.emoji, [r.userId]);
+  }
+  return Array.from(map.entries()).map(([emoji, userIds]) => ({
+    emoji,
+    count: userIds.length,
+    userIds,
+  }));
+}
+
 /**
  * Cache key scoped to both server and channel so that private-channel entries
  * cannot be hit by users authorized on a different server.
@@ -125,7 +140,7 @@ export const messageService = {
     return cacheService.getOrRevalidate(
       cacheKey,
       async () => {
-        const messages = await messageRepository.findManyPaginated(
+        const messages = await messageRepository.findManyPaginatedWithReactions(
           { channelId, isDeleted: false },
           clampedLimit + 1,
           cursor,
@@ -136,7 +151,12 @@ export const messageService = {
         const page = hasMore ? messages.slice(0, clampedLimit) : messages;
         const nextCursor = hasMore ? page[page.length - 1].id : null;
 
-        return { messages: page, nextCursor, hasMore };
+        const messagesWithReactions = page.map(msg => ({
+          ...msg,
+          reactions: groupReactions(msg.reactions),
+        }));
+
+        return { messages: messagesWithReactions, nextCursor, hasMore };
       },
       { ttl: CacheTTL.channelMessages },
     );

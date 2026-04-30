@@ -30,6 +30,16 @@ export const MESSAGE_INCLUDE = {
   },
 } as const;
 
+const REACTION_SELECT = {
+  emoji: true,
+  userId: true,
+} as const;
+
+export const MESSAGE_WITH_REACTIONS_INCLUDE = {
+  ...MESSAGE_INCLUDE,
+  reactions: { select: REACTION_SELECT },
+} as const;
+
 export const messageRepository = {
   findByIdWithChannel(id: string, client: Client = prisma) {
     return client.message.findUnique({
@@ -59,6 +69,23 @@ export const messageRepository = {
       skip: cursor ? 1 : 0,
       orderBy,
       include: MESSAGE_INCLUDE,
+    });
+  },
+
+  findManyPaginatedWithReactions(
+    where: Prisma.MessageWhereInput,
+    take: number,
+    cursor: string | undefined,
+    orderBy: Prisma.MessageOrderByWithRelationInput,
+    client: Client = prisma,
+  ) {
+    return client.message.findMany({
+      where,
+      take,
+      cursor: cursor ? { id: cursor } : undefined,
+      skip: cursor ? 1 : 0,
+      orderBy,
+      include: MESSAGE_WITH_REACTIONS_INCLUDE,
     });
   },
 

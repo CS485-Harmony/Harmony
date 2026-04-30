@@ -66,6 +66,13 @@ function toFrontendMessage(raw: Record<string, unknown>, fallbackChannelId = '')
         : typeof raw.reply_count === 'number'
           ? raw.reply_count
           : 0,
+    reactions: Array.isArray(raw.reactions)
+      ? (raw.reactions as Array<Record<string, unknown>>).map(r => ({
+          emoji: r.emoji as string,
+          count: r.count as number,
+          userIds: r.userIds as string[],
+        }))
+      : [],
   };
 }
 

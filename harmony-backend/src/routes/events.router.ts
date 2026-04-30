@@ -37,6 +37,8 @@ import type {
   MemberLeftPayload,
   VisibilityChangedPayload,
   UserMentionedPayload,
+  ReactionAddedPayload,
+  ReactionRemovedPayload,
 } from '../events/eventTypes';
 
 export const eventsRouter = Router();
@@ -400,11 +402,39 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     },
   );
 
+  const reactionAddedSubscription = eventBus.subscribe(
+    EventChannels.REACTION_ADDED,
+    (payload: ReactionAddedPayload) => {
+      if (payload.channelId !== channelId) return;
+      writeEvent('reaction:added', {
+        messageId: payload.messageId,
+        channelId: payload.channelId,
+        userId: payload.userId,
+        emoji: payload.emoji,
+      });
+    },
+  );
+
+  const reactionRemovedSubscription = eventBus.subscribe(
+    EventChannels.REACTION_REMOVED,
+    (payload: ReactionRemovedPayload) => {
+      if (payload.channelId !== channelId) return;
+      writeEvent('reaction:removed', {
+        messageId: payload.messageId,
+        channelId: payload.channelId,
+        userId: payload.userId,
+        emoji: payload.emoji,
+      });
+    },
+  );
+
   const channelSubscriptions = [
     createdSubscription,
     editedSubscription,
     deletedSubscription,
     serverUpdatedSubscription,
+    reactionAddedSubscription,
+    reactionRemovedSubscription,
   ];
 
   // ── Replay messages missed during reconnect gap ──────────────────────────
@@ -815,6 +845,34 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     },
   );
   subscriptions.push(visibilityChangedSubscription);
+
+  const serverReactionAddedSubscription = eventBus.subscribe(
+    EventChannels.REACTION_ADDED,
+    (payload: ReactionAddedPayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+      writeEvent('reaction:added', {
+        messageId: payload.messageId,
+        channelId: payload.channelId,
+        userId: payload.userId,
+        emoji: payload.emoji,
+      });
+    },
+  );
+  subscriptions.push(serverReactionAddedSubscription);
+
+  const serverReactionRemovedSubscription = eventBus.subscribe(
+    EventChannels.REACTION_REMOVED,
+    (payload: ReactionRemovedPayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+      writeEvent('reaction:removed', {
+        messageId: payload.messageId,
+        channelId: payload.channelId,
+        userId: payload.userId,
+        emoji: payload.emoji,
+      });
+    },
+  );
+  subscriptions.push(serverReactionRemovedSubscription);
 
   // ── Replay messages missed during reconnect gap ──────────────────────────
   const serverReplayFrames = lastEventId
