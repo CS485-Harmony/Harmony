@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { getAccessToken, fetchSseTicket } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
@@ -55,8 +55,8 @@ function formatRelativeTime(ts: string): string {
 
 export function NotificationBell({ userId }: NotificationBellProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
+  const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
   const [isLoading, setIsLoading] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -67,7 +67,6 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     try {
       const data = await apiClient.trpcQuery<Notification[]>('notification.getNotifications');
       setNotifications(data ?? []);
-      setUnreadCount((data ?? []).filter((n) => !n.read).length);
     } catch {
       // ignore — network errors shouldn't crash the bell
     } finally {
@@ -136,7 +135,6 @@ export function NotificationBell({ userId }: NotificationBellProps) {
             },
           };
           setNotifications((prev) => [optimistic, ...prev].slice(0, 50));
-          setUnreadCount((c) => c + 1);
         } catch {
           // malformed payload — ignore
         }
@@ -172,9 +170,8 @@ export function NotificationBell({ userId }: NotificationBellProps) {
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
       );
-      setUnreadCount((c) => Math.max(0, c - 1));
     } catch {
-      // ignore
+      // ignore — non-critical, badge will self-correct on next load
     }
   };
 
@@ -182,9 +179,8 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     try {
       await apiClient.trpcMutation('notification.markAllAsRead');
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-      setUnreadCount(0);
     } catch {
-      // ignore
+      // ignore — non-critical, badge will self-correct on next load
     }
   };
 
