@@ -481,7 +481,7 @@ export function MessageInput({
           className='hidden'
           aria-hidden='true'
           onChange={handleFileChange}
-          accept='image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          accept='image/jpeg,image/png,image/gif,image/webp,video/mp4,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         />
 
         {/* Attachment button */}

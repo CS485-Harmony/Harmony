@@ -8,6 +8,8 @@
 import request from 'supertest';
 import { createApp } from '../src/app';
 import type { Express } from 'express';
+import { MIME_TO_EXT } from '../src/lib/storage/mime-types';
+import { storageProvider } from '../src/lib/storage';
 
 const VALID_TOKEN = 'valid-test-token';
 const TEST_USER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -51,6 +53,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   mockDetectMimeType.mockReset();
+  jest.clearAllMocks();
 });
 
 describe('POST /api/attachments/upload', () => {
@@ -150,5 +153,32 @@ describe('POST /api/attachments/upload', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.contentType).toBe('text/plain');
+  });
+
+  it('returns 201 for a valid MP4 upload', async () => {
+    mockDetectMimeType.mockResolvedValueOnce('video/mp4');
+
+    const mp4Buffer = Buffer.from('fake-mp4-data');
+    const res = await request(app)
+      .post('/api/attachments/upload')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .attach('file', mp4Buffer, {
+        filename: 'clip.mp4',
+        contentType: 'video/mp4',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.contentType).toBe('video/mp4');
+    expect(storageProvider.upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: 'clip.mp4',
+        contentType: 'video/mp4',
+        data: mp4Buffer,
+      }),
+    );
+  });
+
+  it('maps video/mp4 to the .mp4 storage extension', () => {
+    expect(MIME_TO_EXT['video/mp4']).toBe('.mp4');
   });
 });
