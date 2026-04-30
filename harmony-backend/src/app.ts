@@ -19,6 +19,8 @@ import { redis } from './db/redis';
 import { presenceService } from './services/presence.service';
 
 const logger = createLogger({ component: 'app', instanceId });
+const MAX_LOGGED_ATTACHMENT_ORIGINS = 5;
+const MAX_LOGGED_INPUT_KEYS = 20;
 
 function buildTrpcInputLogContext(input: unknown) {
   if (!input || typeof input !== 'object') {
@@ -35,6 +37,24 @@ function buildTrpcInputLogContext(input: unknown) {
   };
 
   const attachments = Array.isArray(obj.attachments) ? obj.attachments : [];
+  const attachmentOrigins = [
+    ...new Set(
+      attachments
+        .map((att) => {
+          if (!att || typeof att !== 'object') return null;
+          const url = (att as { url?: unknown }).url;
+          if (typeof url !== 'string') return null;
+          try {
+            return new URL(url).origin;
+          } catch {
+            return 'invalid-url';
+          }
+        })
+        .filter((origin): origin is string => origin !== null),
+    ),
+  ].slice(0, MAX_LOGGED_ATTACHMENT_ORIGINS);
+
+  const inputKeys = Object.keys(obj).sort().slice(0, MAX_LOGGED_INPUT_KEYS);
 
   return {
     serverId: typeof obj.serverId === 'string' ? obj.serverId : undefined,
@@ -44,19 +64,8 @@ function buildTrpcInputLogContext(input: unknown) {
     hasContent: typeof obj.content === 'string' ? obj.content.trim().length > 0 : undefined,
     contentLength: typeof obj.content === 'string' ? obj.content.length : undefined,
     attachmentCount: attachments.length,
-    attachmentOrigins: attachments
-      .map((att) => {
-        if (!att || typeof att !== 'object') return null;
-        const url = (att as { url?: unknown }).url;
-        if (typeof url !== 'string') return null;
-        try {
-          return new URL(url).origin;
-        } catch {
-          return 'invalid-url';
-        }
-      })
-      .filter((origin): origin is string => origin !== null),
-    inputKeys: Object.keys(obj).sort(),
+    attachmentOrigins,
+    inputKeys,
   };
 }
 
