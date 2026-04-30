@@ -10,7 +10,7 @@ const logger = createLogger({ component: 'mention-service' });
  */
 export function extractMentionedUsernames(content: string): string[] {
   const names = new Set<string>();
-  for (const m of content.matchAll(/@([\w]{1,32})/g)) {
+  for (const m of content.matchAll(/@([a-zA-Z0-9_-]{1,32})/g)) {
     names.add(m[1].toLowerCase());
   }
   return [...names];

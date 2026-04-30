@@ -46,12 +46,12 @@ function getEmbedVideoUrl(url: string): string | null {
   }
 }
 
-function MessageContent({ content }: { content: string }) {
+function MessageContent({ content, currentUsername }: { content: string; currentUsername?: string }) {
   const matches = [...content.matchAll(URL_PATTERN)];
   if (matches.length === 0) {
     return (
       <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-        <MentionText content={content} currentUsername={undefined} />
+        <MentionText content={content} currentUsername={currentUsername} />
       </p>
     );
   }
@@ -82,7 +82,7 @@ function MessageContent({ content }: { content: string }) {
     <div className='mt-0.5'>
       {textContent && (
         <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-          <MentionText content={textContent} currentUsername={undefined} />
+          <MentionText content={textContent} currentUsername={currentUsername} />
         </p>
       )}
       {videoEmbeds.length > 0 && (
@@ -635,6 +635,17 @@ export function MessageItem({
 
   const isOwnMessage = !!user && user.id === message.author.id;
 
+  const currentUsername = user?.username;
+  const displayedContent = localContent ?? message.content;
+  const isMentioned = !!currentUsername && (() => {
+    const re = /@([a-zA-Z0-9_-]{1,32})/g;
+    let m;
+    while ((m = re.exec(displayedContent)) !== null) {
+      if (m[1].toLowerCase() === currentUsername.toLowerCase()) return true;
+    }
+    return false;
+  })();
+
   const handleReactionAdd = useCallback(
     (emoji: string) => {
       setLocalReactions(prev => {
@@ -901,7 +912,12 @@ export function MessageItem({
     return (
       <div
         data-message-id={message.id}
-        className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
+        className={cn(
+          'group relative flex flex-col px-4 py-0.5',
+          isMentioned
+            ? 'bg-yellow-500/10 hover:bg-yellow-500/15 border-l-2 border-yellow-400/60'
+            : 'hover:bg-white/[0.02]',
+        )}
       >
         {message.parentMessage && (
           <div className='ml-14 pt-1'>
@@ -921,7 +937,7 @@ export function MessageItem({
               editUi
             ) : (
               <div>
-                <MessageContent content={localContent ?? message.content} />
+                <MessageContent content={displayedContent} currentUsername={currentUsername} />
                 {(message.editedAt || localContent !== undefined) && (
                   <span className='ml-1 text-[10px] text-gray-500'>(edited)</span>
                 )}
@@ -945,7 +961,12 @@ export function MessageItem({
   return (
     <div
       data-message-id={message.id}
-      className='group relative flex flex-col px-4 py-0.5 hover:bg-white/[0.02]'
+      className={cn(
+        'group relative flex flex-col px-4 py-0.5',
+        isMentioned
+          ? 'bg-yellow-500/10 hover:bg-yellow-500/15 border-l-2 border-yellow-400/60'
+          : 'hover:bg-white/[0.02]',
+      )}
     >
       {message.parentMessage && (
         <div className='ml-14 pt-1'>
@@ -994,7 +1015,7 @@ export function MessageItem({
           {isEditing ? (
             editUi
           ) : (
-            <MessageContent content={localContent ?? message.content} />
+            <MessageContent content={displayedContent} currentUsername={currentUsername} />
           )}
           <AttachmentList attachments={message.attachments} />
           <ReactionList

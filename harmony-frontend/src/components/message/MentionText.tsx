@@ -23,7 +23,7 @@ export function MentionText({ content, currentUsername }: MentionTextProps) {
   let match: RegExpExecArray | null;
   let key = 0;
   // Create a fresh regex per call so lastIndex state never bleeds between renders.
-  const re = /@([\w]{1,32})/g;
+  const re = /@([a-zA-Z0-9_-]{1,32})/g;
   while ((match = re.exec(content)) !== null) {
     const [full, username] = match;
     const start = match.index;
