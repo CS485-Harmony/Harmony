@@ -12,8 +12,8 @@ const BROADCAST_MENTIONS = new Set(['everyone', 'here']);
 
 /**
  * Renders message content with @username tokens styled as inline mention pills.
- * - @everyone / @here get a distinct amber highlight with a tooltip.
- * - Self-mentions receive an accent (indigo) background.
+ * - @everyone / @here share the same indigo styling as regular mentions, with tooltips.
+ * - Self-mentions receive a stronger indigo background.
  * - Other @username mentions are styled subtly.
  * Pass `currentUsername` from a parent component that already holds auth state.
  */
@@ -51,7 +51,7 @@ export function MentionText({ content, currentUsername }: MentionTextProps) {
         key={key++}
         className={
           isBroadcast
-            ? 'rounded px-0.5 font-semibold text-amber-200 bg-amber-500/30 hover:bg-amber-500/50 cursor-default'
+            ? 'rounded px-0.5 font-semibold text-indigo-300 bg-indigo-500/20 hover:bg-indigo-500/40 cursor-default'
             : isSelf
               ? 'rounded px-0.5 font-semibold text-white bg-indigo-500/70 hover:bg-indigo-500 cursor-default'
               : 'rounded px-0.5 font-semibold text-indigo-300 bg-indigo-500/20 hover:bg-indigo-500/40 cursor-default'
