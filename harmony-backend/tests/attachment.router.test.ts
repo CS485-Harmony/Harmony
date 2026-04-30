@@ -8,6 +8,8 @@
 import request from 'supertest';
 import { createApp } from '../src/app';
 import type { Express } from 'express';
+import { MIME_TO_EXT } from '../src/lib/storage/mime-types';
+import { storageProvider } from '../src/lib/storage';
 
 const VALID_TOKEN = 'valid-test-token';
 const TEST_USER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -51,6 +53,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   mockDetectMimeType.mockReset();
+  jest.clearAllMocks();
 });
 
 describe('POST /api/attachments/upload', () => {
@@ -166,5 +169,16 @@ describe('POST /api/attachments/upload', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.contentType).toBe('video/mp4');
+    expect(storageProvider.upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: 'clip.mp4',
+        contentType: 'video/mp4',
+        data: mp4Buffer,
+      }),
+    );
+  });
+
+  it('maps video/mp4 to the .mp4 storage extension', () => {
+    expect(MIME_TO_EXT['video/mp4']).toBe('.mp4');
   });
 });
