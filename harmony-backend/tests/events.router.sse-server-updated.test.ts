@@ -11,9 +11,10 @@ import http from 'http';
 import { createApp } from '../src/app';
 import { eventBus } from '../src/events/eventBus';
 import { prisma } from '../src/db/prisma';
+import { redis } from '../src/db/redis';
+import { seedSseTestTicket, SSE_TEST_TICKET } from './helpers/redisTicketJestMock';
 import type { Express } from 'express';
 
-const VALID_TOKEN = 'valid-token';
 const VALID_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440001';
 const SERVER_ID = '660e8400-e29b-41d4-a716-446655440001';
 const OTHER_SERVER_ID = '770e8400-e29b-41d4-a716-446655440001';
@@ -70,6 +71,12 @@ jest.mock('../src/services/cache.service', () => ({
 jest.mock('../src/middleware/rate-limit.middleware', () => ({
   createPublicRateLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
+
+jest.mock('../src/db/redis', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Jest mock factory must resolve after hoisting
+  const { redisTicketMockFactory } = require('./helpers/redisTicketJestMock');
+  return redisTicketMockFactory();
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -148,6 +155,7 @@ afterAll((done) => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  seedSseTestTicket(redis as unknown as { set: jest.Mock });
   capturedHandlers.clear();
 
   mockSubscribe.mockImplementation((channel: string, handler: SubscriberHandler) => {
@@ -162,7 +170,7 @@ beforeEach(() => {
 // ─── SERVER_UPDATED subscription ─────────────────────────────────────────────
 
 describe('GET /api/events/channel/:channelId — SERVER_UPDATED subscription', () => {
-  const sseUrl = `/api/events/channel/${VALID_CHANNEL_ID}?token=${VALID_TOKEN}`;
+  const sseUrl = `/api/events/channel/${VALID_CHANNEL_ID}?ticket=${SSE_TEST_TICKET}`;
 
   it('subscribes to SERVER_UPDATED event channel', async () => {
     await new Promise<void>((resolve, reject) => {

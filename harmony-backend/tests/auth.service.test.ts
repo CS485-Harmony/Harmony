@@ -358,73 +358,135 @@ describe('authService.login', () => {
     compareSpy.mockRestore();
   });
 
-  it('admin override works in non-production using the derived verifier', async () => {
-    const adminUser = {
-      ...mockUser,
-      id: 'admin-id-001',
-      email: ADMIN_EMAIL,
-      username: 'admin',
-      displayName: 'System Admin',
-    };
-    mockPrisma.user.upsert.mockResolvedValue(adminUser);
+  it('admin override works when NODE_ENV=development and ENABLE_DEV_ADMIN=true', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    process.env.ENABLE_DEV_ADMIN = 'true';
 
-    const adminVerifier = derivePasswordVerifier('admin', DEV_ADMIN_SALT);
-    const result = await authService.login(ADMIN_EMAIL, adminVerifier);
+    try {
+      const adminUser = {
+        ...mockUser,
+        id: 'admin-id-001',
+        email: ADMIN_EMAIL,
+        username: 'admin',
+        displayName: 'System Admin',
+      };
+      mockPrisma.user.upsert.mockResolvedValue(adminUser);
 
-    expect(typeof result.accessToken).toBe('string');
-    expect(mockPrisma.user.upsert).toHaveBeenCalled();
+      const adminVerifier = derivePasswordVerifier('admin', DEV_ADMIN_SALT);
+      const result = await authService.login(ADMIN_EMAIL, adminVerifier);
+
+      expect(typeof result.accessToken).toBe('string');
+      expect(mockPrisma.user.upsert).toHaveBeenCalled();
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      delete process.env.ENABLE_DEV_ADMIN;
+    }
   });
 
   it('admin override upserts the expected system-admin fields', async () => {
-    await authService.login(ADMIN_EMAIL, derivePasswordVerifier('admin', DEV_ADMIN_SALT));
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    process.env.ENABLE_DEV_ADMIN = 'true';
 
-    expect(mockPrisma.user.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        create: expect.objectContaining({
-          email: ADMIN_EMAIL,
-          username: 'admin',
-          displayName: 'System Admin',
+    try {
+      await authService.login(ADMIN_EMAIL, derivePasswordVerifier('admin', DEV_ADMIN_SALT));
+
+      expect(mockPrisma.user.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            email: ADMIN_EMAIL,
+            username: 'admin',
+            displayName: 'System Admin',
+          }),
         }),
-      }),
-    );
+      );
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      delete process.env.ENABLE_DEV_ADMIN;
+    }
   });
 
   it('admin override makes the admin OWNER of every server', async () => {
-    mockPrisma.server.findMany.mockResolvedValue([{ id: 'server-001' }, { id: 'server-002' }]);
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    process.env.ENABLE_DEV_ADMIN = 'true';
 
-    await authService.login(ADMIN_EMAIL, derivePasswordVerifier('admin', DEV_ADMIN_SALT));
+    try {
+      mockPrisma.server.findMany.mockResolvedValue([{ id: 'server-001' }, { id: 'server-002' }]);
 
-    expect(mockPrisma.serverMember.upsert).toHaveBeenCalledTimes(2);
-    for (const [call] of mockPrisma.serverMember.upsert.mock.calls) {
-      expect(call).toEqual(
-        expect.objectContaining({
-          update: { role: 'OWNER' },
-          create: expect.objectContaining({ role: 'OWNER' }),
-        }),
-      );
+      await authService.login(ADMIN_EMAIL, derivePasswordVerifier('admin', DEV_ADMIN_SALT));
+
+      expect(mockPrisma.serverMember.upsert).toHaveBeenCalledTimes(2);
+      for (const [call] of mockPrisma.serverMember.upsert.mock.calls) {
+        expect(call).toEqual(
+          expect.objectContaining({
+            update: { role: 'OWNER' },
+            create: expect.objectContaining({ role: 'OWNER' }),
+          }),
+        );
+      }
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      delete process.env.ENABLE_DEV_ADMIN;
     }
   });
 
   it('propagates admin upsert failures', async () => {
-    mockPrisma.user.upsert.mockRejectedValue(new Error('DB error during upsert'));
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    process.env.ENABLE_DEV_ADMIN = 'true';
 
-    await expect(
-      authService.login(ADMIN_EMAIL, derivePasswordVerifier('admin', DEV_ADMIN_SALT)),
-    ).rejects.toThrow('DB error during upsert');
+    try {
+      mockPrisma.user.upsert.mockRejectedValue(new Error('DB error during upsert'));
+
+      await expect(
+        authService.login(ADMIN_EMAIL, derivePasswordVerifier('admin', DEV_ADMIN_SALT)),
+      ).rejects.toThrow('DB error during upsert');
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      delete process.env.ENABLE_DEV_ADMIN;
+    }
   });
 
   it('propagates admin membership upsert failures', async () => {
-    mockPrisma.server.findMany.mockResolvedValue([{ id: 'server-001' }, { id: 'server-002' }]);
-    mockPrisma.serverMember.upsert.mockRejectedValueOnce(new Error('membership upsert failed'));
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    process.env.ENABLE_DEV_ADMIN = 'true';
 
-    await expect(
-      authService.login(ADMIN_EMAIL, derivePasswordVerifier('admin', DEV_ADMIN_SALT)),
-    ).rejects.toThrow('membership upsert failed');
+    try {
+      mockPrisma.server.findMany.mockResolvedValue([{ id: 'server-001' }, { id: 'server-002' }]);
+      mockPrisma.serverMember.upsert.mockRejectedValueOnce(new Error('membership upsert failed'));
+
+      await expect(
+        authService.login(ADMIN_EMAIL, derivePasswordVerifier('admin', DEV_ADMIN_SALT)),
+      ).rejects.toThrow('membership upsert failed');
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      delete process.env.ENABLE_DEV_ADMIN;
+    }
   });
 
   it('disables admin override in production', async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
+    process.env.ENABLE_DEV_ADMIN = 'true';
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+
+    try {
+      await expect(
+        authService.login(ADMIN_EMAIL, derivePasswordVerifier('admin', DEV_ADMIN_SALT)),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      delete process.env.ENABLE_DEV_ADMIN;
+    }
+  });
+
+  it('disables admin override when ENABLE_DEV_ADMIN is not set', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    delete process.env.ENABLE_DEV_ADMIN;
     mockPrisma.user.findUnique.mockResolvedValue(null);
 
     try {

@@ -242,6 +242,21 @@ class ApiClient {
 export const apiClient = new ApiClient();
 
 /**
+ * Fetches a one-shot SSE ticket from the backend.
+ * The ticket must be passed as ?ticket=<nonce> when opening an EventSource.
+ * Throws if the request fails (caller should abort the SSE connection).
+ */
+export async function fetchSseTicket(apiBaseUrl: string, accessToken: string): Promise<string> {
+  const res = await fetch(`${apiBaseUrl}/api/events/ticket`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Failed to fetch SSE ticket: ${res.status}`);
+  const data = await res.json() as { ticket: string };
+  return data.ticket;
+}
+
+/**
  * Proactively refreshes the access token using the stored refresh token.
  * Safe to call from SSE hooks before reconnecting after a dropped connection.
  *

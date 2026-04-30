@@ -31,7 +31,7 @@ const t = initTRPC.context<TRPCContext>().create({
       ...shape,
       data: {
         ...shape.data,
-        stack: process.env.NODE_ENV === 'development' ? shape.data.stack : undefined,
+        stack: process.env.NODE_ENV === 'development' && process.env.EXPOSE_STACK === '1' ? shape.data.stack : undefined,
       },
     };
   },

@@ -51,8 +51,27 @@ describe('tRPC errorFormatter — stack trace suppression', () => {
     expect(res.body.error.data.stack).toBeUndefined();
   });
 
-  it('includes stack trace when NODE_ENV is development', async () => {
+  it('includes stack trace when NODE_ENV is development and EXPOSE_STACK=1', async () => {
     process.env.NODE_ENV = 'development';
+    process.env.EXPOSE_STACK = '1';
+    const app = createApp();
+
+    try {
+      const res = await request(app)
+        .get(AUTHED_ENDPOINT)
+        .set('Accept', 'application/json');
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBeDefined();
+      expect(typeof res.body.error.data.stack).toBe('string');
+    } finally {
+      delete process.env.EXPOSE_STACK;
+    }
+  });
+
+  it('omits stack trace when NODE_ENV is development but EXPOSE_STACK is unset', async () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.EXPOSE_STACK;
     const app = createApp();
 
     const res = await request(app)
@@ -61,6 +80,6 @@ describe('tRPC errorFormatter — stack trace suppression', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.error).toBeDefined();
-    expect(typeof res.body.error.data.stack).toBe('string');
+    expect(res.body.error.data.stack).toBeUndefined();
   });
 });

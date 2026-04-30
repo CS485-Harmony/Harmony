@@ -14,11 +14,11 @@ import request from 'supertest';
 import { createApp } from '../src/app';
 import { eventBus } from '../src/events/eventBus';
 import { prisma } from '../src/db/prisma';
+import { redis } from '../src/db/redis';
 import { createDeferred, waitFor } from './helpers/async';
+import { seedSseTestTicket, SSE_TEST_TICKET } from './helpers/redisTicketJestMock';
 import type { Express } from 'express';
 import type { MessageCreatedPayload } from '../src/events/eventTypes';
-
-const VALID_TOKEN = 'valid-token';
 
 // ─── Mock eventBus ─────────────────────────────────────────────────────────────
 
@@ -71,6 +71,12 @@ jest.mock('../src/services/cache.service', () => ({
 jest.mock('../src/middleware/rate-limit.middleware', () => ({
   createPublicRateLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
+
+jest.mock('../src/db/redis', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Jest mock factory must resolve after hoisting
+  const { redisTicketMockFactory } = require('./helpers/redisTicketJestMock');
+  return redisTicketMockFactory();
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -132,6 +138,7 @@ afterAll((done) => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  seedSseTestTicket(redis as unknown as { set: jest.Mock });
   mockSubscribe.mockReturnValue({ unsubscribe: jest.fn(), ready: Promise.resolve() });
   // Default prisma mocks for auth path through SSE endpoint
   (prisma.channel.findUnique as jest.Mock).mockResolvedValue({ serverId: 'test-server-id' });
@@ -143,7 +150,7 @@ beforeEach(() => {
 
 describe('GET /api/events/channel/:channelId — SSE headers', () => {
   const VALID_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440001';
-  const sseUrl = (id: string) => `/api/events/channel/${id}?token=${VALID_TOKEN}`;
+  const sseUrl = (id: string) => `/api/events/channel/${id}?ticket=${SSE_TEST_TICKET}`;
 
   it('sets Content-Type: text/event-stream', async () => {
     const { headers } = await sseGet(server, sseUrl(VALID_CHANNEL_ID));
@@ -177,7 +184,7 @@ describe('GET /api/events/channel/:channelId — SSE headers', () => {
 
 describe('GET /api/events/channel/:channelId — subscription readiness', () => {
   const VALID_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440001';
-  const sseUrl = `/api/events/channel/${VALID_CHANNEL_ID}?token=${VALID_TOKEN}`;
+  const sseUrl = `/api/events/channel/${VALID_CHANNEL_ID}?ticket=${SSE_TEST_TICKET}`;
 
   it('waits for all subscription handshakes before flushing SSE headers', async () => {
     const ready = createDeferred<void>();
@@ -290,7 +297,7 @@ describe('GET /api/events/channel/:channelId — subscription readiness', () => 
 describe('GET /api/events/channel/:channelId — Last-Event-ID replay', () => {
   const VALID_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440001';
   const lastEventId = '2026-04-19T09:59:00.000Z';
-  const sseUrl = `/api/events/channel/${VALID_CHANNEL_ID}?token=${VALID_TOKEN}&lastEventId=${encodeURIComponent(lastEventId)}`;
+  const sseUrl = `/api/events/channel/${VALID_CHANNEL_ID}?ticket=${SSE_TEST_TICKET}&lastEventId=${encodeURIComponent(lastEventId)}`;
 
   it('replays message:created events missed during the reconnect gap', async () => {
     const missedMessage = {
@@ -353,7 +360,7 @@ describe('GET /api/events/channel/:channelId — input validation', () => {
   it('accepts a valid UUID-formatted channelId and returns 200', async () => {
     const { statusCode } = await sseGet(
       server,
-      `/api/events/channel/550e8400-e29b-41d4-a716-446655440001?token=${VALID_TOKEN}`,
+      `/api/events/channel/550e8400-e29b-41d4-a716-446655440001?ticket=${SSE_TEST_TICKET}`,
     );
     expect(statusCode).toBe(200);
   });
@@ -372,7 +379,7 @@ describe('GET /api/events/channel/:channelId — subscription readiness', () => 
 
     const res = await sseGet(
       server,
-      `/api/events/channel/550e8400-e29b-41d4-a716-446655440001?token=${VALID_TOKEN}`,
+      `/api/events/channel/550e8400-e29b-41d4-a716-446655440001?ticket=${SSE_TEST_TICKET}`,
     );
 
     expect(res.statusCode).toBe(503);

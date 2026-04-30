@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { apiClient } from '@/lib/api-client';
-import { getAccessToken } from '@/lib/api-client';
+import { getAccessToken, fetchSseTicket } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
 interface Notification {
@@ -87,54 +87,65 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     const token = getAccessToken();
     if (!token) return;
 
-    const apiBase =
-      process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
-    const url = `${apiBase}/api/events/user?token=${encodeURIComponent(token)}`;
-    const es = new EventSource(url);
-    eventSourceRef.current = es;
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+    let cancelled = false;
 
-    es.addEventListener('notification:mention', (e: MessageEvent) => {
+    (async () => {
+      let ticket: string;
       try {
-        const payload = JSON.parse(e.data) as {
-          id: string;
-          messageId: string;
-          channelId: string;
-          serverId: string;
-          authorId: string;
-          authorUsername: string;
-          timestamp: string;
-          read: boolean;
-        };
-        // Add an optimistic notification entry
-        const optimistic: Notification = {
-          id: payload.id,
-          type: 'mention',
-          messageId: payload.messageId,
-          channelId: payload.channelId,
-          serverId: payload.serverId,
-          read: false,
-          createdAt: payload.timestamp,
-          message: {
-            id: payload.messageId,
-            content: '',
-            isDeleted: false,
-            author: {
-              id: payload.authorId,
-              username: payload.authorUsername,
-              displayName: payload.authorUsername,
-              avatarUrl: null,
-            },
-          },
-        };
-        setNotifications((prev) => [optimistic, ...prev].slice(0, 50));
-        setUnreadCount((c) => c + 1);
+        ticket = await fetchSseTicket(apiBase, token);
       } catch {
-        // malformed payload — ignore
+        return; // abort silently — notification bell is non-critical
       }
-    });
+      if (cancelled) return;
+
+      const url = `${apiBase}/api/events/user?ticket=${encodeURIComponent(ticket)}`;
+      const es = new EventSource(url);
+      eventSourceRef.current = es;
+
+      es.addEventListener('notification:mention', (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data) as {
+            id: string;
+            messageId: string;
+            channelId: string;
+            serverId: string;
+            authorId: string;
+            authorUsername: string;
+            timestamp: string;
+            read: boolean;
+          };
+          const optimistic: Notification = {
+            id: payload.id,
+            type: 'mention',
+            messageId: payload.messageId,
+            channelId: payload.channelId,
+            serverId: payload.serverId,
+            read: false,
+            createdAt: payload.timestamp,
+            message: {
+              id: payload.messageId,
+              content: '',
+              isDeleted: false,
+              author: {
+                id: payload.authorId,
+                username: payload.authorUsername,
+                displayName: payload.authorUsername,
+                avatarUrl: null,
+              },
+            },
+          };
+          setNotifications((prev) => [optimistic, ...prev].slice(0, 50));
+          setUnreadCount((c) => c + 1);
+        } catch {
+          // malformed payload — ignore
+        }
+      });
+    })();
 
     return () => {
-      es.close();
+      cancelled = true;
+      eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
   }, [userId]);

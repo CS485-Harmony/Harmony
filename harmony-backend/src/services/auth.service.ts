@@ -19,20 +19,14 @@ const DEV_ADMIN_PASSWORD_SALT = 'f6f0e4f9f5f841caa4dd4ac4ef0bf9e8';
 
 const ACCESS_SECRET = (() => {
   const value = process.env.JWT_ACCESS_SECRET;
-  // istanbul ignore next -- NODE_ENV guard makes this unreachable in Jest (ts-jest transform cache)
-  if (!value && process.env.NODE_ENV !== 'test') {
-    throw new Error('JWT_ACCESS_SECRET environment variable is not set');
-  }
-  return value ?? 'dev-access-secret-change-in-prod';
+  if (!value) throw new Error('JWT_ACCESS_SECRET environment variable is not set');
+  return value;
 })();
 
 const REFRESH_SECRET = (() => {
   const value = process.env.JWT_REFRESH_SECRET;
-  // istanbul ignore next -- NODE_ENV guard makes this unreachable in Jest (ts-jest transform cache)
-  if (!value && process.env.NODE_ENV !== 'test') {
-    throw new Error('JWT_REFRESH_SECRET environment variable is not set');
-  }
-  return value ?? 'dev-refresh-secret-change-in-prod';
+  if (!value) throw new Error('JWT_REFRESH_SECRET environment variable is not set');
+  return value;
 })();
 
 const ACCESS_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN ?? '15m';
@@ -172,7 +166,7 @@ export const authService = {
   },
 
   async getLoginPasswordSalt(email: string): Promise<string> {
-    if (process.env.NODE_ENV !== 'production' && email === ADMIN_EMAIL) {
+    if (process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_ADMIN === 'true' && email === ADMIN_EMAIL) {
       return DEV_ADMIN_PASSWORD_SALT;
     }
 
@@ -248,11 +242,11 @@ export const authService = {
   },
 
   async login(email: string, passwordVerifier: string): Promise<AuthTokens> {
-    // ── Dev-only admin override ────────────────────────────────────────────
-    // Login as admin@harmony.dev / admin to get a system-admin account that
-    // bypasses all permission and ownership checks. Remove before production.
+    // Dev-only admin override — requires NODE_ENV=development AND ENABLE_DEV_ADMIN=true.
+    // Never active on staging, CI, e2e, or production environments.
     if (
-      process.env.NODE_ENV !== 'production' &&
+      process.env.NODE_ENV === 'development' &&
+      process.env.ENABLE_DEV_ADMIN === 'true' &&
       email === ADMIN_EMAIL &&
       passwordVerifier === createDevAdminPasswordVerifier()
     ) {

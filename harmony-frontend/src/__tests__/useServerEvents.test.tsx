@@ -19,6 +19,8 @@ import type { User } from '../types/user';
 
 jest.mock('../lib/api-client', () => ({
   getAccessToken: jest.fn(() => 'mock-token'),
+  fetchSseTicket: jest.fn(() => Promise.resolve('mock-ticket')),
+  refreshAccessToken: jest.fn(() => Promise.resolve()),
 }));
 
 // ─── Mock EventSource ─────────────────────────────────────────────────────────
@@ -123,6 +125,14 @@ const MOCK_MESSAGE: Message = {
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
+/**
+ * The hooks use an async connect() that awaits fetchSseTicket before creating
+ * the EventSource. Even though the mock resolves immediately, the await still
+ * defers to the microtask queue. flushPromises drains it so the EventSource
+ * exists by the time assertions run.
+ */
+const flushPromises = () => act(async () => {});
+
 const originalEnv = process.env;
 
 beforeEach(() => {
@@ -140,7 +150,7 @@ afterEach(() => {
 // ─── Connection ───────────────────────────────────────────────────────────────
 
 describe('useServerEvents — connection', () => {
-  it('creates an EventSource with the correct server URL', () => {
+  it('creates an EventSource with the correct server URL', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -149,13 +159,14 @@ describe('useServerEvents — connection', () => {
         onChannelDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     expect(MockEventSource).toHaveBeenCalledWith(
-      `${API_URL}/api/events/server/${SERVER_ID}?token=mock-token`,
+      `${API_URL}/api/events/server/${SERVER_ID}?ticket=mock-ticket`,
     );
   });
 
-  it('does NOT create EventSource when enabled=false', () => {
+  it('does NOT create EventSource when enabled=false', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -165,11 +176,12 @@ describe('useServerEvents — connection', () => {
         enabled: false,
       }),
     );
+    await flushPromises();
 
     expect(MockEventSource).not.toHaveBeenCalled();
   });
 
-  it('closes the EventSource on unmount', () => {
+  it('closes the EventSource on unmount', async () => {
     const { unmount } = renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -178,13 +190,14 @@ describe('useServerEvents — connection', () => {
         onChannelDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     unmount();
 
     expect(mockEventSourceInstance?.close).toHaveBeenCalled();
   });
 
-  it('registers listeners for all eleven event types', () => {
+  it('registers listeners for all eleven event types', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -201,6 +214,7 @@ describe('useServerEvents — connection', () => {
         onServerUpdated: jest.fn(),
       }),
     );
+    await flushPromises();
 
     const addedTypes = (
       mockEventSourceInstance!.addEventListener.mock.calls as [string, unknown][]
@@ -223,7 +237,7 @@ describe('useServerEvents — connection', () => {
 // ─── Channel event handling ───────────────────────────────────────────────────
 
 describe('useServerEvents — channel events', () => {
-  it('calls onChannelCreated with parsed channel on channel:created event', () => {
+  it('calls onChannelCreated with parsed channel on channel:created event', async () => {
     const onChannelCreated = jest.fn();
 
     renderHook(() =>
@@ -234,6 +248,7 @@ describe('useServerEvents — channel events', () => {
         onChannelDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('channel:created', MOCK_CHANNEL);
@@ -243,7 +258,7 @@ describe('useServerEvents — channel events', () => {
     expect(onChannelCreated).toHaveBeenCalledWith(MOCK_CHANNEL);
   });
 
-  it('calls onChannelUpdated with parsed channel on channel:updated event', () => {
+  it('calls onChannelUpdated with parsed channel on channel:updated event', async () => {
     const onChannelUpdated = jest.fn();
 
     renderHook(() =>
@@ -254,6 +269,7 @@ describe('useServerEvents — channel events', () => {
         onChannelDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('channel:updated', {
@@ -266,7 +282,7 @@ describe('useServerEvents — channel events', () => {
     expect(onChannelUpdated).toHaveBeenCalledWith({ ...MOCK_CHANNEL, name: 'renamed' });
   });
 
-  it('calls onChannelDeleted with channelId on channel:deleted event', () => {
+  it('calls onChannelDeleted with channelId on channel:deleted event', async () => {
     const onChannelDeleted = jest.fn();
 
     renderHook(() =>
@@ -277,6 +293,7 @@ describe('useServerEvents — channel events', () => {
         onChannelDeleted,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('channel:deleted', { channelId: 'ch-001' });
@@ -290,7 +307,7 @@ describe('useServerEvents — channel events', () => {
 // ─── Member event handling ────────────────────────────────────────────────────
 
 describe('useServerEvents — member events', () => {
-  it('calls onMemberJoined with parsed User on member:joined event', () => {
+  it('calls onMemberJoined with parsed User on member:joined event', async () => {
     const onMemberJoined = jest.fn();
 
     renderHook(() =>
@@ -302,6 +319,7 @@ describe('useServerEvents — member events', () => {
         onMemberJoined,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('member:joined', MOCK_USER);
@@ -311,7 +329,7 @@ describe('useServerEvents — member events', () => {
     expect(onMemberJoined).toHaveBeenCalledWith(MOCK_USER);
   });
 
-  it('calls onMemberLeft with userId on member:left event', () => {
+  it('calls onMemberLeft with userId on member:left event', async () => {
     const onMemberLeft = jest.fn();
 
     renderHook(() =>
@@ -323,6 +341,7 @@ describe('useServerEvents — member events', () => {
         onMemberLeft,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('member:left', { userId: 'user-new' });
@@ -332,7 +351,7 @@ describe('useServerEvents — member events', () => {
     expect(onMemberLeft).toHaveBeenCalledWith('user-new');
   });
 
-  it('does not throw when onMemberJoined is not provided', () => {
+  it('does not throw when onMemberJoined is not provided', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -342,6 +361,7 @@ describe('useServerEvents — member events', () => {
         // onMemberJoined intentionally omitted
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -350,7 +370,7 @@ describe('useServerEvents — member events', () => {
     }).not.toThrow();
   });
 
-  it('does not throw when onMemberLeft is not provided', () => {
+  it('does not throw when onMemberLeft is not provided', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -360,6 +380,7 @@ describe('useServerEvents — member events', () => {
         // onMemberLeft intentionally omitted
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -368,7 +389,7 @@ describe('useServerEvents — member events', () => {
     }).not.toThrow();
   });
 
-  it('removes member:joined and member:left listeners on unmount', () => {
+  it('removes member:joined and member:left listeners on unmount', async () => {
     const { unmount } = renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -379,6 +400,7 @@ describe('useServerEvents — member events', () => {
         onMemberLeft: jest.fn(),
       }),
     );
+    await flushPromises();
 
     unmount();
 
@@ -390,7 +412,7 @@ describe('useServerEvents — member events', () => {
     expect(removedTypes).toContain('member:left');
   });
 
-  it('does not call onMemberJoined on malformed JSON', () => {
+  it('does not call onMemberJoined on malformed JSON', async () => {
     const onMemberJoined = jest.fn();
 
     renderHook(() =>
@@ -402,6 +424,7 @@ describe('useServerEvents — member events', () => {
         onMemberJoined,
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -430,7 +453,7 @@ describe('useServerEvents — member events', () => {
 // ─── Member status change handling ───────────────────────────────────────────
 
 describe('useServerEvents — member status change events', () => {
-  it('calls onMemberStatusChanged with id and status on member:statusChanged event', () => {
+  it('calls onMemberStatusChanged with id and status on member:statusChanged event', async () => {
     const onMemberStatusChanged = jest.fn();
 
     renderHook(() =>
@@ -442,6 +465,7 @@ describe('useServerEvents — member status change events', () => {
         onMemberStatusChanged,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('member:statusChanged', {
@@ -454,7 +478,7 @@ describe('useServerEvents — member status change events', () => {
     expect(onMemberStatusChanged).toHaveBeenCalledWith({ id: 'user-new', status: 'idle' });
   });
 
-  it('does not throw when onMemberStatusChanged is not provided', () => {
+  it('does not throw when onMemberStatusChanged is not provided', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -464,6 +488,7 @@ describe('useServerEvents — member status change events', () => {
         // onMemberStatusChanged intentionally omitted
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -475,7 +500,7 @@ describe('useServerEvents — member status change events', () => {
     }).not.toThrow();
   });
 
-  it('removes member:statusChanged listener on unmount', () => {
+  it('removes member:statusChanged listener on unmount', async () => {
     const { unmount } = renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -485,6 +510,7 @@ describe('useServerEvents — member status change events', () => {
         onMemberStatusChanged: jest.fn(),
       }),
     );
+    await flushPromises();
 
     unmount();
 
@@ -495,7 +521,7 @@ describe('useServerEvents — member status change events', () => {
     expect(removedTypes).toContain('member:statusChanged');
   });
 
-  it('does not call onMemberStatusChanged on malformed JSON', () => {
+  it('does not call onMemberStatusChanged on malformed JSON', async () => {
     const onMemberStatusChanged = jest.fn();
 
     renderHook(() =>
@@ -507,6 +533,7 @@ describe('useServerEvents — member status change events', () => {
         onMemberStatusChanged,
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -524,7 +551,7 @@ describe('useServerEvents — member status change events', () => {
 // ─── Visibility change event handling ────────────────────────────────────────
 
 describe('useServerEvents — channel:visibility-changed events', () => {
-  it('registers a listener for channel:visibility-changed', () => {
+  it('registers a listener for channel:visibility-changed', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -534,6 +561,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
         onChannelVisibilityChanged: jest.fn(),
       }),
     );
+    await flushPromises();
 
     const addedTypes = (
       mockEventSourceInstance!.addEventListener.mock.calls as [string, unknown][]
@@ -542,7 +570,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
     expect(addedTypes).toContain('channel:visibility-changed');
   });
 
-  it('calls onChannelVisibilityChanged with channel and oldVisibility on event', () => {
+  it('calls onChannelVisibilityChanged with channel and oldVisibility on event', async () => {
     const onChannelVisibilityChanged = jest.fn();
     const updatedChannel: Channel = { ...MOCK_CHANNEL, visibility: ChannelVisibility.PRIVATE };
 
@@ -555,6 +583,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
         onChannelVisibilityChanged,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('channel:visibility-changed', {
@@ -571,7 +600,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
     );
   });
 
-  it('does not throw when onChannelVisibilityChanged is not provided', () => {
+  it('does not throw when onChannelVisibilityChanged is not provided', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -581,6 +610,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
         // onChannelVisibilityChanged intentionally omitted
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -593,7 +623,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
     }).not.toThrow();
   });
 
-  it('removes channel:visibility-changed listener on unmount', () => {
+  it('removes channel:visibility-changed listener on unmount', async () => {
     const { unmount } = renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -603,6 +633,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
         onChannelVisibilityChanged: jest.fn(),
       }),
     );
+    await flushPromises();
 
     unmount();
 
@@ -613,7 +644,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
     expect(removedTypes).toContain('channel:visibility-changed');
   });
 
-  it('does not call onChannelVisibilityChanged on malformed JSON', () => {
+  it('does not call onChannelVisibilityChanged on malformed JSON', async () => {
     const onChannelVisibilityChanged = jest.fn();
 
     renderHook(() =>
@@ -625,6 +656,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
         onChannelVisibilityChanged,
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -638,7 +670,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
     expect(onChannelVisibilityChanged).not.toHaveBeenCalled();
   });
 
-  it('logs when the EventSource connection fails before opening', () => {
+  it('logs when the EventSource connection fails before opening', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -647,6 +679,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
         onChannelDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateError();
@@ -668,7 +701,7 @@ describe('useServerEvents — channel:visibility-changed events', () => {
 // ─── Message event handling ───────────────────────────────────────────────────
 
 describe('useServerEvents — message events', () => {
-  it('calls onMessageCreated with parsed message on message:created event', () => {
+  it('calls onMessageCreated with parsed message on message:created event', async () => {
     const onMessageCreated = jest.fn();
 
     renderHook(() =>
@@ -680,6 +713,7 @@ describe('useServerEvents — message events', () => {
         onMessageCreated,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('message:created', MOCK_MESSAGE);
@@ -689,7 +723,7 @@ describe('useServerEvents — message events', () => {
     expect(onMessageCreated).toHaveBeenCalledWith(MOCK_MESSAGE);
   });
 
-  it('calls onMessageEdited with parsed message on message:edited event', () => {
+  it('calls onMessageEdited with parsed message on message:edited event', async () => {
     const onMessageEdited = jest.fn();
 
     renderHook(() =>
@@ -701,6 +735,7 @@ describe('useServerEvents — message events', () => {
         onMessageEdited,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('message:edited', {
@@ -713,7 +748,7 @@ describe('useServerEvents — message events', () => {
     expect(onMessageEdited).toHaveBeenCalledWith({ ...MOCK_MESSAGE, content: 'edited content' });
   });
 
-  it('calls onMessageDeleted with messageId and channelId on message:deleted event', () => {
+  it('calls onMessageDeleted with messageId and channelId on message:deleted event', async () => {
     const onMessageDeleted = jest.fn();
 
     renderHook(() =>
@@ -725,6 +760,7 @@ describe('useServerEvents — message events', () => {
         onMessageDeleted,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('message:deleted', {
@@ -737,7 +773,7 @@ describe('useServerEvents — message events', () => {
     expect(onMessageDeleted).toHaveBeenCalledWith('msg-001', 'ch-001');
   });
 
-  it('does not throw when message callbacks are not provided', () => {
+  it('does not throw when message callbacks are not provided', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -746,6 +782,7 @@ describe('useServerEvents — message events', () => {
         onChannelDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -759,7 +796,7 @@ describe('useServerEvents — message events', () => {
     }).not.toThrow();
   });
 
-  it('removes message listeners on unmount', () => {
+  it('removes message listeners on unmount', async () => {
     const { unmount } = renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -771,6 +808,7 @@ describe('useServerEvents — message events', () => {
         onMessageDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     unmount();
 
@@ -783,7 +821,7 @@ describe('useServerEvents — message events', () => {
     expect(removedTypes).toContain('message:deleted');
   });
 
-  it('does not call onMessageCreated on malformed JSON', () => {
+  it('does not call onMessageCreated on malformed JSON', async () => {
     const onMessageCreated = jest.fn();
 
     renderHook(() =>
@@ -795,6 +833,7 @@ describe('useServerEvents — message events', () => {
         onMessageCreated,
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -812,7 +851,7 @@ describe('useServerEvents — message events', () => {
 // ─── server:updated event handling ───────────────────────────────────────────
 
 describe('useServerEvents — server:updated events', () => {
-  it('calls onServerUpdated with parsed server on server:updated event', () => {
+  it('calls onServerUpdated with parsed server on server:updated event', async () => {
     const onServerUpdated = jest.fn();
     const MOCK_SERVER = { id: SERVER_ID, name: 'Test Server', iconUrl: null, description: null };
 
@@ -825,6 +864,7 @@ describe('useServerEvents — server:updated events', () => {
         onServerUpdated,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('server:updated', MOCK_SERVER);
@@ -834,7 +874,7 @@ describe('useServerEvents — server:updated events', () => {
     expect(onServerUpdated).toHaveBeenCalledWith(MOCK_SERVER);
   });
 
-  it('does not throw when onServerUpdated is not provided', () => {
+  it('does not throw when onServerUpdated is not provided', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -843,6 +883,7 @@ describe('useServerEvents — server:updated events', () => {
         onChannelDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -854,7 +895,7 @@ describe('useServerEvents — server:updated events', () => {
     }).not.toThrow();
   });
 
-  it('removes server:updated listener on unmount', () => {
+  it('removes server:updated listener on unmount', async () => {
     const { unmount } = renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -864,6 +905,7 @@ describe('useServerEvents — server:updated events', () => {
         onServerUpdated: jest.fn(),
       }),
     );
+    await flushPromises();
 
     unmount();
 

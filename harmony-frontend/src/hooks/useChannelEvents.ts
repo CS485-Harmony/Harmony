@@ -19,7 +19,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Message } from '@/types/message';
 import type { Server } from '@/types/server';
-import { getAccessToken, refreshAccessToken } from '@/lib/api-client';
+import { getAccessToken, refreshAccessToken, fetchSseTicket } from '@/lib/api-client';
 import { createFrontendLogger } from '@/lib/frontend-logger';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 
@@ -80,134 +80,160 @@ export function useChannelEvents({
     const apiUrl = getApiBaseUrl();
     const token = getAccessToken();
     if (!token) return; // unauthenticated — don't attempt connection
-    const url = `${apiUrl}/api/events/channel/${channelId}?token=${encodeURIComponent(token)}`;
-    const es = new EventSource(url);
 
-    // ── Event handlers ──────────────────────────────────────────────────────
-
-    const handleCreated = (event: MessageEvent<string>) => {
-      try {
-        const msg = JSON.parse(event.data) as Message;
-        onCreatedRef.current(msg);
-      } catch (error) {
-        logger.warn('Dropped malformed channel SSE payload', {
-          feature: 'channel-events',
-          event: 'payload_parse_failed',
-          source: 'sse',
-          operation: 'message:created',
-          target: '/api/events/channel/[channelId]',
-          error,
-        });
-      }
-    };
-
-    const handleEdited = (event: MessageEvent<string>) => {
-      try {
-        const msg = JSON.parse(event.data) as Message;
-        onEditedRef.current(msg);
-      } catch (error) {
-        logger.warn('Dropped malformed channel SSE payload', {
-          feature: 'channel-events',
-          event: 'payload_parse_failed',
-          source: 'sse',
-          operation: 'message:edited',
-          target: '/api/events/channel/[channelId]',
-          error,
-        });
-      }
-    };
-
-    const handleDeleted = (event: MessageEvent<string>) => {
-      try {
-        const payload = JSON.parse(event.data) as { messageId: string };
-        onDeletedRef.current(payload.messageId);
-      } catch (error) {
-        logger.warn('Dropped malformed channel SSE payload', {
-          feature: 'channel-events',
-          event: 'payload_parse_failed',
-          source: 'sse',
-          operation: 'message:deleted',
-          target: '/api/events/channel/[channelId]',
-          error,
-        });
-      }
-    };
-
-    const handleServerUpdated = (event: MessageEvent<string>) => {
-      try {
-        const server = JSON.parse(event.data) as Server;
-        onServerUpdatedRef.current?.(server);
-      } catch (error) {
-        logger.warn('Dropped malformed channel SSE payload', {
-          feature: 'channel-events',
-          event: 'payload_parse_failed',
-          source: 'sse',
-          operation: 'server:updated',
-          target: '/api/events/channel/[channelId]',
-          error,
-        });
-      }
-    };
-
-    es.addEventListener('message:created', handleCreated);
-    es.addEventListener('message:edited', handleEdited);
-    es.addEventListener('message:deleted', handleDeleted);
-    es.addEventListener('server:updated', handleServerUpdated);
-
-    // Track whether the connection ever opened successfully.
-    // If onerror fires before onopen it's a permanent failure (4xx/5xx from the
-    // server or a network error before the stream started) — close immediately
-    // instead of letting EventSource retry with a stale/invalid token.
-    let everOpened = false;
+    let es: EventSource | null = null;
+    let cancelled = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    // Tracks registered handlers so cleanup can call removeEventListener.
+    const activeHandlers: Array<[string, (event: MessageEvent<string>) => void]> = [];
 
-    es.onopen = () => {
-      everOpened = true;
-      reconnectCountRef.current = 0; // reset budget on successful connection
-      setIsConnected(true);
-    };
-    es.onerror = () => {
-      setIsConnected(false);
-      logger.warn('Channel SSE connection failed', {
-        feature: 'channel-events',
-        event: everOpened ? 'stream_disconnected' : 'stream_failed',
-        source: 'sse',
-        target: '/api/events/channel/[channelId]',
-      });
-      if (!everOpened && reconnectCountRef.current === 0) {
-        // Never successfully opened on the first attempt — likely a 401/403. Stop retrying.
-        es.close();
+    const connect = async () => {
+      let ticket: string;
+      try {
+        ticket = await fetchSseTicket(apiUrl, token);
+      } catch (err) {
+        logger.warn('Failed to fetch SSE ticket; aborting channel connection', {
+          feature: 'channel-events',
+          event: 'ticket_fetch_failed',
+          source: 'sse',
+          target: '/api/events/ticket',
+          error: err,
+        });
         return;
       }
+      if (cancelled) return;
 
-      // The connection was previously healthy but dropped (e.g. network blip,
-      // server restart, or the access token expired and the backend rejected the
-      // EventSource auto-reconnect attempt). Stop the native retry loop (which
-      // would keep hammering the server with the same stale token) and
-      // proactively refresh the token before reconnecting.
-      es.close();
-      const attempt = reconnectCountRef.current;
-      if (attempt >= MAX_RECONNECT_ATTEMPTS) return; // give up after cap
+      const url = `${apiUrl}/api/events/channel/${channelId}?ticket=${encodeURIComponent(ticket)}`;
+      es = new EventSource(url);
 
-      reconnectCountRef.current += 1;
-      const delay = RECONNECT_DELAY_MS * reconnectCountRef.current;
-      reconnectTimer = setTimeout(() => {
-        // Attempt a silent token refresh so the next EventSource URL carries a
-        // valid token even when the user has been idle (no API calls to trigger
-        // the axios interceptor refresh).
-        refreshAccessToken().finally(() => {
-          setReconnectKey(k => k + 1);
+      // ── Event handlers ────────────────────────────────────────────────────
+
+      const handleCreated = (event: MessageEvent<string>) => {
+        try {
+          const msg = JSON.parse(event.data) as Message;
+          onCreatedRef.current(msg);
+        } catch (error) {
+          logger.warn('Dropped malformed channel SSE payload', {
+            feature: 'channel-events',
+            event: 'payload_parse_failed',
+            source: 'sse',
+            operation: 'message:created',
+            target: '/api/events/channel/[channelId]',
+            error,
+          });
+        }
+      };
+
+      const handleEdited = (event: MessageEvent<string>) => {
+        try {
+          const msg = JSON.parse(event.data) as Message;
+          onEditedRef.current(msg);
+        } catch (error) {
+          logger.warn('Dropped malformed channel SSE payload', {
+            feature: 'channel-events',
+            event: 'payload_parse_failed',
+            source: 'sse',
+            operation: 'message:edited',
+            target: '/api/events/channel/[channelId]',
+            error,
+          });
+        }
+      };
+
+      const handleDeleted = (event: MessageEvent<string>) => {
+        try {
+          const payload = JSON.parse(event.data) as { messageId: string };
+          onDeletedRef.current(payload.messageId);
+        } catch (error) {
+          logger.warn('Dropped malformed channel SSE payload', {
+            feature: 'channel-events',
+            event: 'payload_parse_failed',
+            source: 'sse',
+            operation: 'message:deleted',
+            target: '/api/events/channel/[channelId]',
+            error,
+          });
+        }
+      };
+
+      const handleServerUpdated = (event: MessageEvent<string>) => {
+        try {
+          const server = JSON.parse(event.data) as Server;
+          onServerUpdatedRef.current?.(server);
+        } catch (error) {
+          logger.warn('Dropped malformed channel SSE payload', {
+            feature: 'channel-events',
+            event: 'payload_parse_failed',
+            source: 'sse',
+            operation: 'server:updated',
+            target: '/api/events/channel/[channelId]',
+            error,
+          });
+        }
+      };
+
+      es.addEventListener('message:created', handleCreated);
+      es.addEventListener('message:edited', handleEdited);
+      es.addEventListener('message:deleted', handleDeleted);
+      es.addEventListener('server:updated', handleServerUpdated);
+      activeHandlers.push(
+        ['message:created', handleCreated],
+        ['message:edited', handleEdited],
+        ['message:deleted', handleDeleted],
+        ['server:updated', handleServerUpdated],
+      );
+
+      // Track whether the connection ever opened successfully.
+      // If onerror fires before onopen it's a permanent failure (4xx/5xx from the
+      // server or a network error before the stream started) — close immediately
+      // instead of letting EventSource retry with a stale ticket.
+      let everOpened = false;
+
+      es.onopen = () => {
+        everOpened = true;
+        reconnectCountRef.current = 0; // reset budget on successful connection
+        setIsConnected(true);
+      };
+      es.onerror = () => {
+        setIsConnected(false);
+        logger.warn('Channel SSE connection failed', {
+          feature: 'channel-events',
+          event: everOpened ? 'stream_disconnected' : 'stream_failed',
+          source: 'sse',
+          target: '/api/events/channel/[channelId]',
         });
-      }, delay);
+        if (!everOpened && reconnectCountRef.current === 0) {
+          // Never successfully opened on the first attempt — likely a 401/403. Stop retrying.
+          es?.close();
+          return;
+        }
+
+        // The connection was previously healthy but dropped. Stop the native retry
+        // loop (which would reuse a consumed ticket) and proactively refresh the
+        // access token before reconnecting with a fresh ticket.
+        es?.close();
+        const attempt = reconnectCountRef.current;
+        if (attempt >= MAX_RECONNECT_ATTEMPTS) return; // give up after cap
+
+        reconnectCountRef.current += 1;
+        const delay = RECONNECT_DELAY_MS * reconnectCountRef.current;
+        reconnectTimer = setTimeout(() => {
+          refreshAccessToken().finally(() => {
+            setReconnectKey(k => k + 1);
+          });
+        }, delay);
+      };
     };
 
+    connect();
+
     return () => {
+      cancelled = true;
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-      es.removeEventListener('message:created', handleCreated);
-      es.removeEventListener('message:edited', handleEdited);
-      es.removeEventListener('message:deleted', handleDeleted);
-      es.removeEventListener('server:updated', handleServerUpdated);
-      es.close();
+      if (es) {
+        activeHandlers.forEach(([type, handler]) => es!.removeEventListener(type, handler));
+        es.close();
+      }
       setIsConnected(false);
     };
   }, [channelId, enabled, reconnectKey]);

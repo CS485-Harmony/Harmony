@@ -24,15 +24,28 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
-describe('isSystemAdmin — production env guard (issue #466)', () => {
-  const originalEnv = process.env.NODE_ENV;
+describe('isSystemAdmin — ENABLE_DEV_ADMIN guard (issue #425)', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalEnableDevAdmin = process.env.ENABLE_DEV_ADMIN;
 
   afterEach(() => {
-    Object.defineProperty(process.env, 'NODE_ENV', { value: originalEnv, writable: true });
+    Object.defineProperty(process.env, 'NODE_ENV', { value: originalNodeEnv, writable: true });
+    process.env.ENABLE_DEV_ADMIN = originalEnableDevAdmin;
   });
 
-  it('returns false in production even when the user email matches ADMIN_EMAIL', async () => {
-    Object.defineProperty(process.env, 'NODE_ENV', { value: 'production', writable: true });
+  it('returns true only when NODE_ENV=development AND ENABLE_DEV_ADMIN=true', async () => {
+    Object.defineProperty(process.env, 'NODE_ENV', { value: 'development', writable: true });
+    process.env.ENABLE_DEV_ADMIN = 'true';
+    mockPrisma.user.findUnique.mockResolvedValue({ email: ADMIN_EMAIL });
+
+    const result = await isSystemAdmin(ADMIN_USER_ID);
+
+    expect(result).toBe(true);
+  });
+
+  it('returns false when NODE_ENV=development but ENABLE_DEV_ADMIN is not set', async () => {
+    Object.defineProperty(process.env, 'NODE_ENV', { value: 'development', writable: true });
+    delete process.env.ENABLE_DEV_ADMIN;
     mockPrisma.user.findUnique.mockResolvedValue({ email: ADMIN_EMAIL });
 
     const result = await isSystemAdmin(ADMIN_USER_ID);
@@ -41,15 +54,31 @@ describe('isSystemAdmin — production env guard (issue #466)', () => {
     expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
   });
 
-  it('returns true in test env when the user email matches ADMIN_EMAIL', async () => {
+  it('returns false in test env even when ENABLE_DEV_ADMIN=true', async () => {
+    // NODE_ENV is 'test' by default in Jest — admin override must not activate
+    process.env.ENABLE_DEV_ADMIN = 'true';
     mockPrisma.user.findUnique.mockResolvedValue({ email: ADMIN_EMAIL });
 
     const result = await isSystemAdmin(ADMIN_USER_ID);
 
-    expect(result).toBe(true);
+    expect(result).toBe(false);
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
   });
 
-  it('returns false in test env when the user email does not match ADMIN_EMAIL', async () => {
+  it('returns false in production even when ENABLE_DEV_ADMIN=true', async () => {
+    Object.defineProperty(process.env, 'NODE_ENV', { value: 'production', writable: true });
+    process.env.ENABLE_DEV_ADMIN = 'true';
+    mockPrisma.user.findUnique.mockResolvedValue({ email: ADMIN_EMAIL });
+
+    const result = await isSystemAdmin(ADMIN_USER_ID);
+
+    expect(result).toBe(false);
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('returns false when email does not match ADMIN_EMAIL', async () => {
+    Object.defineProperty(process.env, 'NODE_ENV', { value: 'development', writable: true });
+    process.env.ENABLE_DEV_ADMIN = 'true';
     mockPrisma.user.findUnique.mockResolvedValue({ email: 'attacker@example.com' });
 
     const result = await isSystemAdmin('attacker-id');

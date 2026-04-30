@@ -16,6 +16,8 @@ import type { Server } from '../types/server';
 
 jest.mock('../lib/api-client', () => ({
   getAccessToken: jest.fn(() => 'mock-token'),
+  fetchSseTicket: jest.fn(() => Promise.resolve('mock-ticket')),
+  refreshAccessToken: jest.fn(() => Promise.resolve()),
 }));
 
 // ─── Mock EventSource ─────────────────────────────────────────────────────────
@@ -111,6 +113,14 @@ const MOCK_SERVER: Server = {
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
+/**
+ * The hooks use an async connect() that awaits fetchSseTicket before creating
+ * the EventSource. Even though the mock resolves immediately, the await still
+ * defers to the microtask queue. flushPromises drains it so the EventSource
+ * exists by the time assertions run.
+ */
+const flushPromises = () => act(async () => {});
+
 const originalEnv = process.env;
 
 beforeEach(() => {
@@ -128,7 +138,7 @@ afterEach(() => {
 // ─── Connection ───────────────────────────────────────────────────────────────
 
 describe('useChannelEvents — connection', () => {
-  it('creates an EventSource with the correct URL', () => {
+  it('creates an EventSource with the correct URL', async () => {
     renderHook(() =>
       useChannelEvents({
         channelId: CHANNEL_ID,
@@ -137,13 +147,14 @@ describe('useChannelEvents — connection', () => {
         onMessageDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     expect(MockEventSource).toHaveBeenCalledWith(
-      `${API_URL}/api/events/channel/${CHANNEL_ID}?token=mock-token`,
+      `${API_URL}/api/events/channel/${CHANNEL_ID}?ticket=mock-ticket`,
     );
   });
 
-  it('does NOT create EventSource when enabled=false', () => {
+  it('does NOT create EventSource when enabled=false', async () => {
     renderHook(() =>
       useChannelEvents({
         channelId: CHANNEL_ID,
@@ -153,11 +164,12 @@ describe('useChannelEvents — connection', () => {
         enabled: false,
       }),
     );
+    await flushPromises();
 
     expect(MockEventSource).not.toHaveBeenCalled();
   });
 
-  it('closes the EventSource on unmount', () => {
+  it('closes the EventSource on unmount', async () => {
     const { unmount } = renderHook(() =>
       useChannelEvents({
         channelId: CHANNEL_ID,
@@ -166,13 +178,14 @@ describe('useChannelEvents — connection', () => {
         onMessageDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     unmount();
 
     expect(mockEventSourceInstance?.close).toHaveBeenCalled();
   });
 
-  it('re-creates EventSource when channelId changes', () => {
+  it('re-creates EventSource when channelId changes', async () => {
     const { rerender } = renderHook(
       ({ channelId }: { channelId: string }) =>
         useChannelEvents({
@@ -183,10 +196,12 @@ describe('useChannelEvents — connection', () => {
         }),
       { initialProps: { channelId: CHANNEL_ID } },
     );
+    await flushPromises();
 
     expect(MockEventSource).toHaveBeenCalledTimes(1);
 
     rerender({ channelId: '550e8400-e29b-41d4-a716-446655440002' });
+    await flushPromises();
 
     expect(MockEventSource).toHaveBeenCalledTimes(2);
   });
@@ -195,7 +210,7 @@ describe('useChannelEvents — connection', () => {
 // ─── Event handling ───────────────────────────────────────────────────────────
 
 describe('useChannelEvents — event handling', () => {
-  it('calls onMessageCreated with parsed message on message:created event', () => {
+  it('calls onMessageCreated with parsed message on message:created event', async () => {
     const onMessageCreated = jest.fn();
 
     renderHook(() =>
@@ -206,6 +221,7 @@ describe('useChannelEvents — event handling', () => {
         onMessageDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('message:created', MOCK_MESSAGE);
@@ -215,7 +231,7 @@ describe('useChannelEvents — event handling', () => {
     expect(onMessageCreated).toHaveBeenCalledWith(MOCK_MESSAGE);
   });
 
-  it('calls onMessageEdited with parsed message on message:edited event', () => {
+  it('calls onMessageEdited with parsed message on message:edited event', async () => {
     const onMessageEdited = jest.fn();
     const editedMessage = {
       ...MOCK_MESSAGE,
@@ -231,6 +247,7 @@ describe('useChannelEvents — event handling', () => {
         onMessageDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('message:edited', editedMessage);
@@ -240,7 +257,7 @@ describe('useChannelEvents — event handling', () => {
     expect(onMessageEdited).toHaveBeenCalledWith(editedMessage);
   });
 
-  it('calls onMessageDeleted with messageId on message:deleted event', () => {
+  it('calls onMessageDeleted with messageId on message:deleted event', async () => {
     const onMessageDeleted = jest.fn();
 
     renderHook(() =>
@@ -251,6 +268,7 @@ describe('useChannelEvents — event handling', () => {
         onMessageDeleted,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('message:deleted', { messageId: 'msg-001' });
@@ -260,7 +278,7 @@ describe('useChannelEvents — event handling', () => {
     expect(onMessageDeleted).toHaveBeenCalledWith('msg-001');
   });
 
-  it('registers event listeners for all three event types', () => {
+  it('registers event listeners for all three event types', async () => {
     renderHook(() =>
       useChannelEvents({
         channelId: CHANNEL_ID,
@@ -269,6 +287,7 @@ describe('useChannelEvents — event handling', () => {
         onMessageDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     const addedTypes = (
       mockEventSourceInstance!.addEventListener.mock.calls as [string, unknown][]
@@ -282,7 +301,7 @@ describe('useChannelEvents — event handling', () => {
 // ─── Edge cases ───────────────────────────────────────────────────────────────
 
 describe('useChannelEvents — edge cases', () => {
-  it('does not throw when receiving malformed JSON in an event', () => {
+  it('does not throw when receiving malformed JSON in an event', async () => {
     const onMessageCreated = jest.fn();
 
     renderHook(() =>
@@ -293,6 +312,7 @@ describe('useChannelEvents — edge cases', () => {
         onMessageDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -318,7 +338,7 @@ describe('useChannelEvents — edge cases', () => {
     );
   });
 
-  it('removes event listeners on unmount', () => {
+  it('removes event listeners on unmount', async () => {
     const { unmount } = renderHook(() =>
       useChannelEvents({
         channelId: CHANNEL_ID,
@@ -327,6 +347,7 @@ describe('useChannelEvents — edge cases', () => {
         onMessageDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     unmount();
 
@@ -337,7 +358,7 @@ describe('useChannelEvents — edge cases', () => {
 // ─── onServerUpdated extension ────────────────────────────────────────────────
 
 describe('useChannelEvents — onServerUpdated', () => {
-  it('calls onServerUpdated with parsed server data when server:updated event fires', () => {
+  it('calls onServerUpdated with parsed server data when server:updated event fires', async () => {
     const onServerUpdated = jest.fn();
 
     renderHook(() =>
@@ -349,6 +370,7 @@ describe('useChannelEvents — onServerUpdated', () => {
         onServerUpdated,
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateEvent('server:updated', MOCK_SERVER);
@@ -358,7 +380,7 @@ describe('useChannelEvents — onServerUpdated', () => {
     expect(onServerUpdated).toHaveBeenCalledWith(MOCK_SERVER);
   });
 
-  it('does not throw when onServerUpdated is not provided (backwards compatible)', () => {
+  it('does not throw when onServerUpdated is not provided (backwards compatible)', async () => {
     renderHook(() =>
       useChannelEvents({
         channelId: CHANNEL_ID,
@@ -368,6 +390,7 @@ describe('useChannelEvents — onServerUpdated', () => {
         // onServerUpdated intentionally omitted
       }),
     );
+    await flushPromises();
 
     expect(() => {
       act(() => {
@@ -376,7 +399,7 @@ describe('useChannelEvents — onServerUpdated', () => {
     }).not.toThrow();
   });
 
-  it('registers a server:updated event listener', () => {
+  it('registers a server:updated event listener', async () => {
     renderHook(() =>
       useChannelEvents({
         channelId: CHANNEL_ID,
@@ -386,6 +409,7 @@ describe('useChannelEvents — onServerUpdated', () => {
         onServerUpdated: jest.fn(),
       }),
     );
+    await flushPromises();
 
     const addedTypes = (
       mockEventSourceInstance!.addEventListener.mock.calls as [string, unknown][]
@@ -393,7 +417,7 @@ describe('useChannelEvents — onServerUpdated', () => {
     expect(addedTypes).toContain('server:updated');
   });
 
-  it('removes the server:updated listener on unmount', () => {
+  it('removes the server:updated listener on unmount', async () => {
     const { unmount } = renderHook(() =>
       useChannelEvents({
         channelId: CHANNEL_ID,
@@ -403,6 +427,7 @@ describe('useChannelEvents — onServerUpdated', () => {
         onServerUpdated: jest.fn(),
       }),
     );
+    await flushPromises();
 
     unmount();
 
@@ -412,7 +437,7 @@ describe('useChannelEvents — onServerUpdated', () => {
     expect(removedTypes).toContain('server:updated');
   });
 
-  it('logs when the EventSource connection fails before opening', () => {
+  it('logs when the EventSource connection fails before opening', async () => {
     renderHook(() =>
       useChannelEvents({
         channelId: CHANNEL_ID,
@@ -421,6 +446,7 @@ describe('useChannelEvents — onServerUpdated', () => {
         onMessageDeleted: jest.fn(),
       }),
     );
+    await flushPromises();
 
     act(() => {
       mockEventSourceInstance!.simulateError();

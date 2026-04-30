@@ -1,21 +1,26 @@
 /**
  * SSE Router — Issue #180
  *
- * GET /api/events/channel/:channelId?token=<accessToken>
+ * POST /api/events/ticket
+ *   Requires Authorization: Bearer <accessToken>.
+ *   Returns a one-shot nonce stored in Redis for 60 s.
  *
- * Streams real-time message events to authenticated, authorised clients using
- * Server-Sent Events.
+ * GET /api/events/channel/:channelId?ticket=<nonce>
+ * GET /api/events/server/:serverId?ticket=<nonce>
+ * GET /api/events/user?ticket=<nonce>
  *
- * Auth: the browser's native EventSource API cannot send custom headers, so the
- * access token is accepted via a `?token=` query parameter instead of the
- * Authorization header. The token is validated identically to requireAuth.
+ * Streams real-time events using Server-Sent Events.
  *
- * Authorisation: verifies the authenticated user is a member of the server that
- * owns the requested channel, preventing access to PRIVATE channels by non-members.
+ * Auth: EventSource cannot send custom headers, so a short-lived one-shot ticket
+ * is used instead of passing the JWT directly in the query string. The frontend
+ * calls POST /api/events/ticket first, then opens the EventSource with ?ticket=<nonce>.
+ * The nonce is consumed immediately on first use, preventing replay.
  */
 
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db/prisma';
+import { redis } from '../db/redis';
 import { createLogger } from '../lib/logger';
 import { authService } from '../services/auth.service';
 import { eventBus, EventChannels } from '../events/eventBus';
@@ -49,6 +54,67 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function isValidUUID(id: string): boolean {
   return UUID_RE.test(id.trim());
 }
+
+// ─── SSE ticket helpers ───────────────────────────────────────────────────────
+
+const TICKET_TTL_SECONDS = 60;
+
+function ticketKey(nonce: string): string {
+  return `sse:ticket:${nonce}`;
+}
+
+/**
+ * Atomically read and delete the ticket key so concurrent requests cannot both
+ * redeem the same one-shot nonce. Lua works on all Redis versions (GETDEL alone is 6.2+).
+ */
+const REDEEM_TICKET_LUA = `
+local v = redis.call('GET', KEYS[1])
+if v == false then return false end
+redis.call('DEL', KEYS[1])
+return v
+`;
+
+/**
+ * Exchange a one-shot nonce for the userId it was issued for, then delete it.
+ * Returns null if the nonce does not exist or has expired.
+ */
+async function redeemTicket(nonce: string): Promise<string | null> {
+  const key = ticketKey(nonce);
+  const raw = (await redis.eval(REDEEM_TICKET_LUA, 1, key)) as string | boolean | null;
+  if (raw === false || raw == null) return null;
+  return typeof raw === 'string' ? raw : String(raw);
+}
+
+// ─── Ticket issuance endpoint ─────────────────────────────────────────────────
+
+/**
+ * POST /api/events/ticket
+ *
+ * Requires Authorization: Bearer <accessToken>.
+ * Returns { ticket: <nonce> } — the nonce must be passed as ?ticket=<nonce>
+ * when opening an SSE connection. The nonce is valid for 60 seconds and can
+ * only be used once.
+ */
+eventsRouter.post('/ticket', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing or invalid Authorization header' });
+    return;
+  }
+
+  let userId: string;
+  try {
+    const payload = authService.verifyAccessToken(authHeader.slice(7));
+    userId = payload.sub;
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired access token' });
+    return;
+  }
+
+  const nonce = crypto.randomUUID();
+  await redis.set(ticketKey(nonce), userId, 'EX', TICKET_TTL_SECONDS);
+  res.json({ ticket: nonce });
+});
 
 // ─── Prisma select shape (matches frontend Message type) ──────────────────────
 
@@ -191,19 +257,16 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     return;
   }
 
-  // ── Auth — accept token via query param (EventSource cannot send headers) ──
-  const token = typeof req.query.token === 'string' ? req.query.token : null;
-  if (!token) {
-    res.status(401).json({ error: 'Missing token query parameter' });
+  // ── Auth — one-shot ticket exchanged via POST /api/events/ticket ─────────
+  const ticket = typeof req.query.ticket === 'string' ? req.query.ticket : null;
+  if (!ticket) {
+    res.status(401).json({ error: 'Missing ticket query parameter' });
     return;
   }
 
-  let userId: string;
-  try {
-    const payload = authService.verifyAccessToken(token);
-    userId = payload.sub;
-  } catch {
-    res.status(401).json({ error: 'Invalid or expired access token' });
+  const userId = await redeemTicket(ticket);
+  if (!userId) {
+    res.status(401).json({ error: 'Invalid or expired SSE ticket' });
     return;
   }
 
@@ -414,14 +477,14 @@ const CHANNEL_SSE_SELECT = {
 // ─── Server-scoped SSE route — channel list updates ───────────────────────────
 
 /**
- * GET /api/events/server/:serverId?token=<accessToken>
+ * GET /api/events/server/:serverId?ticket=<nonce>
  *
  * Streams real-time server events to authenticated, authorised clients using
  * Server-Sent Events. Scoped to a server so all members see the same sidebar,
  * member, message, and server updates regardless of which channel they are viewing.
  *
- * Auth: same token-via-query-param pattern as /channel/:channelId (EventSource cannot
- * send custom headers).
+ * Auth: one-shot ticket pattern — call POST /api/events/ticket first, then
+ * pass the returned nonce as ?ticket=<nonce>.
  *
  * Authorisation: user must be a member of the server.
  */
@@ -433,19 +496,16 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     return;
   }
 
-  // ── Auth ─────────────────────────────────────────────────────────────────
-  const token = typeof req.query.token === 'string' ? req.query.token : null;
-  if (!token) {
-    res.status(401).json({ error: 'Missing token query parameter' });
+  // ── Auth — one-shot ticket ────────────────────────────────────────────────
+  const ticket = typeof req.query.ticket === 'string' ? req.query.ticket : null;
+  if (!ticket) {
+    res.status(401).json({ error: 'Missing ticket query parameter' });
     return;
   }
 
-  let userId: string;
-  try {
-    const payload = authService.verifyAccessToken(token);
-    userId = payload.sub;
-  } catch {
-    res.status(401).json({ error: 'Invalid or expired access token' });
+  const userId = await redeemTicket(ticket);
+  if (!userId) {
+    res.status(401).json({ error: 'Invalid or expired SSE ticket' });
     return;
   }
 
@@ -806,24 +866,21 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
 // ─── User-scoped notification SSE route ──────────────────────────────────────
 
 /**
- * GET /api/events/user?token=<accessToken>
+ * GET /api/events/user?ticket=<nonce>
  *
  * Streams real-time mention notifications to the authenticated user.
  * Each connected client only receives events addressed to their own userId.
  */
 eventsRouter.get('/user', async (req: Request, res: Response) => {
-  const token = typeof req.query.token === 'string' ? req.query.token : null;
-  if (!token) {
-    res.status(401).json({ error: 'Missing token query parameter' });
+  const ticket = typeof req.query.ticket === 'string' ? req.query.ticket : null;
+  if (!ticket) {
+    res.status(401).json({ error: 'Missing ticket query parameter' });
     return;
   }
 
-  let userId: string;
-  try {
-    const payload = authService.verifyAccessToken(token);
-    userId = payload.sub;
-  } catch {
-    res.status(401).json({ error: 'Invalid or expired access token' });
+  const userId = await redeemTicket(ticket);
+  if (!userId) {
+    res.status(401).json({ error: 'Invalid or expired SSE ticket' });
     return;
   }
 

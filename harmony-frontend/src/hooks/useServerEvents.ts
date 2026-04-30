@@ -39,7 +39,7 @@ import type { Channel, ChannelVisibility } from '@/types/channel';
 import type { Message } from '@/types/message';
 import type { User, UserStatus } from '@/types/user';
 import type { Server } from '@/types/server';
-import { getAccessToken, refreshAccessToken } from '@/lib/api-client';
+import { getAccessToken, refreshAccessToken, fetchSseTicket } from '@/lib/api-client';
 import { createFrontendLogger } from '@/lib/frontend-logger';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 
@@ -134,12 +134,34 @@ export function useServerEvents({
     const token = getAccessToken();
     if (!token) return;
 
-    let url = `${apiUrl}/api/events/server/${serverId}?token=${encodeURIComponent(token)}`;
-    // On reconnect, pass the last seen event id so the server can replay missed messages.
-    if (reconnectKey > 0 && lastEventIdRef.current) {
-      url += `&lastEventId=${encodeURIComponent(lastEventIdRef.current)}`;
-    }
-    const es = new EventSource(url);
+    let es: EventSource | null = null;
+    let cancelled = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    // Tracks registered handlers so cleanup can call removeEventListener.
+    const activeHandlers: Array<[string, (event: MessageEvent<string>) => void]> = [];
+
+    const connect = async () => {
+      let ticket: string;
+      try {
+        ticket = await fetchSseTicket(apiUrl, token);
+      } catch (err) {
+        logger.warn('Failed to fetch SSE ticket; aborting server connection', {
+          feature: 'server-events',
+          event: 'ticket_fetch_failed',
+          source: 'sse',
+          target: '/api/events/ticket',
+          error: err,
+        });
+        return;
+      }
+      if (cancelled) return;
+
+      let url = `${apiUrl}/api/events/server/${serverId}?ticket=${encodeURIComponent(ticket)}`;
+      // On reconnect, pass the last seen event id so the server can replay missed messages.
+      if (reconnectKey > 0 && lastEventIdRef.current) {
+        url += `&lastEventId=${encodeURIComponent(lastEventIdRef.current)}`;
+      }
+      es = new EventSource(url);
 
     const handleCreated = (event: MessageEvent<string>) => {
       try {
@@ -321,67 +343,75 @@ export function useServerEvents({
       }
     };
 
-    es.addEventListener('channel:created', handleCreated);
-    es.addEventListener('channel:updated', handleUpdated);
-    es.addEventListener('channel:deleted', handleDeleted);
-    es.addEventListener('member:joined', handleMemberJoined);
-    es.addEventListener('member:left', handleMemberLeft);
-    es.addEventListener('member:statusChanged', handleMemberStatusChanged);
-    es.addEventListener('channel:visibility-changed', handleVisibilityChanged);
-    es.addEventListener('message:created', handleMessageCreated);
-    es.addEventListener('message:edited', handleMessageEdited);
-    es.addEventListener('message:deleted', handleMessageDeleted);
-    es.addEventListener('server:updated', handleServerUpdated);
+      es.addEventListener('channel:created', handleCreated);
+      es.addEventListener('channel:updated', handleUpdated);
+      es.addEventListener('channel:deleted', handleDeleted);
+      es.addEventListener('member:joined', handleMemberJoined);
+      es.addEventListener('member:left', handleMemberLeft);
+      es.addEventListener('member:statusChanged', handleMemberStatusChanged);
+      es.addEventListener('channel:visibility-changed', handleVisibilityChanged);
+      es.addEventListener('message:created', handleMessageCreated);
+      es.addEventListener('message:edited', handleMessageEdited);
+      es.addEventListener('message:deleted', handleMessageDeleted);
+      es.addEventListener('server:updated', handleServerUpdated);
+      activeHandlers.push(
+        ['channel:created', handleCreated],
+        ['channel:updated', handleUpdated],
+        ['channel:deleted', handleDeleted],
+        ['member:joined', handleMemberJoined],
+        ['member:left', handleMemberLeft],
+        ['member:statusChanged', handleMemberStatusChanged],
+        ['channel:visibility-changed', handleVisibilityChanged],
+        ['message:created', handleMessageCreated],
+        ['message:edited', handleMessageEdited],
+        ['message:deleted', handleMessageDeleted],
+        ['server:updated', handleServerUpdated],
+      );
 
-    let everOpened = false;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+      let everOpened = false;
 
-    es.onopen = () => {
-      everOpened = true;
-      reconnectCountRef.current = 0; // reset budget on successful connection
-    };
-    es.onerror = () => {
-      logger.warn('Server SSE connection failed', {
-        feature: 'server-events',
-        event: everOpened ? 'stream_disconnected' : 'stream_failed',
-        source: 'sse',
-        target: '/api/events/server/[serverId]',
-      });
-      if (!everOpened && reconnectCountRef.current === 0) {
-        // Never successfully opened on the first attempt — likely 401/403. Stop retrying.
-        es.close();
-        return;
-      }
-
-      // Connection dropped after being healthy. Stop native retry (stale token)
-      // and schedule a reconnect with a proactive token refresh.
-      es.close();
-      const attempt = reconnectCountRef.current;
-      if (attempt >= MAX_RECONNECT_ATTEMPTS) return;
-
-      reconnectCountRef.current += 1;
-      const delay = RECONNECT_DELAY_MS * reconnectCountRef.current;
-      reconnectTimer = setTimeout(() => {
-        refreshAccessToken().finally(() => {
-          setReconnectKey(k => k + 1);
+      es.onopen = () => {
+        everOpened = true;
+        reconnectCountRef.current = 0; // reset budget on successful connection
+      };
+      es.onerror = () => {
+        logger.warn('Server SSE connection failed', {
+          feature: 'server-events',
+          event: everOpened ? 'stream_disconnected' : 'stream_failed',
+          source: 'sse',
+          target: '/api/events/server/[serverId]',
         });
-      }, delay);
+        if (!everOpened && reconnectCountRef.current === 0) {
+          // Never successfully opened on the first attempt — likely 401/403. Stop retrying.
+          es?.close();
+          return;
+        }
+
+        // Connection dropped after being healthy. Stop native retry (stale ticket)
+        // and schedule a reconnect with a proactive token refresh.
+        es?.close();
+        const attempt = reconnectCountRef.current;
+        if (attempt >= MAX_RECONNECT_ATTEMPTS) return;
+
+        reconnectCountRef.current += 1;
+        const delay = RECONNECT_DELAY_MS * reconnectCountRef.current;
+        reconnectTimer = setTimeout(() => {
+          refreshAccessToken().finally(() => {
+            setReconnectKey(k => k + 1);
+          });
+        }, delay);
+      };
     };
+
+    connect();
 
     return () => {
+      cancelled = true;
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-      es.removeEventListener('channel:created', handleCreated);
-      es.removeEventListener('channel:updated', handleUpdated);
-      es.removeEventListener('channel:deleted', handleDeleted);
-      es.removeEventListener('member:joined', handleMemberJoined);
-      es.removeEventListener('member:left', handleMemberLeft);
-      es.removeEventListener('member:statusChanged', handleMemberStatusChanged);
-      es.removeEventListener('channel:visibility-changed', handleVisibilityChanged);
-      es.removeEventListener('message:created', handleMessageCreated);
-      es.removeEventListener('message:edited', handleMessageEdited);
-      es.removeEventListener('message:deleted', handleMessageDeleted);
-      es.removeEventListener('server:updated', handleServerUpdated);
-      es.close();
+      if (es) {
+        activeHandlers.forEach(([type, handler]) => es!.removeEventListener(type, handler));
+        es.close();
+      }
     };
   }, [serverId, enabled, reconnectKey]);
 }
