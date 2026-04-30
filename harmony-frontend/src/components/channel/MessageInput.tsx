@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { cn } from '@/lib/utils';
+import { cn, getUserErrorMessage } from '@/lib/utils';
 import { sendMessageAction } from '@/app/actions/sendMessage';
 import { createReplyAction } from '@/app/actions/createReply';
 import { apiClient } from '@/lib/api-client';
@@ -296,8 +296,8 @@ export function MessageInput({
       setPendingAttachments([]);
       closeMentionDropdown();
       onMessageSent?.(msg);
-    } catch {
-      setSendError('Failed to send message. Please try again.');
+    } catch (err) {
+      setSendError(getUserErrorMessage(err, 'Failed to send message. Please try again.'));
     } finally {
       setIsSending(false);
     }
