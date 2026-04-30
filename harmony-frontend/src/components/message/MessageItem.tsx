@@ -653,7 +653,9 @@ export function MessageItem({
     const re = /@([a-zA-Z0-9_-]{1,32})/g;
     let m;
     while ((m = re.exec(displayedContent)) !== null) {
-      if (m[1].toLowerCase() === currentUsername.toLowerCase()) return true;
+      const name = m[1].toLowerCase();
+      if (name === currentUsername.toLowerCase()) return true;
+      if (name === 'everyone' || name === 'here') return true;
     }
     return false;
   })();
