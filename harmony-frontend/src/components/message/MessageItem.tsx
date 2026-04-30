@@ -46,6 +46,8 @@ function getEmbedVideoUrl(url: string): string | null {
   }
 }
 
+type ContentPart = { kind: 'text'; value: string } | { kind: 'link'; url: string };
+
 function MessageContent({ content, currentUsername }: { content: string; currentUsername?: string }) {
   const matches = [...content.matchAll(URL_PATTERN)];
   if (matches.length === 0) {
@@ -56,7 +58,7 @@ function MessageContent({ content, currentUsername }: { content: string; current
     );
   }
 
-  const textSegments: string[] = [];
+  const parts: ContentPart[] = [];
   const videoEmbeds: string[] = [];
   let lastIndex = 0;
 
@@ -65,28 +67,49 @@ function MessageContent({ content, currentUsername }: { content: string; current
     const index = match.index ?? 0;
     const embedUrl = getEmbedVideoUrl(url);
 
-    textSegments.push(content.slice(lastIndex, index));
-    if (!embedUrl) {
-      textSegments.push(url);
-    } else {
+    if (index > lastIndex) {
+      parts.push({ kind: 'text', value: content.slice(lastIndex, index) });
+    }
+
+    if (embedUrl) {
       videoEmbeds.push(embedUrl);
+    } else {
+      parts.push({ kind: 'link', url });
     }
 
     lastIndex = index + url.length;
   }
 
-  textSegments.push(content.slice(lastIndex));
-  const textContent = textSegments.join('').trim();
+  if (lastIndex < content.length) {
+    parts.push({ kind: 'text', value: content.slice(lastIndex) });
+  }
+
+  const hasInlineContent = parts.length > 0;
 
   return (
     <div className='mt-0.5'>
-      {textContent && (
+      {hasInlineContent && (
         <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-          <MentionText content={textContent} currentUsername={currentUsername} />
+          {parts.map((part, i) => {
+            if (part.kind === 'link') {
+              return (
+                <a
+                  key={i}
+                  href={part.url}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='text-blue-400 underline hover:text-blue-300'
+                >
+                  {part.url}
+                </a>
+              );
+            }
+            return <MentionText key={i} content={part.value} currentUsername={currentUsername} />;
+          })}
         </p>
       )}
       {videoEmbeds.length > 0 && (
-        <div className={`${textContent ? 'mt-2' : ''} flex flex-col gap-2`}>
+        <div className={`${hasInlineContent ? 'mt-2' : ''} flex flex-col gap-2`}>
           {videoEmbeds.map(url => (
             <video
               key={url}
