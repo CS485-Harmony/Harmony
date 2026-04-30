@@ -107,6 +107,7 @@ export default async function GuestChannelPage({ params }: PageProps) {
     publicMetaTags,
   );
   const isIndexable = channel?.visibility === ChannelVisibility.PUBLIC_INDEXABLE;
+  const canonicalUrl = getChannelUrl(serverSlug, channelSlug);
 
   const jsonLd = isIndexable
     ? {
@@ -114,12 +115,13 @@ export default async function GuestChannelPage({ params }: PageProps) {
         '@type': 'DiscussionForumPosting',
         'name': title,
         'headline': title,
-        'url': getChannelUrl(serverSlug, channelSlug),
+        'url': canonicalUrl,
         'description': description,
         'text': description,
         'author': {
           '@type': 'Organization',
           'name': serverName,
+          'url': canonicalUrl,
         },
         ...(channel?.createdAt && { datePublished: channel.createdAt }),
       }

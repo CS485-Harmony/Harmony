@@ -141,6 +141,7 @@ describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
       'author': {
         '@type': 'Organization',
         'name': 'Harmony HQ',
+        'url': 'https://harmony.chat/c/harmony-hq/general',
       },
       'url': 'https://harmony.chat/c/harmony-hq/general',
       'datePublished': '2026-01-01T00:00:00.000Z',
@@ -189,6 +190,7 @@ describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
       author: {
         '@type': 'Organization',
         'name': 'fallback-server',
+        'url': 'https://harmony.chat/c/fallback-server/general',
       },
     });
   });
@@ -212,6 +214,7 @@ describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
       author: {
         '@type': 'Organization',
         'name': 'admin',
+        'url': 'https://harmony.chat/c/admin/general',
       },
       name: 'general - admin | Harmony',
       headline: 'general - admin | Harmony',
