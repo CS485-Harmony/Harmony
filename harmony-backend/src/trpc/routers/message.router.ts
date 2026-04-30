@@ -22,10 +22,11 @@ export const messageRouter = router({
         limit: z.number().int().min(1).max(100).default(20),
       }),
     )
-    .query(({ input }) =>
+    .query(({ input, ctx }) =>
       messageService.getMessages({
         serverId: input.serverId,
         channelId: input.channelId,
+        userId: ctx.userId,
         cursor: input.cursor,
         limit: input.limit,
       }),

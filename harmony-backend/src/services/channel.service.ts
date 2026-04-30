@@ -5,6 +5,7 @@ import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from './cache.s
 import { eventBus, EventChannels } from '../events/eventBus';
 import { channelRepository } from '../repositories/channel.repository';
 import { serverRepository } from '../repositories/server.repository';
+import { serverMemberRepository } from '../repositories/serverMember.repository';
 
 export interface CreateChannelInput {
   serverId: string;
@@ -25,8 +26,22 @@ export interface UpdateChannelInput {
 const logger = createLogger({ component: 'channel-service' });
 
 export const channelService = {
-  async getChannels(serverId: string) {
-    return channelRepository.findByServerId(serverId);
+  async getChannels(serverId: string, userId?: string) {
+    if (!userId) {
+      // Unauthenticated callers never reach here via withPermission, but guard defensively.
+      return channelRepository.findByServerId(serverId);
+    }
+
+    const serverMember = await serverMemberRepository.findByUserAndServerSelect(userId, serverId);
+    const isAdminOrAbove =
+      serverMember?.role === 'OWNER' || serverMember?.role === 'ADMIN';
+
+    if (isAdminOrAbove) {
+      return channelRepository.findByServerId(serverId);
+    }
+
+    // Non-admins see non-private channels + private channels they're explicitly added to.
+    return channelRepository.findAccessibleByServerId(serverId, userId);
   },
 
   async getChannelBySlug(serverSlug: string, channelSlug: string) {

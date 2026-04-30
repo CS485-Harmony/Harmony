@@ -82,6 +82,7 @@ model User {
   refreshTokens           RefreshToken[]
   ownedServers            Server[]                  @relation("ServerOwner")
   serverMemberships       ServerMember[]
+  channelMemberships      ChannelMember[]
   createdInvites          ServerInvite[]            @relation("InviteCreator")
   mentions                MessageMention[]
   notifications           Notification[]
@@ -142,6 +143,19 @@ model ServerMember {
   @@map("server_members")
 }
 
+model ChannelMember {
+  userId    String   @map("user_id") @db.Uuid
+  channelId String   @map("channel_id") @db.Uuid
+  addedAt   DateTime @default(now()) @map("added_at") @db.Timestamptz
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([userId, channelId])
+  @@index([channelId], map: "idx_channel_members_channel")
+  @@map("channel_members")
+}
+
 model Channel {
   id         String            @id @default(uuid()) @db.Uuid
   serverId   String            @map("server_id") @db.Uuid
@@ -160,6 +174,7 @@ model Channel {
   auditLog          VisibilityAuditLog[]
   generatedMetaTags GeneratedMetaTags?
   notificationPreferences NotificationPreference[]
+  channelMembers    ChannelMember[]
 
   // Composite unique — one slug per server
   @@unique([serverId, slug], map: "idx_channels_server_slug")

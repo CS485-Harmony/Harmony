@@ -5,6 +5,7 @@ import { cacheService, CacheTTL, sanitizeKeySegment } from './cache.service';
 import { permissionService } from './permission.service';
 import { eventBus, EventChannels } from '../events/eventBus';
 import { channelRepository } from '../repositories/channel.repository';
+import { channelMemberRepository } from '../repositories/channelMember.repository';
 import { messageRepository } from '../repositories/message.repository';
 import { processMentions } from './mention.service';
 import { pushNotificationService } from './pushNotification.service';
@@ -14,6 +15,7 @@ import { pushNotificationService } from './pushNotification.service';
 export interface GetMessagesInput {
   serverId: string;
   channelId: string;
+  userId: string;
   cursor?: string; // messageId to paginate from (exclusive)
   limit?: number; // default 20
 }
@@ -95,6 +97,23 @@ async function requireChannelInServer(channelId: string, serverId: string) {
   return channel;
 }
 
+/** Throws FORBIDDEN if the user cannot access a PRIVATE channel (not admin+ and not explicit member). */
+async function requirePrivateChannelAccess(
+  channel: { id: string; visibility: string },
+  userId: string,
+  serverId: string,
+) {
+  if (channel.visibility !== 'PRIVATE') return;
+
+  const role = await permissionService.getMemberRole(userId, serverId);
+  if (role === 'OWNER' || role === 'ADMIN') return;
+
+  const isMember = await channelMemberRepository.isMember(userId, channel.id);
+  if (!isMember) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have access to this private channel' });
+  }
+}
+
 /**
  * Resolve a message (non-deleted) and assert its channel belongs to `serverId`.
  */
@@ -115,10 +134,11 @@ export const messageService = {
    * Pass the last returned message's id as `cursor` to get the next page.
    */
   async getMessages(input: GetMessagesInput) {
-    const { serverId, channelId, cursor, limit = 20 } = input;
+    const { serverId, channelId, userId, cursor, limit = 20 } = input;
     const clampedLimit = Math.min(Math.max(1, limit), 100);
 
-    await requireChannelInServer(channelId, serverId);
+    const channel = await requireChannelInServer(channelId, serverId);
+    await requirePrivateChannelAccess(channel, userId, serverId);
 
     const cacheKey = msgCacheKey(serverId, channelId, cursor, clampedLimit);
 
@@ -149,6 +169,7 @@ export const messageService = {
     const { serverId, channelId, authorId, content, attachments } = input;
 
     const channel = await requireChannelInServer(channelId, serverId);
+    await requirePrivateChannelAccess(channel, authorId, serverId);
 
     const message = await messageRepository.create({
       channel: { connect: { id: channelId } },

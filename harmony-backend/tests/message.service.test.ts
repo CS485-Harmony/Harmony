@@ -50,7 +50,7 @@ beforeAll(async () => {
   channelId = channel.id;
 
   await prisma.serverMember.create({
-    data: { userId: authorId, serverId, role: 'MEMBER' },
+    data: { userId: authorId, serverId, role: 'ADMIN' },
   });
 });
 
@@ -175,7 +175,7 @@ describe('messageService.getMessages', () => {
   });
 
   it('returns messages with author snapshots', async () => {
-    const result = await messageService.getMessages({ serverId, channelId: paginationChannelId });
+    const result = await messageService.getMessages({ serverId, channelId: paginationChannelId, userId: authorId });
     expect(Array.isArray(result.messages)).toBe(true);
     expect(result.messages.length).toBeGreaterThanOrEqual(1);
     expect(result.messages[0].author).toHaveProperty('username');
@@ -186,6 +186,7 @@ describe('messageService.getMessages', () => {
     const result = await messageService.getMessages({
       serverId,
       channelId: paginationChannelId,
+      userId: authorId,
       limit: 3,
     });
     expect(result.messages.length).toBeLessThanOrEqual(3);
@@ -195,6 +196,7 @@ describe('messageService.getMessages', () => {
     const page1 = await messageService.getMessages({
       serverId,
       channelId: paginationChannelId,
+      userId: authorId,
       limit: 2,
     });
     expect(page1.messages.length).toBe(2);
@@ -204,6 +206,7 @@ describe('messageService.getMessages', () => {
     const page2 = await messageService.getMessages({
       serverId,
       channelId: paginationChannelId,
+      userId: authorId,
       cursor: page1.nextCursor!,
     });
     const page1Ids = new Set(page1.messages.map((m) => m.id));
@@ -219,7 +222,7 @@ describe('messageService.getMessages', () => {
     });
     await messageService.deleteMessage({ messageId: msg.id, actorId: authorId, serverId });
 
-    const result = await messageService.getMessages({ serverId, channelId: paginationChannelId });
+    const result = await messageService.getMessages({ serverId, channelId: paginationChannelId, userId: authorId });
     const ids = result.messages.map((m) => m.id);
     expect(ids).not.toContain(msg.id);
   });

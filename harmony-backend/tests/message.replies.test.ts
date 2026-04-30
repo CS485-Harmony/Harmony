@@ -50,7 +50,7 @@ beforeAll(async () => {
   channelId = channel.id;
 
   await prisma.serverMember.create({
-    data: { userId: authorId, serverId, role: 'MEMBER' },
+    data: { userId: authorId, serverId, role: 'ADMIN' },
   });
 });
 
