@@ -363,15 +363,16 @@ export function HarmonyShell({
       );
       setLocalMessages(prev =>
         prev.map(msg => {
-          if (msg.author.id !== id) return msg;
-          const updatedAuthor = { ...msg.author, username, displayName, avatarUrl };
-          const updatedMsg = { ...msg, author: updatedAuthor };
-          // Also patch the parentMessage author snapshot if this message is a reply
-          // authored by the same user.
-          if (msg.parentMessage?.author.id === id) {
+          const isMainAuthor = msg.author.id === id;
+          const isParentAuthor = msg.parentMessage?.author.id === id;
+          if (!isMainAuthor && !isParentAuthor) return msg;
+          const updatedMsg = isMainAuthor
+            ? { ...msg, author: { ...msg.author, username, displayName, avatarUrl } }
+            : { ...msg };
+          if (isParentAuthor) {
             updatedMsg.parentMessage = {
-              ...msg.parentMessage,
-              author: { ...msg.parentMessage.author, username, displayName, avatarUrl },
+              ...msg.parentMessage!,
+              author: { ...msg.parentMessage!.author, username, displayName, avatarUrl },
             };
           }
           return updatedMsg;
