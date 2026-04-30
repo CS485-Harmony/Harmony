@@ -1022,6 +1022,7 @@ export function MessageItem({
             messageId={message.id}
             userId={user?.id}
             onReactionClick={handleReactionToggle}
+            highlightedEmoji={highlightedEmoji}
           />
           {localReplyCount > 0 && threadToggle}
         </div>
