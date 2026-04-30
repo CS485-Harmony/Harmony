@@ -19,6 +19,11 @@ jest.mock('@/components/channel/GuestChannelView', () => ({
   GuestChannelView: () => null,
 }));
 
+const mockPermanentRedirect = jest.fn();
+jest.mock('next/navigation', () => ({
+  permanentRedirect: (...args: unknown[]) => mockPermanentRedirect(...args),
+}));
+
 import { renderToStaticMarkup } from 'react-dom/server';
 import GuestChannelPage, { generateMetadata } from '@/app/c/[serverSlug]/[channelSlug]/page';
 import {
@@ -102,6 +107,19 @@ describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
     expect(meta.alternates?.canonical).toBe('https://harmony.chat/c/harmony-hq/general');
   });
 
+  it('uses canonical slugs from API data for metadata canonical URL', async () => {
+    mockFetchPublicServer.mockResolvedValue(makeServer({ slug: 'harmony-hq-canonical' }));
+    mockFetchPublicChannel.mockResolvedValue({
+      channel: makeChannel(ChannelVisibility.PUBLIC_INDEXABLE, { slug: 'general-canonical' }),
+      isPrivate: false,
+    });
+
+    const meta = await generateMetadata(makeParams('Harmony-HQ', 'General'));
+    expect(meta.alternates?.canonical).toBe(
+      'https://harmony.chat/c/harmony-hq-canonical/general-canonical',
+    );
+  });
+
   it('includes Open Graph tags', async () => {
     const meta = await generateMetadata(makeParams());
     expect(meta).toMatchObject({
@@ -141,10 +159,22 @@ describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
       'author': {
         '@type': 'Organization',
         'name': 'Harmony HQ',
+        'url': 'https://harmony.chat/c/harmony-hq/general',
       },
       'url': 'https://harmony.chat/c/harmony-hq/general',
       'datePublished': '2026-01-01T00:00:00.000Z',
     });
+  });
+
+  it('redirects to canonical slugs when route params are non-canonical', async () => {
+    mockFetchPublicServer.mockResolvedValue(makeServer({ slug: 'harmony-hq-canonical' }));
+    mockFetchPublicChannel.mockResolvedValue({
+      channel: makeChannel(ChannelVisibility.PUBLIC_INDEXABLE, { slug: 'general-canonical' }),
+      isPrivate: false,
+    });
+
+    await GuestChannelPage(makeParams('Harmony-HQ', 'General'));
+    expect(mockPermanentRedirect).toHaveBeenCalledWith('/c/harmony-hq-canonical/general-canonical');
   });
 
   it('reuses persisted SEO metadata in JSON-LD when present', async () => {
@@ -189,6 +219,7 @@ describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
       author: {
         '@type': 'Organization',
         'name': 'fallback-server',
+        'url': 'https://harmony.chat/c/fallback-server/general',
       },
     });
   });
@@ -212,6 +243,7 @@ describe('generateMetadata — PUBLIC_INDEXABLE channel', () => {
       author: {
         '@type': 'Organization',
         'name': 'admin',
+        'url': 'https://harmony.chat/c/harmony-hq/general',
       },
       name: 'general - admin | Harmony',
       headline: 'general - admin | Harmony',
