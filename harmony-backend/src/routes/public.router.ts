@@ -62,6 +62,9 @@ export function createPublicRouter(store?: Store) {
             createdAt: true,
             editedAt: true,
             author: { select: { id: true, username: true } },
+            attachments: {
+              select: { id: true, url: true, filename: true, contentType: true, sizeBytes: true },
+            },
           },
         });
 
@@ -111,6 +114,9 @@ export function createPublicRouter(store?: Store) {
             createdAt: true,
             editedAt: true,
             author: { select: { id: true, username: true } },
+            attachments: {
+              select: { id: true, url: true, filename: true, contentType: true, sizeBytes: true },
+            },
           },
         });
 
