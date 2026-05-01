@@ -221,7 +221,7 @@ export const channelService = {
       name: 'general',
       slug: 'general',
       type: ChannelType.TEXT,
-      visibility: isPublic ? ChannelVisibility.PUBLIC_INDEXABLE : ChannelVisibility.PRIVATE,
+      visibility: isPublic ? ChannelVisibility.PUBLIC_INDEXABLE : ChannelVisibility.PUBLIC_NO_INDEX,
       position: 0,
     }, tx);
   },
