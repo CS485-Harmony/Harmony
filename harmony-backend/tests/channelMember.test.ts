@@ -111,6 +111,12 @@ describe('channelMemberService.addMember', () => {
       channelMemberService.addMember('00000000-0000-0000-0000-000000000001', serverId, memberUserId),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
+
+  it('throws BAD_REQUEST when channel is not PRIVATE', async () => {
+    await expect(
+      channelMemberService.addMember(publicChannelId, serverId, memberUserId),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
 });
 
 describe('channelMemberService.getChannelMembers', () => {

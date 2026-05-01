@@ -22,6 +22,9 @@ export const channelMemberService = {
     if (!channel || channel.serverId !== serverId) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
     }
+    if (channel.visibility !== 'PRIVATE') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Explicit membership is only applicable to private channels' });
+    }
 
     // Target must be a member of the server
     const serverMember = await serverMemberRepository.findByUserAndServer(targetUserId, serverId);

@@ -3,6 +3,7 @@ import { prisma } from '../db/prisma';
 import { createLogger } from '../lib/logger';
 import { cacheService, CacheTTL, sanitizeKeySegment } from './cache.service';
 import { permissionService } from './permission.service';
+import { isSystemAdmin } from '../lib/admin.utils';
 import { eventBus, EventChannels } from '../events/eventBus';
 import { channelRepository } from '../repositories/channel.repository';
 import { channelMemberRepository } from '../repositories/channelMember.repository';
@@ -32,6 +33,7 @@ export interface GetThreadMessagesInput {
   parentMessageId: string;
   channelId: string;
   serverId: string;
+  userId: string;
   cursor?: string;
   limit?: number;
 }
@@ -104,6 +106,8 @@ async function requirePrivateChannelAccess(
   serverId: string,
 ) {
   if (channel.visibility !== 'PRIVATE') return;
+
+  if (await isSystemAdmin(userId)) return;
 
   const role = await permissionService.getMemberRole(userId, serverId);
   if (role === 'OWNER' || role === 'ADMIN') return;
@@ -385,7 +389,15 @@ export const messageService = {
    * Uses a transaction to atomically check-and-set, preventing concurrent
    * double-pin races.
    */
-  async pinMessage(messageId: string, serverId: string) {
+  async pinMessage(messageId: string, serverId: string, userId: string) {
+    // Access check before entering transaction to avoid non-tx reads inside the transaction.
+    const preCheck = await messageRepository.findByIdWithChannel(messageId);
+    if (!preCheck || preCheck.isDeleted || preCheck.channel.serverId !== serverId) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Message not found in this server' });
+    }
+    const channel = await requireChannelInServer(preCheck.channelId, serverId);
+    await requirePrivateChannelAccess(channel, userId, serverId);
+
     const updated = await prisma.$transaction(async (tx) => {
       const msg = await messageRepository.findByIdWithChannel(messageId, tx);
 
@@ -417,7 +429,14 @@ export const messageService = {
    * Unpin a message. Requires message:pin (MODERATOR+), checked via router RBAC.
    * Uses a transaction to atomically check-and-clear.
    */
-  async unpinMessage(messageId: string, serverId: string) {
+  async unpinMessage(messageId: string, serverId: string, userId: string) {
+    const preCheck = await messageRepository.findByIdWithChannel(messageId);
+    if (!preCheck || preCheck.isDeleted || preCheck.channel.serverId !== serverId) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Message not found in this server' });
+    }
+    const channel = await requireChannelInServer(preCheck.channelId, serverId);
+    await requirePrivateChannelAccess(channel, userId, serverId);
+
     const updated = await prisma.$transaction(async (tx) => {
       const msg = await messageRepository.findByIdWithChannel(messageId, tx);
 
@@ -448,8 +467,9 @@ export const messageService = {
   /**
    * Retrieve all pinned messages for a channel in pin order (pinnedAt DESC).
    */
-  async getPinnedMessages(channelId: string, serverId: string) {
-    await requireChannelInServer(channelId, serverId);
+  async getPinnedMessages(channelId: string, serverId: string, userId: string) {
+    const channel = await requireChannelInServer(channelId, serverId);
+    await requirePrivateChannelAccess(channel, userId, serverId);
     return messageRepository.findPinnedByChannel(channelId);
   },
 
@@ -461,7 +481,8 @@ export const messageService = {
   async createReply(input: CreateReplyInput) {
     const { parentMessageId, channelId, serverId, authorId, content } = input;
 
-    await requireChannelInServer(channelId, serverId);
+    const channel = await requireChannelInServer(channelId, serverId);
+    await requirePrivateChannelAccess(channel, authorId, serverId);
 
     const reply = await prisma.$transaction(async (tx) => {
       const parent = await messageRepository.findByIdWithChannelFull(parentMessageId, tx);
@@ -552,10 +573,11 @@ export const messageService = {
    * Retrieve paginated replies for a parent message, ordered chronologically (ASC).
    */
   async getThreadMessages(input: GetThreadMessagesInput) {
-    const { parentMessageId, channelId, serverId, cursor, limit = 20 } = input;
+    const { parentMessageId, channelId, serverId, userId, cursor, limit = 20 } = input;
     const clampedLimit = Math.min(Math.max(1, limit), 100);
 
-    await requireChannelInServer(channelId, serverId);
+    const channel = await requireChannelInServer(channelId, serverId);
+    await requirePrivateChannelAccess(channel, userId, serverId);
 
     const cacheKey =
       `thread:msgs:${sanitizeKeySegment(parentMessageId)}` +
