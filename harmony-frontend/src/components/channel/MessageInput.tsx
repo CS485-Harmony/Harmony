@@ -147,6 +147,14 @@ export function MessageInput({
     }
   }, [isSending, isUploading]);
 
+  // When a reply target is set (or changes), focus the textarea so the user
+  // can start typing immediately without a manual click.
+  useEffect(() => {
+    if (replyingTo) {
+      textareaRef.current?.focus();
+    }
+  }, [replyingTo]);
+
   const handleAttachClick = () => {
     fileInputRef.current?.click();
   };
