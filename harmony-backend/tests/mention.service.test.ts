@@ -11,7 +11,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { extractMentionedUsernames, processMentions } from '../src/services/mention.service';
+import { extractMentionedUsernames, extractBroadcastMentions, processMentions } from '../src/services/mention.service';
 
 const prisma = new PrismaClient();
 
@@ -138,6 +138,43 @@ describe('extractMentionedUsernames', () => {
   it('handles content starting mid-word after @', () => {
     // Email-style addresses should not be over-matched beyond the word boundary
     expect(extractMentionedUsernames('email@domain.com')).toEqual(['domain']);
+  });
+});
+
+// ── extractBroadcastMentions ──────────────────────────────────────────────────
+
+describe('extractBroadcastMentions', () => {
+  it('detects @everyone', () => {
+    expect(extractBroadcastMentions('hey @everyone listen up')).toEqual(['everyone']);
+  });
+
+  it('detects @here', () => {
+    expect(extractBroadcastMentions('ping @here please')).toEqual(['here']);
+  });
+
+  it('detects both tokens when both appear', () => {
+    const result = extractBroadcastMentions('@everyone and @here');
+    expect(result.sort()).toEqual(['everyone', 'here']);
+  });
+
+  it('deduplicates repeated tokens', () => {
+    expect(extractBroadcastMentions('@everyone @everyone')).toEqual(['everyone']);
+  });
+
+  it('is case-insensitive', () => {
+    expect(extractBroadcastMentions('@EVERYONE @HERE')).toEqual(expect.arrayContaining(['everyone', 'here']));
+  });
+
+  it('does NOT match @hereford (substring false positive)', () => {
+    expect(extractBroadcastMentions('ask @hereford about it')).toEqual([]);
+  });
+
+  it('does NOT match @everyone123 (trailing alphanumeric)', () => {
+    expect(extractBroadcastMentions('@everyone123 is not a broadcast')).toEqual([]);
+  });
+
+  it('returns empty array when no broadcast tokens present', () => {
+    expect(extractBroadcastMentions('hello @alice')).toEqual([]);
   });
 });
 

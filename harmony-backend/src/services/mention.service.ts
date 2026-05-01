@@ -33,7 +33,7 @@ export function extractMentionedUsernames(content: string): string[] {
  */
 export function extractBroadcastMentions(content: string): BroadcastMention[] {
   const found = new Set<BroadcastMention>();
-  for (const m of content.matchAll(/@(everyone|here)/gi)) {
+  for (const m of content.matchAll(/@(everyone|here)\b/gi)) {
     found.add(m[1].toLowerCase() as BroadcastMention);
   }
   return [...found];
