@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useRef, useLayoutEffect, useCallback, useMemo } from 'react';
+import { useRef, useLayoutEffect, useCallback, useEffect, useMemo } from 'react';
 import { MessageItem } from '@/components/message/MessageItem';
 import { formatDate } from '@/lib/utils';
 import { ChannelVisibility } from '@/types';
@@ -89,6 +89,7 @@ export function MessageList({
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   // #c7: only auto-scroll when user is already near the bottom
   const isNearBottomRef = useRef(true);
   // Track whether the initial mount scroll has happened so we jump instantly
@@ -102,7 +103,28 @@ export function MessageList({
     isNearBottomRef.current = distanceFromBottom <= 100;
   }, []);
 
+  // When any message content grows in height (images, videos, embeds loading),
+  // re-anchor the scroll position to the bottom if the user was already there.
+  // ResizeObserver is used instead of onLoad handlers so that ALL sources of
+  // height change are covered (attachments, inline video embeds, avatars, etc.).
+  useEffect(() => {
+    const scrollEl = scrollContainerRef.current;
+    const contentEl = contentRef.current;
+    if (!scrollEl || !contentEl) return;
+    const observer = new ResizeObserver(() => {
+      if (isNearBottomRef.current) {
+        scrollEl.scrollTop = scrollEl.scrollHeight;
+      }
+    });
+    observer.observe(contentEl);
+    return () => observer.disconnect();
+  }, []);
+
   useLayoutEffect(() => {
+    // Nothing to scroll to yet — don't mark as mounted so that the first
+    // real messages get the instant-scroll path instead of smooth scroll.
+    if (messages.length === 0) return;
+
     if (!hasMountedRef.current) {
       // Initial load: jump instantly so the user starts at the bottom
       hasMountedRef.current = true;
@@ -150,7 +172,7 @@ export function MessageList({
       </div>
 
       {/* Message groups with date separators */}
-      <div className='space-y-4'>
+      <div ref={contentRef} className='space-y-4'>
         {groups.map((group, gi) => {
           const prevGroup = groups[gi - 1];
           const showDateSeparator =
