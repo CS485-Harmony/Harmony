@@ -470,7 +470,7 @@ export function MessageInput({
 
       <div
         className={cn(
-          'flex items-end gap-1 rounded-lg bg-[#40444b] px-2 py-2',
+          'flex items-center gap-1 rounded-lg bg-[#40444b] px-2 py-2',
           isAtLimit && 'ring-1 ring-red-500/60',
         )}
       >
