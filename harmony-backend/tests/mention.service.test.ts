@@ -11,7 +11,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { extractMentionedUsernames, processMentions } from '../src/services/mention.service';
+import { extractMentionedUsernames, extractBroadcastMentions, processMentions, processBroadcastMentions } from '../src/services/mention.service';
 
 const prisma = new PrismaClient();
 
@@ -141,6 +141,43 @@ describe('extractMentionedUsernames', () => {
   });
 });
 
+// ── extractBroadcastMentions ──────────────────────────────────────────────────
+
+describe('extractBroadcastMentions', () => {
+  it('detects @everyone', () => {
+    expect(extractBroadcastMentions('hey @everyone listen up')).toEqual(['everyone']);
+  });
+
+  it('detects @here', () => {
+    expect(extractBroadcastMentions('ping @here please')).toEqual(['here']);
+  });
+
+  it('detects both tokens when both appear', () => {
+    const result = extractBroadcastMentions('@everyone and @here');
+    expect(result.sort()).toEqual(['everyone', 'here']);
+  });
+
+  it('deduplicates repeated tokens', () => {
+    expect(extractBroadcastMentions('@everyone @everyone')).toEqual(['everyone']);
+  });
+
+  it('is case-insensitive', () => {
+    expect(extractBroadcastMentions('@EVERYONE @HERE')).toEqual(expect.arrayContaining(['everyone', 'here']));
+  });
+
+  it('does NOT match @hereford (substring false positive)', () => {
+    expect(extractBroadcastMentions('ask @hereford about it')).toEqual([]);
+  });
+
+  it('does NOT match @everyone123 (trailing alphanumeric)', () => {
+    expect(extractBroadcastMentions('@everyone123 is not a broadcast')).toEqual([]);
+  });
+
+  it('returns empty array when no broadcast tokens present', () => {
+    expect(extractBroadcastMentions('hello @alice')).toEqual([]);
+  });
+});
+
 // ── processMentions ───────────────────────────────────────────────────────────
 
 describe('processMentions', () => {
@@ -224,5 +261,125 @@ describe('processMentions', () => {
 
     const notifCount = await prisma.notification.count({ where: { messageId } });
     expect(notifCount).toBe(0);
+  });
+});
+
+// ── processBroadcastMentions ──────────────────────────────────────────────────
+
+describe('processBroadcastMentions', () => {
+  const ts2 = Date.now() + 1;
+
+  let bcastAuthorId: string;
+  let onlineUserId: string;
+  let idleUserId: string;
+  let offlineUserId: string;
+  let bcastServerId: string;
+  let bcastChannelId: string;
+  let bcastMessageId: string;
+
+  beforeAll(async () => {
+    const author = await prisma.user.create({
+      data: { email: `bc-author-${ts2}@test.com`, username: `bc_author_${ts2}`, passwordHash: 'x', displayName: 'BcAuthor' },
+    });
+    bcastAuthorId = author.id;
+
+    const online = await prisma.user.create({
+      data: { email: `bc-online-${ts2}@test.com`, username: `bc_online_${ts2}`, passwordHash: 'x', displayName: 'Online', status: 'ONLINE' },
+    });
+    onlineUserId = online.id;
+
+    const idle = await prisma.user.create({
+      data: { email: `bc-idle-${ts2}@test.com`, username: `bc_idle_${ts2}`, passwordHash: 'x', displayName: 'Idle', status: 'IDLE' },
+    });
+    idleUserId = idle.id;
+
+    const offline = await prisma.user.create({
+      data: { email: `bc-offline-${ts2}@test.com`, username: `bc_offline_${ts2}`, passwordHash: 'x', displayName: 'Offline', status: 'OFFLINE' },
+    });
+    offlineUserId = offline.id;
+
+    const server = await prisma.server.create({
+      data: { name: `Broadcast Test Server ${ts2}`, slug: `bc-test-${ts2}`, ownerId: bcastAuthorId },
+    });
+    bcastServerId = server.id;
+
+    await prisma.serverMember.createMany({
+      data: [
+        { userId: bcastAuthorId, serverId: bcastServerId, role: 'OWNER' },
+        { userId: onlineUserId, serverId: bcastServerId, role: 'MEMBER' },
+        { userId: idleUserId, serverId: bcastServerId, role: 'MEMBER' },
+        { userId: offlineUserId, serverId: bcastServerId, role: 'MEMBER' },
+      ],
+    });
+
+    const channel = await prisma.channel.create({
+      data: { serverId: bcastServerId, name: 'general', slug: 'general' },
+    });
+    bcastChannelId = channel.id;
+
+    const message = await prisma.message.create({
+      data: { channelId: bcastChannelId, authorId: bcastAuthorId, content: 'placeholder' },
+    });
+    bcastMessageId = message.id;
+  });
+
+  afterAll(async () => {
+    await prisma.notification.deleteMany({ where: { messageId: bcastMessageId } });
+    await prisma.messageMention.deleteMany({ where: { messageId: bcastMessageId } });
+    await prisma.message.delete({ where: { id: bcastMessageId } });
+    await prisma.serverMember.deleteMany({ where: { serverId: bcastServerId } });
+    await prisma.channel.delete({ where: { id: bcastChannelId } });
+    await prisma.server.delete({ where: { id: bcastServerId } });
+    await prisma.user.deleteMany({ where: { id: { in: [bcastAuthorId, onlineUserId, idleUserId, offlineUserId] } } });
+  });
+
+  beforeEach(async () => {
+    await prisma.notification.deleteMany({ where: { messageId: bcastMessageId } });
+    await prisma.messageMention.deleteMany({ where: { messageId: bcastMessageId } });
+  });
+
+  const baseParams = () => ({
+    messageId: bcastMessageId,
+    channelId: bcastChannelId,
+    serverId: bcastServerId,
+    authorId: bcastAuthorId,
+    authorUsername: `bc_author_${ts2}`,
+    content: '',
+  });
+
+  it('@everyone notifies all members (online, idle, and offline), excluding the author', async () => {
+    await processBroadcastMentions({ ...baseParams(), content: '@everyone listen up' });
+
+    const notifiedIds = (await prisma.notification.findMany({ where: { messageId: bcastMessageId } })).map((n) => n.userId);
+    expect(notifiedIds).toContain(onlineUserId);
+    expect(notifiedIds).toContain(idleUserId);
+    expect(notifiedIds).toContain(offlineUserId);
+    expect(notifiedIds).not.toContain(bcastAuthorId);
+  });
+
+  it('@here notifies only ONLINE and IDLE members, not OFFLINE, and not the author', async () => {
+    await processBroadcastMentions({ ...baseParams(), content: '@here check this out' });
+
+    const notifiedIds = (await prisma.notification.findMany({ where: { messageId: bcastMessageId } })).map((n) => n.userId);
+    expect(notifiedIds).toContain(onlineUserId);
+    expect(notifiedIds).toContain(idleUserId);
+    expect(notifiedIds).not.toContain(offlineUserId);
+    expect(notifiedIds).not.toContain(bcastAuthorId);
+  });
+
+  it('when @everyone and @here both appear, each eligible user receives at most one notification', async () => {
+    await processBroadcastMentions({ ...baseParams(), content: '@everyone and @here please read' });
+
+    const allNotified = await prisma.notification.findMany({ where: { messageId: bcastMessageId } });
+    const userIds = allNotified.map((n) => n.userId);
+
+    // No duplicate notifications for any single user
+    const uniqueUserIds = new Set(userIds);
+    expect(userIds.length).toBe(uniqueUserIds.size);
+
+    // @everyone takes precedence — all non-author members notified
+    expect(uniqueUserIds).toContain(onlineUserId);
+    expect(uniqueUserIds).toContain(idleUserId);
+    expect(uniqueUserIds).toContain(offlineUserId);
   });
 });

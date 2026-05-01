@@ -4,6 +4,7 @@ export const MIME_TO_EXT: Record<string, string> = {
   'image/png': '.png',
   'image/gif': '.gif',
   'image/webp': '.webp',
+  'video/mp4': '.mp4',
   'application/pdf': '.pdf',
   'text/plain': '.txt',
   'application/msword': '.doc',

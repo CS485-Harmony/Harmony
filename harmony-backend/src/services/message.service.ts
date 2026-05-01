@@ -6,7 +6,7 @@ import { permissionService } from './permission.service';
 import { eventBus, EventChannels } from '../events/eventBus';
 import { channelRepository } from '../repositories/channel.repository';
 import { messageRepository } from '../repositories/message.repository';
-import { processMentions } from './mention.service';
+import { processMentions, processBroadcastMentions } from './mention.service';
 import { pushNotificationService } from './pushNotification.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -64,6 +64,21 @@ export interface DeleteMessageInput {
 const logger = createLogger({ component: 'message-service' });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Group flat reaction rows into the `{ emoji, count, userIds }` shape expected by the frontend. */
+function groupReactions(raw: { emoji: string; userId: string }[]) {
+  const map = new Map<string, string[]>();
+  for (const r of raw) {
+    const users = map.get(r.emoji);
+    if (users) users.push(r.userId);
+    else map.set(r.emoji, [r.userId]);
+  }
+  return Array.from(map.entries()).map(([emoji, userIds]) => ({
+    emoji,
+    count: userIds.length,
+    userIds,
+  }));
+}
 
 /**
  * Cache key scoped to both server and channel so that private-channel entries
@@ -125,7 +140,7 @@ export const messageService = {
     return cacheService.getOrRevalidate(
       cacheKey,
       async () => {
-        const messages = await messageRepository.findManyPaginated(
+        const messages = await messageRepository.findManyPaginatedWithReactions(
           { channelId, isDeleted: false },
           clampedLimit + 1,
           cursor,
@@ -136,7 +151,12 @@ export const messageService = {
         const page = hasMore ? messages.slice(0, clampedLimit) : messages;
         const nextCursor = hasMore ? page[page.length - 1].id : null;
 
-        return { messages: page, nextCursor, hasMore };
+        const messagesWithReactions = page.map(msg => ({
+          ...msg,
+          reactions: groupReactions(msg.reactions),
+        }));
+
+        return { messages: messagesWithReactions, nextCursor, hasMore };
       },
       { ttl: CacheTTL.channelMessages },
     );
@@ -196,6 +216,16 @@ export const messageService = {
       content,
     }).catch((err) =>
       logger.warn({ err, messageId: message.id }, 'processMentions failed on sendMessage'),
+    );
+    processBroadcastMentions({
+      messageId: message.id,
+      channelId,
+      serverId,
+      authorId,
+      authorUsername,
+      content,
+    }).catch((err) =>
+      logger.warn({ err, messageId: message.id }, 'processBroadcastMentions failed on sendMessage'),
     );
 
     // Dispatch push notifications fire-and-forget
@@ -276,6 +306,16 @@ export const messageService = {
       content,
     }).catch((err) =>
       logger.warn({ err, messageId }, 'processMentions failed on editMessage'),
+    );
+    processBroadcastMentions({
+      messageId,
+      channelId: message.channelId,
+      serverId,
+      authorId,
+      authorUsername: updated.author.username,
+      content,
+    }).catch((err) =>
+      logger.warn({ err, messageId }, 'processBroadcastMentions failed on editMessage'),
     );
 
     return updated;
@@ -522,6 +562,16 @@ export const messageService = {
       content,
     }).catch((err) =>
       logger.warn({ err, messageId: reply.id }, 'processMentions failed on createReply'),
+    );
+    processBroadcastMentions({
+      messageId: reply.id,
+      channelId,
+      serverId,
+      authorId,
+      authorUsername: reply.author.username,
+      content,
+    }).catch((err) =>
+      logger.warn({ err, messageId: reply.id }, 'processBroadcastMentions failed on createReply'),
     );
 
     return reply;

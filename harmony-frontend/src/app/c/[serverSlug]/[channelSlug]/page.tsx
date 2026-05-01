@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { permanentRedirect } from 'next/navigation';
 import { GuestChannelView } from '@/components/channel/GuestChannelView';
 import {
   fetchPublicServer,
@@ -10,6 +11,22 @@ import { getChannelUrl } from '@/lib/runtime-config';
 
 interface PageProps {
   params: Promise<{ serverSlug: string; channelSlug: string }>;
+}
+
+function getCanonicalSlugs(
+  serverSlug: string,
+  channelSlug: string,
+  server: Awaited<ReturnType<typeof fetchPublicServer>>,
+  channelResult: Awaited<ReturnType<typeof fetchPublicChannel>>,
+): { serverSlug: string; channelSlug: string } {
+  const canonicalServerSlug = server?.slug?.trim() || serverSlug;
+  const canonicalChannelSlug =
+    channelResult && !channelResult.isPrivate ? channelResult.channel.slug : channelSlug;
+
+  return {
+    serverSlug: canonicalServerSlug,
+    channelSlug: canonicalChannelSlug,
+  };
 }
 
 function sanitizeMetadataLabel(value: string): string {
@@ -67,7 +84,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     publicMetaTags,
   );
   const isIndexable = channel?.visibility === ChannelVisibility.PUBLIC_INDEXABLE;
-  const canonicalUrl = getChannelUrl(serverSlug, channelSlug);
+  const canonicalSlugs = getCanonicalSlugs(serverSlug, channelSlug, server, channelResult);
+  const canonicalUrl = getChannelUrl(canonicalSlugs.serverSlug, canonicalSlugs.channelSlug);
 
   return {
     title,
@@ -107,6 +125,15 @@ export default async function GuestChannelPage({ params }: PageProps) {
     publicMetaTags,
   );
   const isIndexable = channel?.visibility === ChannelVisibility.PUBLIC_INDEXABLE;
+  const canonicalSlugs = getCanonicalSlugs(serverSlug, channelSlug, server, channelResult);
+  const canonicalUrl = getChannelUrl(canonicalSlugs.serverSlug, canonicalSlugs.channelSlug);
+
+  if (
+    !channelResult?.isPrivate &&
+    (canonicalSlugs.serverSlug !== serverSlug || canonicalSlugs.channelSlug !== channelSlug)
+  ) {
+    permanentRedirect(`/c/${canonicalSlugs.serverSlug}/${canonicalSlugs.channelSlug}`);
+  }
 
   const jsonLd = isIndexable
     ? {
@@ -114,12 +141,13 @@ export default async function GuestChannelPage({ params }: PageProps) {
         '@type': 'DiscussionForumPosting',
         'name': title,
         'headline': title,
-        'url': getChannelUrl(serverSlug, channelSlug),
+        'url': canonicalUrl,
         'description': description,
         'text': description,
         'author': {
           '@type': 'Organization',
           'name': serverName,
+          'url': canonicalUrl,
         },
         ...(channel?.createdAt && { datePublished: channel.createdAt }),
       }

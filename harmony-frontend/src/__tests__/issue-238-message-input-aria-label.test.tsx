@@ -113,7 +113,7 @@ describe('Issue #238 — MessageInput: textarea aria-label accessibility', () =>
     await waitFor(() => {
       expect(mockSendMessageAction).toHaveBeenCalledTimes(1);
       expect(textarea).toHaveFocus();
-      expect(screen.getByRole('alert')).toHaveTextContent(/failed to send message/i);
+      expect(screen.getByRole('alert')).toHaveTextContent('network failure');
     });
   });
 });

@@ -86,6 +86,17 @@ export const reactionService = {
           ),
         );
 
+      cacheService
+        .invalidatePattern(
+          `channel:msgs:${sanitizeKeySegment(serverId)}:${sanitizeKeySegment(channelId)}:*`,
+        )
+        .catch((err) =>
+          logger.warn(
+            { err, messageId, channelId, serverId },
+            'Failed to invalidate channel messages cache after reaction add',
+          ),
+        );
+
       eventBus
         .publish(EventChannels.REACTION_ADDED, {
           messageId,
@@ -163,6 +174,17 @@ export const reactionService = {
         logger.warn(
           { err, messageId, serverId },
           'Failed to invalidate reaction cache after removal',
+        ),
+      );
+
+    cacheService
+      .invalidatePattern(
+        `channel:msgs:${sanitizeKeySegment(serverId)}:${sanitizeKeySegment(channelId)}:*`,
+      )
+      .catch((err) =>
+        logger.warn(
+          { err, messageId, channelId, serverId },
+          'Failed to invalidate channel messages cache after reaction removal',
         ),
       );
 

@@ -64,18 +64,32 @@ export const userService = {
         ...(patch.status !== undefined && { status: patch.status }),
       });
 
-      // When status changes, publish one event per server the user belongs to so
-      // all connected members of those servers can update their member sidebar in real time.
-      // Status reflects presence only (not identity), so we publish for all servers
-      // regardless of the user's publicProfile setting.
-      if (patch.status !== undefined) {
+      const timestamp = new Date().toISOString();
+      const identityChanged =
+        patch.displayName !== undefined ||
+        patch.avatarUrl !== undefined ||
+        patch.publicProfile !== undefined;
+
+      // Fan out events per server. Fetch memberships once if either event type is needed.
+      if (patch.status !== undefined || identityChanged) {
         const memberships = await serverMemberRepository.findByUserIdSelect(userId);
         for (const { serverId } of memberships) {
-          void eventBus.publish(EventChannels.USER_STATUS_CHANGED, {
-            userId,
-            serverId,
-            status: patch.status,
-          });
+          if (patch.status !== undefined) {
+            void eventBus.publish(EventChannels.USER_STATUS_CHANGED, {
+              userId,
+              serverId,
+              status: patch.status,
+            });
+          }
+          if (identityChanged) {
+            // The SSE router hydrates displayName/avatarUrl from the DB so the
+            // publicProfile privacy gate is applied consistently (same as member:joined).
+            void eventBus.publish(EventChannels.USER_PROFILE_UPDATED, {
+              userId,
+              serverId,
+              timestamp,
+            });
+          }
         }
       }
 

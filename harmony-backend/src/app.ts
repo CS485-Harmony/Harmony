@@ -19,6 +19,55 @@ import { redis } from './db/redis';
 import { presenceService } from './services/presence.service';
 
 const logger = createLogger({ component: 'app', instanceId });
+const MAX_LOGGED_ATTACHMENT_ORIGINS = 5;
+const MAX_LOGGED_INPUT_KEYS = 20;
+
+function buildTrpcInputLogContext(input: unknown) {
+  if (!input || typeof input !== 'object') {
+    return {};
+  }
+
+  const obj = input as {
+    serverId?: unknown;
+    channelId?: unknown;
+    messageId?: unknown;
+    parentMessageId?: unknown;
+    content?: unknown;
+    attachments?: unknown;
+  };
+
+  const attachments = Array.isArray(obj.attachments) ? obj.attachments : [];
+  const attachmentOrigins = [
+    ...new Set(
+      attachments
+        .map((att) => {
+          if (!att || typeof att !== 'object') return null;
+          const url = (att as { url?: unknown }).url;
+          if (typeof url !== 'string') return null;
+          try {
+            return new URL(url).origin;
+          } catch {
+            return 'invalid-url';
+          }
+        })
+        .filter((origin): origin is string => origin !== null),
+    ),
+  ].slice(0, MAX_LOGGED_ATTACHMENT_ORIGINS);
+
+  const inputKeys = Object.keys(obj).sort().slice(0, MAX_LOGGED_INPUT_KEYS);
+
+  return {
+    serverId: typeof obj.serverId === 'string' ? obj.serverId : undefined,
+    channelId: typeof obj.channelId === 'string' ? obj.channelId : undefined,
+    messageId: typeof obj.messageId === 'string' ? obj.messageId : undefined,
+    parentMessageId: typeof obj.parentMessageId === 'string' ? obj.parentMessageId : undefined,
+    hasContent: typeof obj.content === 'string' ? obj.content.trim().length > 0 : undefined,
+    contentLength: typeof obj.content === 'string' ? obj.content.length : undefined,
+    attachmentCount: attachments.length,
+    attachmentOrigins,
+    inputKeys,
+  };
+}
 
 /**
  * Creates one Redis store per rate-limit route in production.
@@ -60,7 +109,6 @@ export interface CreateAppOptions {
 export function createApp(options: CreateAppOptions = {}) {
   presenceService.startSweeper();
 
-  const isE2E = process.env.NODE_ENV === 'e2e';
   const isProduction = process.env.NODE_ENV === 'production';
   // Each limiter calls makeStore() independently so it gets its own instance.
   const makeStore = (prefix: string): Store | undefined =>
@@ -175,10 +223,30 @@ export function createApp(options: CreateAppOptions = {}) {
     createExpressMiddleware({
       router: appRouter,
       createContext,
-      onError({ error, path }) {
-        // Only log unexpected server errors; auth/validation errors (4xx) are routine
+      onError({ error, path, input }) {
+        if (error.code !== 'INTERNAL_SERVER_ERROR') {
+          logger.warn(
+            {
+              path,
+              trpcCode: error.code,
+              errorMessage: error.message,
+              ...buildTrpcInputLogContext(input),
+            },
+            'tRPC request failed with non-internal error',
+          );
+        }
+
+        // Unexpected server errors include stack/cause via serializer.
         if (error.code === 'INTERNAL_SERVER_ERROR') {
-          logger.error({ err: error, path }, 'Unhandled tRPC error');
+          logger.error(
+            {
+              err: error,
+              path,
+              trpcCode: error.code,
+              errorMessage: error.message,
+            },
+            'tRPC request failed with INTERNAL_SERVER_ERROR',
+          );
         }
       },
     }),

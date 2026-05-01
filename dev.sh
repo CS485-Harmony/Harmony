@@ -31,6 +31,10 @@ echo "==> Applying Prisma migrations..."
 npx prisma migrate deploy
 echo "==> Migrations up to date."
 
+echo "==> Regenerating Prisma client..."
+npx prisma generate
+echo "==> Prisma client up to date."
+
 # Start services
 
 echo "==> Starting backend API (npm run dev)..."

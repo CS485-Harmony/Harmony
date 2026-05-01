@@ -24,6 +24,12 @@
  *     onMemberStatusChanged: ({ id, status }) => setMembers(prev =>
  *       prev.map(m => m.id === id ? { ...m, status } : m)
  *     ),
+ *     onMemberProfileUpdated: ({ id, username, displayName, avatarUrl }) => {
+ *       setMembers(prev => prev.map(m => m.id === id ? { ...m, username, displayName, avatarUrl } : m));
+ *       setMessages(prev => prev.map(msg =>
+ *         msg.author.id === id ? { ...msg, author: { ...msg.author, username, displayName, avatarUrl } } : msg
+ *       ));
+ *     },
  *     onChannelVisibilityChanged: (ch, oldVis) => { ... },
  *     onMessageCreated: (msg) => { if (msg.channelId === activeChannelId) append(msg); },
  *     onMessageEdited: (msg) => { if (msg.channelId === activeChannelId) update(msg); },
@@ -59,6 +65,13 @@ export interface UseServerEventsOptions {
   onMemberLeft?: (userId: string) => void;
   /** Called when a member's presence status changes (online/idle/offline). Optional. */
   onMemberStatusChanged?: (data: { id: string; status: UserStatus }) => void;
+  /** Called when a member's display name, avatar, or username changes. Optional. */
+  onMemberProfileUpdated?: (data: {
+    id: string;
+    username: string;
+    displayName?: string;
+    avatarUrl?: string;
+  }) => void;
   /**
    * Called when a channel's visibility changes. The updated channel object is
    * provided along with the previous visibility so callers can detect access
@@ -73,6 +86,10 @@ export interface UseServerEventsOptions {
   onMessageDeleted?: (messageId: string, channelId: string) => void;
   /** Called when server metadata (name, icon, description) changes. Optional. */
   onServerUpdated?: (server: Server) => void;
+  /** Called when a reaction is added to a message in any channel of the server. Optional. */
+  onReactionAdded?: (data: { messageId: string; channelId: string; userId: string; emoji: string }) => void;
+  /** Called when a reaction is removed from a message in any channel of the server. Optional. */
+  onReactionRemoved?: (data: { messageId: string; channelId: string; userId: string; emoji: string }) => void;
   /** Set to false to disable the connection (e.g. for unauthenticated guests). Defaults to true. */
   enabled?: boolean;
 }
@@ -85,11 +102,14 @@ export function useServerEvents({
   onMemberJoined,
   onMemberLeft,
   onMemberStatusChanged,
+  onMemberProfileUpdated,
   onChannelVisibilityChanged,
   onMessageCreated,
   onMessageEdited,
   onMessageDeleted,
   onServerUpdated,
+  onReactionAdded,
+  onReactionRemoved,
   enabled = true,
 }: UseServerEventsOptions): void {
   // Incrementing this triggers the effect to re-run with a fresh token after a
@@ -107,11 +127,14 @@ export function useServerEvents({
   const onMemberJoinedRef = useRef(onMemberJoined);
   const onMemberLeftRef = useRef(onMemberLeft);
   const onMemberStatusChangedRef = useRef(onMemberStatusChanged);
+  const onMemberProfileUpdatedRef = useRef(onMemberProfileUpdated);
   const onVisibilityChangedRef = useRef(onChannelVisibilityChanged);
   const onMessageCreatedRef = useRef(onMessageCreated);
   const onMessageEditedRef = useRef(onMessageEdited);
   const onMessageDeletedRef = useRef(onMessageDeleted);
   const onServerUpdatedRef = useRef(onServerUpdated);
+  const onReactionAddedRef = useRef(onReactionAdded);
+  const onReactionRemovedRef = useRef(onReactionRemoved);
 
   useLayoutEffect(() => {
     onCreatedRef.current = onChannelCreated;
@@ -120,11 +143,14 @@ export function useServerEvents({
     onMemberJoinedRef.current = onMemberJoined;
     onMemberLeftRef.current = onMemberLeft;
     onMemberStatusChangedRef.current = onMemberStatusChanged;
+    onMemberProfileUpdatedRef.current = onMemberProfileUpdated;
     onVisibilityChangedRef.current = onChannelVisibilityChanged;
     onMessageCreatedRef.current = onMessageCreated;
     onMessageEditedRef.current = onMessageEdited;
     onMessageDeletedRef.current = onMessageDeleted;
     onServerUpdatedRef.current = onServerUpdated;
+    onReactionAddedRef.current = onReactionAdded;
+    onReactionRemovedRef.current = onReactionRemoved;
   });
 
   useEffect(() => {
@@ -259,6 +285,27 @@ export function useServerEvents({
       }
     };
 
+    const handleMemberProfileUpdated = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          id: string;
+          username: string;
+          displayName?: string;
+          avatarUrl?: string;
+        };
+        onMemberProfileUpdatedRef.current?.(payload);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'member:profileUpdated',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
     const handleVisibilityChanged = (event: MessageEvent<string>) => {
       try {
         // The backend sends the full updated channel object plus oldVisibility.
@@ -343,17 +390,62 @@ export function useServerEvents({
       }
     };
 
+    const handleReactionAdded = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          messageId: string;
+          channelId: string;
+          userId: string;
+          emoji: string;
+        };
+        onReactionAddedRef.current?.(payload);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'reaction:added',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
+    const handleReactionRemoved = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          messageId: string;
+          channelId: string;
+          userId: string;
+          emoji: string;
+        };
+        onReactionRemovedRef.current?.(payload);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'reaction:removed',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
       es.addEventListener('channel:created', handleCreated);
       es.addEventListener('channel:updated', handleUpdated);
       es.addEventListener('channel:deleted', handleDeleted);
       es.addEventListener('member:joined', handleMemberJoined);
       es.addEventListener('member:left', handleMemberLeft);
       es.addEventListener('member:statusChanged', handleMemberStatusChanged);
+      es.addEventListener('member:profileUpdated', handleMemberProfileUpdated);
       es.addEventListener('channel:visibility-changed', handleVisibilityChanged);
       es.addEventListener('message:created', handleMessageCreated);
       es.addEventListener('message:edited', handleMessageEdited);
       es.addEventListener('message:deleted', handleMessageDeleted);
       es.addEventListener('server:updated', handleServerUpdated);
+      es.addEventListener('reaction:added', handleReactionAdded);
+      es.addEventListener('reaction:removed', handleReactionRemoved);
       activeHandlers.push(
         ['channel:created', handleCreated],
         ['channel:updated', handleUpdated],
@@ -361,11 +453,14 @@ export function useServerEvents({
         ['member:joined', handleMemberJoined],
         ['member:left', handleMemberLeft],
         ['member:statusChanged', handleMemberStatusChanged],
+        ['member:profileUpdated', handleMemberProfileUpdated],
         ['channel:visibility-changed', handleVisibilityChanged],
         ['message:created', handleMessageCreated],
         ['message:edited', handleMessageEdited],
         ['message:deleted', handleMessageDeleted],
         ['server:updated', handleServerUpdated],
+        ['reaction:added', handleReactionAdded],
+        ['reaction:removed', handleReactionRemoved],
       );
 
       let everOpened = false;

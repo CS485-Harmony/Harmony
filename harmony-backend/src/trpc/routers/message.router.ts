@@ -3,23 +3,28 @@ import { TRPCError } from '@trpc/server';
 import { router, withPermission } from '../init';
 import { messageService } from '../../services/message.service';
 
+const TRUSTED_EXTERNAL_ATTACHMENT_BASES = ['https://cdn.pixabay.com'];
+
 /**
- * Returns the base URL that all attachment URLs must start with.
- * Computed from STORAGE_PROVIDER and the corresponding base URL env var.
- * Returns null when the base URL is not configured (skips validation).
+ * Returns the allowed attachment base URLs:
+ * - project-owned upload host
+ * - explicitly trusted external CDN origins used by rich media pickers
  */
-function getAllowedAttachmentBase(): string | null {
+function getAllowedAttachmentBases(): string[] {
+  const bases = [...TRUSTED_EXTERNAL_ATTACHMENT_BASES];
   if (process.env.STORAGE_PROVIDER === 's3') {
-    return process.env.R2_PUBLIC_URL ?? null;
+    if (process.env.R2_PUBLIC_URL) bases.unshift(process.env.R2_PUBLIC_URL);
+    return bases;
   }
-  return process.env.LOCAL_UPLOAD_BASE_URL ?? 'http://localhost:4000';
+  bases.unshift(process.env.LOCAL_UPLOAD_BASE_URL ?? 'http://localhost:4000');
+  return bases;
 }
 
 /**
  * Reject prefix-stripping tricks (e.g. https://allowed.example.com.evil/...) by
  * comparing URL origins and, when the allowlist has a path, requiring a path prefix.
  */
-function isAllowedAttachmentUrl(attUrl: string, allowedBase: string): boolean {
+function isAllowedAttachmentUrlForBase(attUrl: string, allowedBase: string): boolean {
   let allowed: URL;
   let candidate: URL;
   try {
@@ -37,6 +42,10 @@ function isAllowedAttachmentUrl(attUrl: string, allowedBase: string): boolean {
   }
   const p = candidate.pathname;
   return p === basePath || p.startsWith(`${basePath}/`);
+}
+
+export function isAllowedAttachmentUrl(attUrl: string, allowedBases: string[]): boolean {
+  return allowedBases.some((allowedBase) => isAllowedAttachmentUrlForBase(attUrl, allowedBase));
 }
 
 // sizeBytes is accepted as a plain number (JSON-safe).
@@ -83,12 +92,10 @@ export const messageRouter = router({
     )
     .mutation(({ input, ctx }) => {
       if (input.attachments?.length) {
-        const allowedBase = getAllowedAttachmentBase();
-        if (allowedBase) {
-          for (const att of input.attachments) {
-            if (!isAllowedAttachmentUrl(att.url, allowedBase)) {
-              throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid attachment URL' });
-            }
+        const allowedBases = getAllowedAttachmentBases();
+        for (const att of input.attachments) {
+          if (!isAllowedAttachmentUrl(att.url, allowedBases)) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid attachment URL' });
           }
         }
       }

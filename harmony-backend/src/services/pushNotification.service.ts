@@ -32,7 +32,7 @@ export interface PushPayload {
 
 /** Extract @username handles from message content. */
 export function parseMentionedUsernames(content: string): string[] {
-  const matches = content.match(/@([a-zA-Z0-9_]{1,32})/g) ?? [];
+  const matches = content.match(/@([a-zA-Z0-9_-]{1,32})/g) ?? [];
   return [...new Set(matches.map((m) => m.slice(1)))];
 }
 

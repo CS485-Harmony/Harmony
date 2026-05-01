@@ -14,6 +14,8 @@ export const ALLOWED_CONTENT_TYPES = new Set([
   'image/png',
   'image/gif',
   'image/webp',
+  // Video
+  'video/mp4',
   // Documents
   'application/pdf',
   'text/plain',

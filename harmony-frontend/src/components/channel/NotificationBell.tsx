@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { getAccessToken, fetchSseTicket } from '@/lib/api-client';
@@ -58,8 +58,8 @@ function formatRelativeTime(ts: string): string {
 export function NotificationBell({ userId }: NotificationBellProps) {
   const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
+  const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
   const [isLoading, setIsLoading] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -70,7 +70,6 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     try {
       const data = await apiClient.trpcQuery<Notification[]>('notification.getNotifications');
       setNotifications(data ?? []);
-      setUnreadCount((data ?? []).filter((n) => !n.read).length);
     } catch {
       // ignore — network errors shouldn't crash the bell
     } finally {
@@ -106,9 +105,43 @@ export function NotificationBell({ userId }: NotificationBellProps) {
       const es = new EventSource(url);
       eventSourceRef.current = es;
 
-      es.addEventListener('notification:mention', () => {
-        // Refetch the full list so channel/server slugs are populated for navigation.
-        setUnreadCount((c) => c + 1);
+      es.addEventListener('notification:mention', (e: MessageEvent) => {
+        try {
+          const payload = JSON.parse(e.data) as {
+            id: string;
+            messageId: string;
+            channelId: string;
+            serverId: string;
+            authorId: string;
+            authorUsername: string;
+            timestamp: string;
+            read: boolean;
+          };
+          const optimistic: Notification = {
+            id: payload.id,
+            type: 'mention',
+            messageId: payload.messageId,
+            channelId: payload.channelId,
+            serverId: payload.serverId,
+            read: false,
+            createdAt: payload.timestamp,
+            message: {
+              id: payload.messageId,
+              content: '',
+              isDeleted: false,
+              author: {
+                id: payload.authorId,
+                username: payload.authorUsername,
+                displayName: payload.authorUsername,
+                avatarUrl: null,
+              },
+            },
+          };
+          setNotifications((prev) => [optimistic, ...prev].slice(0, 50));
+        } catch {
+          // malformed payload — ignore
+        }
+        // Refetch to hydrate channel/server slugs for row navigation.
         loadNotifications();
       });
     })();
@@ -142,9 +175,8 @@ export function NotificationBell({ userId }: NotificationBellProps) {
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
       );
-      setUnreadCount((c) => Math.max(0, c - 1));
     } catch {
-      // ignore
+      // ignore — non-critical, badge will self-correct on next load
     }
   };
 
@@ -152,9 +184,8 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     try {
       await apiClient.trpcMutation('notification.markAllAsRead');
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-      setUnreadCount(0);
     } catch {
-      // ignore
+      // ignore — non-critical, badge will self-correct on next load
     }
   };
 

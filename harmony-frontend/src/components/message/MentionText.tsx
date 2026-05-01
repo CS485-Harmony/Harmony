@@ -13,10 +13,13 @@ export interface MentionTextProps {
   serverSlug?: string;
 }
 
+const BROADCAST_MENTIONS = new Set(['everyone', 'here']);
+
 /**
  * Renders message content with @username and #channel-name tokens styled as pills.
- * Self-mentions get an accent background. #channel pills are clickable when the
- * channel exists in the current server; otherwise they render non-navigable.
+ * - @everyone / @here get tooltips describing broadcast scope.
+ * - Self-mentions get a stronger indigo background.
+ * - #channel pills are clickable Links when the channel exists in the current server.
  */
 export function MentionText({ content, currentUsername, channels, serverSlug }: MentionTextProps) {
   if (!content.includes('@') && !content.includes('#')) {
@@ -31,7 +34,8 @@ export function MentionText({ content, currentUsername, channels, serverSlug }: 
 
   // Single pass: match @username and #channel-name tokens only at start or after whitespace
   // to avoid false positives in URL fragments (e.g. https://example.com/#section) or foo#bar.
-  const re = /(?<!\S)(?:@([\w]{1,32})|#([\w-]{1,100}))/g;
+  // [\w-] covers letters, digits, underscores, and hyphens (for hyphenated usernames).
+  const re = /(?<!\S)(?:@([\w-]{1,32})|#([\w-]{1,100}))/g;
   let match: RegExpExecArray | null;
 
   while ((match = re.exec(content)) !== null) {
@@ -43,8 +47,16 @@ export function MentionText({ content, currentUsername, channels, serverSlug }: 
     if (match[1] !== undefined) {
       // @username pill
       const username = match[1];
-      const isSelf =
-        !!currentUsername && username.toLowerCase() === currentUsername.toLowerCase();
+      const lowerName = username.toLowerCase();
+      const isBroadcast = BROADCAST_MENTIONS.has(lowerName);
+      const isSelf = !isBroadcast && !!currentUsername && lowerName === currentUsername.toLowerCase();
+
+      const tooltip = isBroadcast
+        ? lowerName === 'everyone'
+          ? 'Notifies all members of this channel'
+          : 'Notifies online members of this channel'
+        : `@${username}`;
+
       parts.push(
         <span
           key={key++}
@@ -53,7 +65,7 @@ export function MentionText({ content, currentUsername, channels, serverSlug }: 
               ? 'rounded px-0.5 font-semibold text-white bg-indigo-500/70 hover:bg-indigo-500 cursor-default'
               : 'rounded px-0.5 font-semibold text-indigo-300 bg-indigo-500/20 hover:bg-indigo-500/40 cursor-default'
           }
-          title={`@${username}`}
+          title={tooltip}
         >
           @{username}
         </span>,

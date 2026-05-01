@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { cn } from '@/lib/utils';
+import { cn, getUserErrorMessage } from '@/lib/utils';
 import { sendMessageAction } from '@/app/actions/sendMessage';
 import { createReplyAction } from '@/app/actions/createReply';
 import { apiClient } from '@/lib/api-client';
@@ -146,6 +146,14 @@ export function MessageInput({
       shouldRefocusTextareaRef.current = false;
     }
   }, [isSending, isUploading]);
+
+  // When a reply target is set (or changes), focus the textarea so the user
+  // can start typing immediately without a manual click.
+  useEffect(() => {
+    if (replyingTo) {
+      textareaRef.current?.focus();
+    }
+  }, [replyingTo]);
 
   const handleAttachClick = () => {
     fileInputRef.current?.click();
@@ -296,8 +304,8 @@ export function MessageInput({
       setPendingAttachments([]);
       closeMentionDropdown();
       onMessageSent?.(msg);
-    } catch {
-      setSendError('Failed to send message. Please try again.');
+    } catch (err) {
+      setSendError(getUserErrorMessage(err, 'Failed to send message. Please try again.'));
     } finally {
       setIsSending(false);
     }
@@ -470,7 +478,7 @@ export function MessageInput({
 
       <div
         className={cn(
-          'flex items-end gap-1 rounded-lg bg-[#40444b] px-2 py-2',
+          'flex items-center gap-1 rounded-lg bg-[#40444b] px-2 py-2',
           isAtLimit && 'ring-1 ring-red-500/60',
         )}
       >
@@ -481,7 +489,7 @@ export function MessageInput({
           className='hidden'
           aria-hidden='true'
           onChange={handleFileChange}
-          accept='image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          accept='image/jpeg,image/png,image/gif,image/webp,video/mp4,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         />
 
         {/* Attachment button */}

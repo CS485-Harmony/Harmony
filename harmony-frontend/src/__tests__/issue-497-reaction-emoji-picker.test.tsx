@@ -204,7 +204,7 @@ describe('Issue #497 — MessageItem: reaction emoji picker', () => {
 
   it('silently ignores CONFLICT errors (user already reacted)', async () => {
     const conflictError = {
-      response: { data: { error: { json: { code: 'CONFLICT' } } } },
+      response: { status: 409, data: { error: { json: { code: 'CONFLICT' } } } },
     };
     mockTrpcMutation.mockRejectedValue(conflictError);
 

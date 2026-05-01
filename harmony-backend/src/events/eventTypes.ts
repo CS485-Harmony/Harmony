@@ -21,6 +21,7 @@ export const EventChannels = {
   CHANNEL_DELETED: 'harmony:CHANNEL_DELETED',
   SERVER_UPDATED: 'harmony:SERVER_UPDATED',
   USER_STATUS_CHANGED: 'harmony:USER_STATUS_CHANGED',
+  USER_PROFILE_UPDATED: 'harmony:USER_PROFILE_UPDATED',
   REACTION_ADDED: 'harmony:REACTION_ADDED',
   REACTION_REMOVED: 'harmony:REACTION_REMOVED',
   USER_MENTIONED: 'harmony:USER_MENTIONED',
@@ -135,6 +136,12 @@ export interface UserStatusChangedPayload {
   status: 'ONLINE' | 'IDLE' | 'DND' | 'OFFLINE';
 }
 
+export interface UserProfileUpdatedPayload {
+  userId: string;
+  serverId: string;
+  timestamp: string;
+}
+
 export interface ReactionAddedPayload {
   messageId: string;
   channelId: string;
@@ -179,6 +186,7 @@ export interface EventPayloadMap {
   [EventChannels.CHANNEL_DELETED]: ChannelDeletedPayload;
   [EventChannels.SERVER_UPDATED]: ServerUpdatedPayload;
   [EventChannels.USER_STATUS_CHANGED]: UserStatusChangedPayload;
+  [EventChannels.USER_PROFILE_UPDATED]: UserProfileUpdatedPayload;
   [EventChannels.REACTION_ADDED]: ReactionAddedPayload;
   [EventChannels.REACTION_REMOVED]: ReactionRemovedPayload;
   [EventChannels.USER_MENTIONED]: UserMentionedPayload;
