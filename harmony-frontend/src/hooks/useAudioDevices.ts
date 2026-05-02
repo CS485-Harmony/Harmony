@@ -74,6 +74,18 @@ export function useAudioDevices(): UseAudioDevicesReturn {
           const { inputs, outputs } = parseDeviceList(devices);
           setInputDevices(inputs);
           setOutputDevices(outputs);
+          // If the stored selection is no longer present (device unplugged or permissions
+          // revoked), fall back to 'default' so the UI and VoiceContext stay in sync.
+          setSelectedInputIdState(prev => {
+            if (prev === 'default' || inputs.some(d => d.deviceId === prev)) return prev;
+            localStorage.setItem(INPUT_KEY, 'default');
+            return 'default';
+          });
+          setSelectedOutputIdState(prev => {
+            if (prev === 'default' || outputs.some(d => d.deviceId === prev)) return prev;
+            localStorage.setItem(OUTPUT_KEY, 'default');
+            return 'default';
+          });
         })
         .catch(() => {});
     }

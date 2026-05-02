@@ -99,6 +99,17 @@ export function useVoiceOptional(): VoiceContextValue | null {
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
+/**
+ * Imperative handle populated by VoiceProvider so HarmonyShell can forward
+ * voice SSE events (from useServerEvents) into channelParticipants state without
+ * prop-drilling callbacks through the entire component tree.
+ */
+export interface VoiceExternalActions {
+  notifyUserJoined: (channelId: string, userId: string) => void;
+  notifyUserLeft: (channelId: string, userId: string) => void;
+  notifyStateChanged: (channelId: string, userId: string, muted: boolean, deafened: boolean) => void;
+}
+
 interface VoiceProviderProps {
   children: ReactNode;
   /** The current server's UUID — used to scope getParticipants fetches. */
@@ -111,9 +122,15 @@ interface VoiceProviderProps {
    * room.localParticipant.identity is not yet available.
    */
   currentUserId?: string;
+  /**
+   * Optional ref populated by the provider with imperative methods that
+   * update channelParticipants from SSE voice events (userJoined/Left/stateChanged).
+   * Pass a ref created with useRef<VoiceExternalActions | null>(null) from HarmonyShell.
+   */
+  externalActionsRef?: { current: VoiceExternalActions | null };
 }
 
-export function VoiceProvider({ children, serverId, voiceChannelIds, currentUserId }: VoiceProviderProps) {
+export function VoiceProvider({ children, serverId, voiceChannelIds, currentUserId, externalActionsRef }: VoiceProviderProps) {
   const { showToast } = useToast();
 
   const [connectedChannelId, setConnectedChannelId] = useState<string | null>(null);
@@ -177,6 +194,38 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
       ),
     );
   }, [serverId, voiceChannelIdsKey]);
+
+  // Populate the external actions ref so HarmonyShell can forward SSE voice events
+  // into channelParticipants state without prop-drilling.
+  useEffect(() => {
+    if (!externalActionsRef) return;
+    externalActionsRef.current = {
+      notifyUserJoined: (channelId, userId) => {
+        setChannelParticipants(prev => {
+          const existing = prev[channelId] ?? [];
+          if (existing.some(p => p.userId === userId)) return prev;
+          return { ...prev, [channelId]: [...existing, { userId, muted: false, deafened: false }] };
+        });
+      },
+      notifyUserLeft: (channelId, userId) => {
+        setChannelParticipants(prev => ({
+          ...prev,
+          [channelId]: (prev[channelId] ?? []).filter(p => p.userId !== userId),
+        }));
+      },
+      notifyStateChanged: (channelId, userId, muted, deafened) => {
+        setChannelParticipants(prev => ({
+          ...prev,
+          [channelId]: (prev[channelId] ?? []).map(p =>
+            p.userId === userId ? { ...p, muted, deafened } : p,
+          ),
+        }));
+      },
+    };
+    return () => {
+      externalActionsRef.current = null;
+    };
+  }, [externalActionsRef]);
 
   const resetVoiceState = useCallback(() => {
     // Detach all remote audio elements before clearing other state.
@@ -259,6 +308,9 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
   }, [resetVoiceState]);
 
   // Applies the user's stored output device to an audio element when the browser supports setSinkId.
+  // This is called only at track-attach time (initial join + participant connect events).
+  // Already-attached <audio> elements are NOT re-routed if the user changes their output device
+  // while already in a call — they need to rejoin the channel for the change to take effect.
   function applySinkId(el: HTMLAudioElement) {
     const outputDeviceId = getStoredAudioOutputDeviceId();
     if (

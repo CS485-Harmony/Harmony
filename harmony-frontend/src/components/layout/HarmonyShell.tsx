@@ -19,7 +19,7 @@ import { ServerRail } from '@/components/server-rail/ServerRail';
 import { GuestPromoBanner } from '@/components/channel/GuestPromoBanner';
 import { CreateChannelModal } from '@/components/channel/CreateChannelModal';
 import { useAuth } from '@/hooks/useAuth';
-import { VoiceProvider } from '@/contexts/VoiceContext';
+import { VoiceProvider, type VoiceExternalActions } from '@/contexts/VoiceContext';
 import { BrowseServersModal } from '@/components/server-rail/BrowseServersModal';
 import { useServerEvents } from '@/hooks/useServerEvents';
 import { useServerListSync } from '@/hooks/useServerListSync';
@@ -200,6 +200,8 @@ export function HarmonyShell({
   }
 
   const { notifyServerCreated, notifyServerJoined } = useServerListSync();
+  // Imperative handle for forwarding SSE voice events into VoiceContext.channelParticipants.
+  const voiceActionsRef = useRef<VoiceExternalActions | null>(null);
 
   const currentMemberRecord = useMemo(
     () => localMembers.find(m => m.id === authUser?.id),
@@ -549,6 +551,26 @@ export function HarmonyShell({
     onServerUpdated: handleServerUpdated,
     onReactionAdded: isChannelLocked ? undefined : handleReactionAdded,
     onReactionRemoved: isChannelLocked ? undefined : handleReactionRemoved,
+    // Forward voice presence events into VoiceContext via the imperative ref so the
+    // sidebar shows real-time participant counts for channels we're not joined in.
+    onVoiceUserJoined: useCallback(
+      ({ channelId, userId }: { channelId: string; userId: string }) => {
+        voiceActionsRef.current?.notifyUserJoined(channelId, userId);
+      },
+      [],
+    ),
+    onVoiceUserLeft: useCallback(
+      ({ channelId, userId }: { channelId: string; userId: string }) => {
+        voiceActionsRef.current?.notifyUserLeft(channelId, userId);
+      },
+      [],
+    ),
+    onVoiceStateChanged: useCallback(
+      ({ channelId, userId, muted, deafened }: { channelId: string; userId: string; muted: boolean; deafened: boolean }) => {
+        voiceActionsRef.current?.notifyStateChanged(channelId, userId, muted, deafened);
+      },
+      [],
+    ),
     enabled: isAuthenticated,
   });
 
@@ -566,7 +588,7 @@ export function HarmonyShell({
   }, [isChannelLocked]);
 
   return (
-    <VoiceProvider serverId={currentServer.id} voiceChannelIds={voiceChannelIds} currentUserId={authUser?.id}>
+    <VoiceProvider serverId={currentServer.id} voiceChannelIds={voiceChannelIds} currentUserId={authUser?.id} externalActionsRef={voiceActionsRef}>
       <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
         {/* Skip-to-content: visually hidden, appears on keyboard focus (WCAG 2.4.1) */}
         <a

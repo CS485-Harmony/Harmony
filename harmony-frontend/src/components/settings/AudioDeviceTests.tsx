@@ -118,17 +118,34 @@ export function MicLevelMeter({ deviceId }: { deviceId: string }) {
 export function SpeakerTest({ deviceId }: { deviceId: string }) {
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Refs for cleanup on unmount while tone is playing.
+  const ctxRef = useRef<AudioContext | null>(null);
+  const oscillatorRef = useRef<OscillatorNode | null>(null);
+
+  useEffect(() => {
+    return () => {
+      // If the component unmounts while the tone is still playing, cancel it.
+      try { oscillatorRef.current?.stop(); } catch { /* already stopped */ }
+      void ctxRef.current?.close();
+      ctxRef.current = null;
+      oscillatorRef.current = null;
+    };
+  }, []);
 
   async function handleTest() {
     if (playing) return;
     setPlaying(true);
     setError(null);
 
+    // Declare ctx outside try so catch can close it if audio.play() rejects.
+    let ctx: AudioContext | undefined;
     try {
-      const ctx = new AudioContext({ sampleRate: 48000 });
+      ctx = new AudioContext({ sampleRate: 48000 });
+      ctxRef.current = ctx;
       const destination = ctx.createMediaStreamDestination();
 
       const oscillator = ctx.createOscillator();
+      oscillatorRef.current = oscillator;
       const gain = ctx.createGain();
       oscillator.type = 'sine';
       oscillator.frequency.value = 440;
@@ -154,10 +171,16 @@ export function SpeakerTest({ deviceId }: { deviceId: string }) {
       oscillator.onended = () => {
         audio.pause();
         audio.srcObject = null;
-        void ctx.close();
+        void ctx!.close();
+        ctxRef.current = null;
+        oscillatorRef.current = null;
         setPlaying(false);
       };
     } catch {
+      // Close ctx if audio.play() rejected before oscillator.onended could run.
+      void ctx?.close();
+      ctxRef.current = null;
+      oscillatorRef.current = null;
       setError('Could not play test tone.');
       setPlaying(false);
     }
