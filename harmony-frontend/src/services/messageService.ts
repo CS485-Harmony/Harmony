@@ -92,8 +92,8 @@ function toFrontendMessage(raw: Record<string, unknown>, fallbackChannelId = '')
 export async function getMessages(
   channelId: string,
   page = 1,
-  options?: { serverId?: string },
-): Promise<{ messages: Message[]; hasMore: boolean }> {
+  options?: { serverId?: string; cursor?: string },
+): Promise<{ messages: Message[]; hasMore: boolean; nextCursor: string | undefined }> {
   // Authenticated path: tRPC returns fresh data and includes attachments.
   if (options?.serverId) {
     const data = await trpcQuery<{
@@ -103,12 +103,14 @@ export async function getMessages(
       serverId: options.serverId,
       channelId,
       limit: 50,
+      ...(options.cursor ? { cursor: options.cursor } : {}),
     });
     if (data === null)
       throw new Error(`getMessages: tRPC returned no data for channelId=${channelId}`);
     return {
       messages: data.messages.map(m => toFrontendMessage(m, channelId)),
       hasMore: !!data.nextCursor,
+      nextCursor: data.nextCursor,
     };
   }
 
@@ -125,6 +127,7 @@ export async function getMessages(
   return {
     messages: data.messages.map(m => toFrontendMessage(m, channelId)),
     hasMore: data.messages.length >= (data.pageSize ?? 50),
+    nextCursor: undefined,
   };
 }
 

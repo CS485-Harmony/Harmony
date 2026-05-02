@@ -20,6 +20,7 @@ import {
 import { getServer, getServerMembersWithRole } from '@/services/serverService';
 import type { ServerMemberInfo } from '@/types';
 import type { Channel } from '@/types';
+import { ChannelVisibility } from '@/types';
 import type { AuditLogPage } from '@/services/channelService';
 import {
   getMetaTagPreview,
@@ -95,6 +96,9 @@ export async function fetchAuditLog(
 async function resolveChannelForSeo(serverSlug: string, channelSlug: string) {
   const channel = await getChannel(serverSlug, channelSlug);
   if (!channel) throw new Error('Channel not found');
+  if (channel.visibility !== ChannelVisibility.PUBLIC_INDEXABLE) {
+    throw new Error('SEO preview is only available for PUBLIC_INDEXABLE channels');
+  }
   return channel;
 }
 
