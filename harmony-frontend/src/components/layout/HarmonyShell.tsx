@@ -19,7 +19,6 @@ import { ServerRail } from '@/components/server-rail/ServerRail';
 import { GuestPromoBanner } from '@/components/channel/GuestPromoBanner';
 import { CreateChannelModal } from '@/components/channel/CreateChannelModal';
 import { useAuth } from '@/hooks/useAuth';
-import { VoiceProvider } from '@/contexts/VoiceContext';
 import { BrowseServersModal } from '@/components/server-rail/BrowseServersModal';
 import { useServerEvents } from '@/hooks/useServerEvents';
 import { useServerListSync } from '@/hooks/useServerListSync';
@@ -133,11 +132,6 @@ export function HarmonyShell({
     return map;
   }, [allChannels]);
 
-  // Stable list of voice channel IDs for VoiceProvider — recomputed only when channels change.
-  const voiceChannelIds = useMemo(
-    () => localChannels.filter(c => c.type === ChannelType.VOICE).map(c => c.id),
-    [localChannels],
-  );
   // Track the channels prop reference so localChannels resets whenever the server
   // passes a fresh array (server navigation or revalidatePath refresh) — same
   // render-time derivation pattern used above for localMessages/prevChannelId.
@@ -529,8 +523,7 @@ export function HarmonyShell({
   }, [isChannelLocked]);
 
   return (
-    <VoiceProvider serverId={currentServer.id} voiceChannelIds={voiceChannelIds} currentUserId={authUser?.id}>
-      <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
+    <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
         {/* Skip-to-content: visually hidden, appears on keyboard focus (WCAG 2.4.1) */}
         <a
           href='#main-content'
@@ -703,7 +696,6 @@ export function HarmonyShell({
             onClose={() => setIsCreateChannelOpen(false)}
           />
         )}
-      </div>
-    </VoiceProvider>
+    </div>
   );
 }
