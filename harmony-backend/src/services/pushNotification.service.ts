@@ -74,17 +74,10 @@ async function resolveLevel(
 
 async function sendToUser(userId: string, payload: PushPayload): Promise<void> {
   ensureVapid();
-  if (!vapidReady) {
-    logger.warn('[DEBUG:push] VAPID not ready — env vars missing, skipping push send');
-    return;
-  }
+  if (!vapidReady) return;
 
   const subs = await prisma.pushSubscription.findMany({ where: { userId } });
-  logger.info({ userId, subCount: subs.length, title: payload.title }, '[DEBUG:push] sendToUser');
-  if (subs.length === 0) {
-    logger.info({ userId }, '[DEBUG:push] no subscriptions for user — not sent');
-    return;
-  }
+  if (subs.length === 0) return;
 
   const body = JSON.stringify(payload);
 
@@ -95,7 +88,6 @@ async function sendToUser(userId: string, payload: PushPayload): Promise<void> {
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
           body,
         );
-        logger.info({ userId, endpoint: sub.endpoint.slice(-20) }, '[DEBUG:push] sent OK');
       } catch (err: unknown) {
         const status = (err as { statusCode?: number }).statusCode;
         if (status === 404 || status === 410) {

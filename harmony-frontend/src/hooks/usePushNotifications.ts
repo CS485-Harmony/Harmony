@@ -35,13 +35,11 @@ export function usePushNotifications(): UsePushNotificationsReturn {
     }
 
     setPermissionState(Notification.permission as PushPermissionState);
-    console.log('[DEBUG:push] Notification.permission:', Notification.permission);
 
     navigator.serviceWorker.ready.then(async (reg) => {
       const sub = await reg.pushManager.getSubscription();
-      console.log('[DEBUG:push] existing subscription:', sub ? sub.endpoint : 'NONE — not subscribed yet');
       setIsSubscribed(!!sub);
-    }).catch((err) => { console.error('[DEBUG:push] serviceWorker.ready failed:', err); });
+    }).catch(() => {});
   }, []);
 
   const enable = useCallback(async () => {
