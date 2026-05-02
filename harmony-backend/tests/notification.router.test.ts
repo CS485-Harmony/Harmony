@@ -5,9 +5,10 @@
  * Prisma is mocked so no live database is required.
  *
  * Covers:
- *   - notification.markAsRead   : persists the read flag for the authed user
- *   - notification.markAllAsRead: persists read for all unread of the authed user
- *   - Both endpoints reject unauthenticated requests
+ *   - notification.markAsRead        : persists the read flag for the authed user
+ *   - notification.markAllAsRead     : persists read for all unread of the authed user
+ *   - notification.markChannelAsRead : persists read for all unread in a channel for the authed user
+ *   - All endpoints reject unauthenticated requests
  */
 
 // ─── Prisma mock ──────────────────────────────────────────────────────────────
@@ -181,6 +182,53 @@ describe('POST /trpc/notification.markAllAsRead', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ result: { data: { count: 0 } } });
+  });
+});
+
+describe('POST /trpc/notification.markChannelAsRead', () => {
+  const CHANNEL_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+
+  it('returns 200 and calls updateMany scoped to channelId, userId, and read:false', async () => {
+    mockPrisma.notification.updateMany.mockResolvedValue({ count: 2 });
+
+    const res = await authedPost('/trpc/notification.markChannelAsRead', {
+      channelId: CHANNEL_ID,
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.notification.updateMany).toHaveBeenCalledWith({
+      where: { channelId: CHANNEL_ID, userId: AUTHED_USER_ID, read: false },
+      data: { read: true },
+    });
+  });
+
+  it('returns the batch payload in the tRPC result envelope', async () => {
+    mockPrisma.notification.updateMany.mockResolvedValue({ count: 2 });
+
+    const res = await authedPost('/trpc/notification.markChannelAsRead', {
+      channelId: CHANNEL_ID,
+    });
+
+    expect(res.body).toMatchObject({ result: { data: { count: 2 } } });
+  });
+
+  it('rejects unauthenticated requests with UNAUTHORIZED', async () => {
+    const res = await request(app)
+      .post('/trpc/notification.markChannelAsRead')
+      .set('Origin', 'http://localhost:3000')
+      .send({ channelId: CHANNEL_ID });
+
+    expect(res.status).toBe(401);
+    expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid channelId (not a UUID) with 400', async () => {
+    const res = await authedPost('/trpc/notification.markChannelAsRead', {
+      channelId: 'not-a-uuid',
+    });
+
+    expect(res.status).toBe(400);
+    expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
   });
 });
 
