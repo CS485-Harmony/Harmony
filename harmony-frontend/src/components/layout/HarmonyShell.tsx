@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useState, useEffect, useCallback, useMemo, useSyncExternalStore, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { TopBar } from '@/components/channel/TopBar';
 import { MembersSidebar } from '@/components/channel/MembersSidebar';
@@ -111,6 +111,9 @@ export function HarmonyShell({
   const [hasMoreOlder, setHasMoreOlder] = useState(initialHasMore);
   const [olderCursor, setOlderCursor] = useState<string | undefined>(initialNextCursor);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  // Synchronous mutex — set before any await so rapid scroll events can't dispatch
+  // duplicate fetches while React hasn't yet re-rendered with isLoadingOlder=true.
+  const isLoadingOlderRef = useRef(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   // Track previous channel so we can reset localMessages synchronously on channel
   // switch — avoids a one-render flash where old messages show under the new channel header.
@@ -121,6 +124,7 @@ export function HarmonyShell({
     setHasMoreOlder(initialHasMore);
     setOlderCursor(initialNextCursor);
     setIsLoadingOlder(false);
+    isLoadingOlderRef.current = false;
     setIsMenuOpen(false);
     setIsPinsOpen(false);
     setReplyingTo(null);
@@ -251,9 +255,11 @@ export function HarmonyShell({
   }, []);
 
   const handleLoadOlderMessages = useCallback(async () => {
-    if (!olderCursor || isLoadingOlder) return;
+    if (!olderCursor || isLoadingOlderRef.current) return;
+    isLoadingOlderRef.current = true;
     setIsLoadingOlder(true);
     const result = await getOlderMessagesAction(currentChannel.id, currentServer.id, olderCursor);
+    isLoadingOlderRef.current = false;
     setIsLoadingOlder(false);
     if (!result.ok) return;
     // Older messages come back newest-first from the cursor; reverse to chronological order
@@ -261,7 +267,7 @@ export function HarmonyShell({
     setLocalMessages(prev => [...olderSorted, ...prev]);
     setHasMoreOlder(result.hasMore);
     setOlderCursor(result.nextCursor);
-  }, [olderCursor, isLoadingOlder, currentChannel.id, currentServer.id]);
+  }, [olderCursor, currentChannel.id, currentServer.id]);
 
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);

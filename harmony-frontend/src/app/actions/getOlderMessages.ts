@@ -13,7 +13,7 @@ export async function getOlderMessagesAction(
   cursor: string,
 ): Promise<GetOlderMessagesResult> {
   try {
-    const result = await getMessages(channelId, 1, { serverId, cursor });
+    const result = await getMessages(channelId, undefined, { serverId, cursor });
     return { ok: true, ...result };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to load older messages.';
