@@ -26,6 +26,8 @@ interface NotificationBellProps {
   userId?: string;
   /** Called whenever the per-server unread mention counts change. */
   onUnreadCountsByServerChange?: (counts: Record<string, number>) => void;
+  /** Called whenever the per-channel unread mention counts change. */
+  onUnreadCountsByChannelChange?: (counts: Record<string, number>) => void;
   /** When the user navigates to a channel, auto-mark its notifications as read. */
   currentChannelId?: string;
 }
@@ -57,12 +59,14 @@ function formatRelativeTime(ts: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function NotificationBell({ userId, onUnreadCountsByServerChange, currentChannelId }: NotificationBellProps) {
+export function NotificationBell({ userId, onUnreadCountsByServerChange, onUnreadCountsByChannelChange, currentChannelId }: NotificationBellProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
   const onUnreadCountsByServerChangeRef = useRef(onUnreadCountsByServerChange);
   onUnreadCountsByServerChangeRef.current = onUnreadCountsByServerChange;
+  const onUnreadCountsByChannelChangeRef = useRef(onUnreadCountsByChannelChange);
+  onUnreadCountsByChannelChangeRef.current = onUnreadCountsByChannelChange;
 
   const unreadByServer = useMemo(
     () =>
@@ -72,9 +76,21 @@ export function NotificationBell({ userId, onUnreadCountsByServerChange, current
     [notifications],
   );
 
+  const unreadByChannel = useMemo(
+    () =>
+      notifications
+        .filter((n) => !n.read)
+        .reduce<Record<string, number>>((acc, n) => ({ ...acc, [n.channelId]: (acc[n.channelId] ?? 0) + 1 }), {}),
+    [notifications],
+  );
+
   useEffect(() => {
     onUnreadCountsByServerChangeRef.current?.(unreadByServer);
   }, [unreadByServer]);
+
+  useEffect(() => {
+    onUnreadCountsByChannelChangeRef.current?.(unreadByChannel);
+  }, [unreadByChannel]);
 
   // Auto-mark notifications as read when the user visits the channel they were mentioned in.
   // Always call the API — don't check local state first (stale closure on initial load).

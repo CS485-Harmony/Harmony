@@ -172,6 +172,7 @@ export function HarmonyShell({
   const [isBrowseServersOpen, setIsBrowseServersOpen] = useState(false);
   const [localServers, setLocalServers] = useState<Server[]>(servers);
   const [mentionCountByServer, setMentionCountByServer] = useState<Record<string, number>>({});
+  const [mentionCountByChannel, setMentionCountByChannel] = useState<Record<string, number>>({});
   const [prevServers, setPrevServers] = useState<Server[]>(servers);
   if (prevServers !== servers) {
     setPrevServers(servers);
@@ -593,6 +594,7 @@ export function HarmonyShell({
           isAuthenticated={isAuthenticated}
           serverId={currentServer.id}
           members={members}
+          mentionCountByChannel={mentionCountByChannel}
           onCreateChannel={defaultType => {
             setCreateChannelDefaultType(defaultType);
             setIsCreateChannelOpen(true);
@@ -619,6 +621,7 @@ export function HarmonyShell({
             onMenuToggle={() => setIsMenuOpen(v => !v)}
             userId={authUser?.id}
             onUnreadCountsByServerChange={setMentionCountByServer}
+            onUnreadCountsByChannelChange={setMentionCountByChannel}
             currentChannelId={currentChannel.id}
           />
 
