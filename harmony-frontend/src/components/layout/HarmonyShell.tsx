@@ -26,6 +26,7 @@ import { useServerListSync } from '@/hooks/useServerListSync';
 import { ChannelType, ChannelVisibility, UserStatus } from '@/types';
 import { useRouter } from 'next/navigation';
 import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
+import { getOlderMessagesAction } from '@/app/actions/getOlderMessages';
 import type { Server, Channel, Message, User } from '@/types';
 
 // ─── Discord colour tokens ────────────────────────────────────────────────────
@@ -64,6 +65,8 @@ export interface HarmonyShellProps {
   allChannels: Channel[];
   currentChannel: Channel;
   messages: Message[];
+  initialHasMore?: boolean;
+  initialNextCursor?: string;
   members: User[];
   /** Base path for navigation links. Use "/c" for public guest routes, "/channels" for authenticated routes. */
   basePath?: string;
@@ -78,6 +81,8 @@ export function HarmonyShell({
   allChannels,
   currentChannel,
   messages,
+  initialHasMore = false,
+  initialNextCursor,
   members,
   basePath = '/c',
   lockedMessagePane,
@@ -103,6 +108,9 @@ export function HarmonyShell({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   // Local message state so sent messages appear immediately without a page reload
   const [localMessages, setLocalMessages] = useState<Message[]>(messages);
+  const [hasMoreOlder, setHasMoreOlder] = useState(initialHasMore);
+  const [olderCursor, setOlderCursor] = useState<string | undefined>(initialNextCursor);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   // Track previous channel so we can reset localMessages synchronously on channel
   // switch — avoids a one-render flash where old messages show under the new channel header.
@@ -110,6 +118,9 @@ export function HarmonyShell({
   if (prevChannelId !== currentChannel.id) {
     setPrevChannelId(currentChannel.id);
     setLocalMessages(messages);
+    setHasMoreOlder(initialHasMore);
+    setOlderCursor(initialNextCursor);
+    setIsLoadingOlder(false);
     setIsMenuOpen(false);
     setIsPinsOpen(false);
     setReplyingTo(null);
@@ -238,6 +249,19 @@ export function HarmonyShell({
     );
     setPinsRefreshKey(prev => prev + 1);
   }, []);
+
+  const handleLoadOlderMessages = useCallback(async () => {
+    if (!olderCursor || isLoadingOlder) return;
+    setIsLoadingOlder(true);
+    const result = await getOlderMessagesAction(currentChannel.id, currentServer.id, olderCursor);
+    setIsLoadingOlder(false);
+    if (!result.ok) return;
+    // Older messages come back newest-first from the cursor; reverse to chronological order
+    const olderSorted = [...result.messages].reverse();
+    setLocalMessages(prev => [...olderSorted, ...prev]);
+    setHasMoreOlder(result.hasMore);
+    setOlderCursor(result.nextCursor);
+  }, [olderCursor, isLoadingOlder, currentChannel.id, currentServer.id]);
 
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
@@ -613,6 +637,9 @@ export function HarmonyShell({
                     canPin={canPin}
                     onReplyClick={handleReplyClick}
                     onPinToggle={handlePinToggle}
+                    hasMoreOlder={hasMoreOlder}
+                    isLoadingOlder={isLoadingOlder}
+                    onLoadOlderMessages={handleLoadOlderMessages}
                   />
                   <MessageInput
                     channelId={currentChannel.id}

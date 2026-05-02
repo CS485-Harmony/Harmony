@@ -77,6 +77,12 @@ interface MessageListProps {
   onReplyClick?: (message: Message) => void;
   /** Called when the user clicks pin/unpin on a message. */
   onPinToggle?: (messageId: string, pinned: boolean) => void;
+  /** Whether there are older messages to load via pagination. */
+  hasMoreOlder?: boolean;
+  /** Whether older messages are currently being fetched. */
+  isLoadingOlder?: boolean;
+  /** Called when the user requests loading older messages. */
+  onLoadOlderMessages?: () => void;
 }
 
 export function MessageList({
@@ -86,6 +92,9 @@ export function MessageList({
   canPin,
   onReplyClick,
   onPinToggle,
+  hasMoreOlder,
+  isLoadingOlder,
+  onLoadOlderMessages,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -95,6 +104,9 @@ export function MessageList({
   // Track whether the initial mount scroll has happened so we jump instantly
   // to the bottom on load rather than smoothly scrolling from the top.
   const hasMountedRef = useRef(false);
+  // Saved scroll height before a prepend operation — restored in useLayoutEffect
+  // to prevent the viewport from jumping when older messages are added at the top.
+  const savedScrollHeightRef = useRef(0);
 
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;
@@ -130,11 +142,22 @@ export function MessageList({
       hasMountedRef.current = true;
       const el = scrollContainerRef.current;
       if (el) el.scrollTop = el.scrollHeight;
+    } else if (savedScrollHeightRef.current > 0) {
+      // Older messages were prepended — restore scroll so the viewport doesn't jump
+      const el = scrollContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight - savedScrollHeightRef.current;
+      savedScrollHeightRef.current = 0;
     } else if (isNearBottomRef.current) {
       // New message while already near bottom: smooth scroll
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
+
+  const handleLoadOlderClick = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (el) savedScrollHeightRef.current = el.scrollHeight;
+    onLoadOlderMessages?.();
+  }, [onLoadOlderMessages]);
 
   const groups = useMemo(() => groupMessages(messages), [messages]);
 
@@ -148,6 +171,22 @@ export function MessageList({
       aria-live='polite'
       aria-relevant='additions'
     >
+      {/* Load older messages */}
+      {(hasMoreOlder || isLoadingOlder) && (
+        <div className='flex justify-center px-4 pb-2 pt-1'>
+          {isLoadingOlder ? (
+            <span className='text-xs text-gray-400'>Loading older messages…</span>
+          ) : (
+            <button
+              onClick={handleLoadOlderClick}
+              className='rounded px-3 py-1 text-xs font-medium text-gray-300 hover:bg-[#40444b] hover:text-white'
+            >
+              Load older messages
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Channel welcome header */}
       <div className='px-4 pb-4'>
         <div className='flex h-16 w-16 items-center justify-center rounded-full bg-[#40444b]'>
