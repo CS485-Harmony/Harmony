@@ -15,6 +15,7 @@ import {
 } from '@/app/settings/[serverSlug]/[channelSlug]/actions';
 import { VisibilityToggle } from '@/components/channel/VisibilityToggle';
 import { SeoPreviewSection } from '@/components/settings/SeoPreviewSection';
+import { ChannelMembersSection } from '@/components/settings/ChannelMembersSection';
 import { apiClient } from '@/lib/api-client';
 import type { Channel } from '@/types';
 import type { AuditLogEntry, AuditLogPage } from '@/services/channelService';
@@ -108,12 +109,13 @@ function ChannelNotificationsSection({ channel, serverId }: { channel: Channel; 
   );
 }
 
-type Section = 'overview' | 'permissions' | 'visibility' | 'seo' | 'notifications';
+type Section = 'overview' | 'permissions' | 'visibility' | 'members' | 'seo' | 'notifications';
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'permissions', label: 'Permissions' },
   { id: 'visibility', label: 'Visibility' },
+  { id: 'members', label: 'Members' },
   { id: 'seo', label: 'SEO Preview' },
   { id: 'notifications', label: 'Notifications' },
 ];
@@ -752,6 +754,9 @@ export function ChannelSettingsPage({
           {activeSection === 'permissions' && <PermissionsSection />}
           {activeSection === 'visibility' && (
             <VisibilitySection channel={channel} serverSlug={serverSlug} disabled={false} />
+          )}
+          {activeSection === 'members' && (
+            <ChannelMembersSection channel={channel} serverSlug={serverSlug} />
           )}
           {activeSection === 'seo' && (
             <SeoPreviewSection

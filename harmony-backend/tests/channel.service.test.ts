@@ -565,7 +565,7 @@ describe('channelService.createDefaultChannel', () => {
     await prisma.server.delete({ where: { id: defaultChannelServerId } }).catch(() => {});
   });
 
-  it('CS-26: delegates to createChannel with the correct fixed arguments', async () => {
+  it('CS-26: delegates to createChannel with PUBLIC_NO_INDEX visibility when isPublic=false', async () => {
     const spy = jest.spyOn(channelService, 'createChannel');
 
     const result = await channelService.createDefaultChannel(defaultChannelServerId);
@@ -575,11 +575,12 @@ describe('channelService.createDefaultChannel', () => {
       name: 'general',
       slug: 'general',
       type: 'TEXT',
-      visibility: 'PRIVATE',
+      visibility: 'PUBLIC_NO_INDEX',
       position: 0,
     }, undefined);
     expect(result.name).toBe('general');
     expect(result.slug).toBe('general');
+    expect(result.visibility).toBe('PUBLIC_NO_INDEX');
 
     spy.mockRestore();
   });
