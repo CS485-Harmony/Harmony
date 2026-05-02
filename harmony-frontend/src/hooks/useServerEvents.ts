@@ -544,6 +544,8 @@ export function useServerEvents({
         reconnectCountRef.current = 0; // reset budget on successful connection
       };
       es.onerror = () => {
+        // Intentional close during cleanup — do not reconnect.
+        if (cancelled) return;
         logger.warn('Server SSE connection failed', {
           feature: 'server-events',
           event: everOpened ? 'stream_disconnected' : 'stream_failed',

@@ -77,10 +77,10 @@ export function NotificationBell({ userId, onUnreadCountsByServerChange, current
   }, [unreadByServer]);
 
   // Auto-mark notifications as read when the user visits the channel they were mentioned in.
+  // Always call the API — don't check local state first (stale closure on initial load).
+  // The backend updateMany with read:false is a no-op when nothing is unread.
   useEffect(() => {
     if (!currentChannelId || !userId) return;
-    const hasUnread = notifications.some((n) => n.channelId === currentChannelId && !n.read);
-    if (!hasUnread) return;
     void apiClient
       .trpcMutation('notification.markChannelAsRead', { channelId: currentChannelId })
       .then(() => {
@@ -89,7 +89,6 @@ export function NotificationBell({ userId, onUnreadCountsByServerChange, current
         );
       })
       .catch((err) => console.error('[NotificationBell] markChannelAsRead failed:', err));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentChannelId, userId]);
   const [isLoading, setIsLoading] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
