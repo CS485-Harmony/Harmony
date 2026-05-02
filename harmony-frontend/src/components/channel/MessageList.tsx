@@ -73,10 +73,14 @@ interface MessageListProps {
   serverId?: string;
   /** When true, shows the pin/unpin option on message hover. Grant to MODERATOR+. */
   canPin?: boolean;
+  /** When true, shows delete for messages the user doesn't own. Grant to MODERATOR+. */
+  canDeleteAny?: boolean;
   /** Called when the user clicks Reply on a message. */
   onReplyClick?: (message: Message) => void;
   /** Called when the user clicks pin/unpin on a message. */
   onPinToggle?: (messageId: string, pinned: boolean) => void;
+  /** Called after the user successfully deletes a message. */
+  onDelete?: (messageId: string) => void;
 }
 
 export function MessageList({
@@ -84,8 +88,10 @@ export function MessageList({
   messages,
   serverId,
   canPin,
+  canDeleteAny,
   onReplyClick,
   onPinToggle,
+  onDelete,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -187,8 +193,10 @@ export function MessageList({
                   showHeader={mi === 0}
                   serverId={serverId}
                   canPin={canPin}
+                  canDeleteAny={canDeleteAny}
                   onReplyClick={onReplyClick}
                   onPinToggle={onPinToggle}
+                  onDelete={onDelete}
                 />
               ))}
             </div>

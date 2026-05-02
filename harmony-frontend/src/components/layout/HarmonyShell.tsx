@@ -239,6 +239,10 @@ export function HarmonyShell({
     setPinsRefreshKey(prev => prev + 1);
   }, []);
 
+  const handleDeleteMessage = useCallback((messageId: string) => {
+    setLocalMessages(prev => prev.filter(m => m.id !== messageId));
+  }, []);
+
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
   }, []);
@@ -611,8 +615,10 @@ export function HarmonyShell({
                     messages={localMessages}
                     serverId={currentServer.id}
                     canPin={canPin}
+                    canDeleteAny={canPin}
                     onReplyClick={handleReplyClick}
                     onPinToggle={handlePinToggle}
+                    onDelete={handleDeleteMessage}
                   />
                   <MessageInput
                     channelId={currentChannel.id}
