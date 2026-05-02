@@ -105,6 +105,76 @@ function MicLevelMeter({ deviceId }: { deviceId: string }) {
   );
 }
 
+// ─── Speaker test ─────────────────────────────────────────────────────────────
+
+/**
+ * Plays a 440 Hz tone for ~1 second through the selected output device.
+ * Routes audio via MediaStreamDestination → HTMLAudioElement so setSinkId
+ * can target the specific device without affecting other app audio.
+ */
+function SpeakerTest({ deviceId }: { deviceId: string }) {
+  const [playing, setPlaying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleTest() {
+    if (playing) return;
+    setPlaying(true);
+    setError(null);
+
+    try {
+      const ctx = new AudioContext({ sampleRate: 48000 });
+      const destination = ctx.createMediaStreamDestination();
+
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = 440;
+      // Fade out over 1 s so the tone ends cleanly without a click.
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.0);
+      oscillator.connect(gain);
+      gain.connect(destination);
+
+      const audio = new Audio();
+      audio.srcObject = destination.stream;
+
+      if (deviceId && deviceId !== 'default' && 'setSinkId' in audio) {
+        await (audio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> }).setSinkId(
+          deviceId,
+        );
+      }
+
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 1.0);
+      await audio.play();
+
+      oscillator.onended = () => {
+        audio.pause();
+        audio.srcObject = null;
+        void ctx.close();
+        setPlaying(false);
+      };
+    } catch {
+      setError('Could not play test tone. Check your output device.');
+      setPlaying(false);
+    }
+  }
+
+  return (
+    <div className='mt-3 flex flex-col gap-2'>
+      <button
+        type='button'
+        onClick={handleTest}
+        disabled={playing}
+        className='w-fit rounded px-3 py-1.5 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white transition-colors disabled:opacity-50'
+      >
+        {playing ? 'Playing…' : 'Test Speaker'}
+      </button>
+      {error && <p className='text-xs text-red-400'>{error}</p>}
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function AudioSettingsSection() {
@@ -209,7 +279,8 @@ export function AudioSettingsSection() {
                   </option>
                 ))}
             </select>
-            <p className='mt-2 text-xs text-gray-500'>
+            <SpeakerTest deviceId={selectedOutputId} />
+            <p className='mt-1 text-xs text-gray-500'>
               Changes take effect the next time you join a voice channel.
             </p>
           </>
