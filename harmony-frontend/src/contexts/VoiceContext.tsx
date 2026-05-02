@@ -29,13 +29,16 @@ import {
   type ReactNode,
 } from 'react';
 import { apiClient, getAccessToken } from '@/lib/api-client';
-import { AUDIO_INPUT_DEVICE_KEY, AUDIO_OUTPUT_DEVICE_KEY } from '@/components/settings/AudioSettingsSection';
+import { AUDIO_INPUT_DEVICE_KEY, AUDIO_OUTPUT_DEVICE_KEY } from '@/lib/audio-device-settings';
 import { createFrontendLogger } from '@/lib/frontend-logger';
 import { useToast } from '@/hooks/useToast';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 
 const logger = createFrontendLogger({ component: 'voice-context' });
 
+// Output routing is applied once when an audio track is attached. Already-attached
+// elements are not updated if the user changes their output device mid-call; they
+// would need to rejoin for the new selection to take effect.
 function applyOutputDevice(el: HTMLAudioElement) {
   const sinkId = typeof window !== 'undefined'
     ? (localStorage.getItem(AUDIO_OUTPUT_DEVICE_KEY) ?? 'default')
@@ -353,16 +356,32 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
         const storedInputId = typeof window !== 'undefined'
           ? (localStorage.getItem(AUDIO_INPUT_DEVICE_KEY) ?? 'default')
           : 'default';
-        const audioConstraints =
+        const exactConstraint =
           storedInputId && storedInputId !== 'default'
             ? { deviceId: { exact: storedInputId } }
             : true;
-        const room = await TwilioVideo.connect(token, {
-          name: channelId,
-          audio: audioConstraints,
-          video: false,
-          dominantSpeaker: true,
-        });
+        let room: Awaited<ReturnType<typeof TwilioVideo.connect>>;
+        try {
+          room = await TwilioVideo.connect(token, {
+            name: channelId,
+            audio: exactConstraint,
+            video: false,
+            dominantSpeaker: true,
+          });
+        } catch (connectErr) {
+          const isDeviceErr =
+            connectErr instanceof DOMException &&
+            (connectErr.name === 'OverconstrainedError' || connectErr.name === 'NotFoundError');
+          if (!isDeviceErr) throw connectErr;
+          // Saved device is gone — fall back to system default.
+          if (typeof window !== 'undefined') localStorage.removeItem(AUDIO_INPUT_DEVICE_KEY);
+          room = await TwilioVideo.connect(token, {
+            name: channelId,
+            audio: true,
+            video: false,
+            dominantSpeaker: true,
+          });
+        }
         roomRef.current = room;
 
         // Store local identity so setMuted/setDeafened can update the participant entry.

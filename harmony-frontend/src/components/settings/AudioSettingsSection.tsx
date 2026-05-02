@@ -15,23 +15,16 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-
-export const AUDIO_INPUT_DEVICE_KEY = 'harmony:audioInputDeviceId';
-export const AUDIO_OUTPUT_DEVICE_KEY = 'harmony:audioOutputDeviceId';
+import {
+  AUDIO_INPUT_DEVICE_KEY,
+  AUDIO_OUTPUT_DEVICE_KEY,
+  loadStoredDeviceId,
+  saveDeviceId,
+} from '@/lib/audio-device-settings';
 
 interface AudioDevice {
   deviceId: string;
   label: string;
-}
-
-function loadStoredDeviceId(key: string): string {
-  if (typeof window === 'undefined') return 'default';
-  return localStorage.getItem(key) ?? 'default';
-}
-
-function saveDeviceId(key: string, deviceId: string) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(key, deviceId);
 }
 
 async function enumerateDevices(): Promise<{ inputs: AudioDevice[]; outputs: AudioDevice[] }> {
@@ -54,6 +47,7 @@ export function AudioSettingsSection() {
   const [needsPermission, setNeedsPermission] = useState(false);
   const [testingMic, setTestingMic] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
+  const [micTestError, setMicTestError] = useState<string | null>(null);
   const sinkIdSupported = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
 
   const testStreamRef = useRef<MediaStream | null>(null);
@@ -70,23 +64,27 @@ export function AudioSettingsSection() {
       // Labels are empty strings until permission is granted.
       const hasLabels = newInputs.some(d => d.label && !d.label.startsWith('Microphone ('));
       setNeedsPermission(!hasLabels && newInputs.length > 0);
+
+      // If the previously selected device is no longer present, reset to default.
+      const inputIds = new Set(newInputs.map(d => d.deviceId));
+      setSelectedInput(prev => {
+        if (prev !== 'default' && !inputIds.has(prev)) {
+          saveDeviceId(AUDIO_INPUT_DEVICE_KEY, 'default');
+          return 'default';
+        }
+        return prev;
+      });
+      const outputIds = new Set(newOutputs.map(d => d.deviceId));
+      setSelectedOutput(prev => {
+        if (prev !== 'default' && !outputIds.has(prev)) {
+          saveDeviceId(AUDIO_OUTPUT_DEVICE_KEY, 'default');
+          return 'default';
+        }
+        return prev;
+      });
     } catch {
       // enumerateDevices is not available (unlikely in modern browsers).
     }
-  }, []);
-
-  useEffect(() => {
-    setSelectedInput(loadStoredDeviceId(AUDIO_INPUT_DEVICE_KEY));
-    setSelectedOutput(loadStoredDeviceId(AUDIO_OUTPUT_DEVICE_KEY));
-    void refreshDevices();
-
-    const handleDeviceChange = () => void refreshDevices();
-    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
-    return () => {
-      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
-      stopMicTest();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const stopMicTest = useCallback(() => {
@@ -107,11 +105,27 @@ export function AudioSettingsSection() {
     setTestingMic(false);
   }, []);
 
+  useEffect(() => {
+    setSelectedInput(loadStoredDeviceId(AUDIO_INPUT_DEVICE_KEY));
+    setSelectedOutput(loadStoredDeviceId(AUDIO_OUTPUT_DEVICE_KEY));
+    void refreshDevices();
+
+    if (!navigator.mediaDevices) return;
+    const handleDeviceChange = () => void refreshDevices();
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+      stopMicTest();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const startMicTest = useCallback(async () => {
     if (testingMic) {
       stopMicTest();
       return;
     }
+    setMicTestError(null);
     try {
       const constraints: MediaStreamConstraints = {
         audio: selectedInput && selectedInput !== 'default'
@@ -141,6 +155,8 @@ export function AudioSettingsSection() {
     } catch (err) {
       if (err instanceof DOMException && err.name === 'NotAllowedError') {
         setPermissionDenied(true);
+      } else {
+        setMicTestError('Could not start mic test — device may be unavailable.');
       }
       stopMicTest();
     }
@@ -242,6 +258,9 @@ export function AudioSettingsSection() {
           </div>
           {testingMic && (
             <p className='mt-1 text-xs text-gray-500'>Speak to test your microphone level.</p>
+          )}
+          {micTestError && (
+            <p className='mt-1 text-xs text-red-400'>{micTestError}</p>
           )}
         </div>
       </div>
