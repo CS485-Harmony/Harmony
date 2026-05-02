@@ -25,14 +25,29 @@ import {
   useEffect,
   useRef,
   useState,
+  type MutableRefObject,
   type ReactNode,
 } from 'react';
 import { apiClient, getAccessToken } from '@/lib/api-client';
+import { AUDIO_INPUT_DEVICE_KEY, AUDIO_OUTPUT_DEVICE_KEY } from '@/components/settings/AudioSettingsSection';
 import { createFrontendLogger } from '@/lib/frontend-logger';
 import { useToast } from '@/hooks/useToast';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 
 const logger = createFrontendLogger({ component: 'voice-context' });
+
+function applyOutputDevice(el: HTMLAudioElement) {
+  const sinkId = typeof window !== 'undefined'
+    ? (localStorage.getItem(AUDIO_OUTPUT_DEVICE_KEY) ?? 'default')
+    : 'default';
+  if (sinkId && sinkId !== 'default' && 'setSinkId' in el) {
+    (el as HTMLAudioElement & { setSinkId(id: string): Promise<void> })
+      .setSinkId(sinkId)
+      .catch(() => {
+        // setSinkId may fail if the device was unplugged; fall back silently.
+      });
+  }
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +89,13 @@ export interface VoiceContextValue {
   setDeafened: (deafened: boolean) => Promise<void>;
 }
 
+/** Imperative handle for external callers (e.g. HarmonyShell SSE handlers) to update voice state. */
+export interface VoiceExternalActions {
+  notifyUserJoined(channelId: string, userId: string): void;
+  notifyUserLeft(channelId: string, userId: string): void;
+  notifyStateChanged(channelId: string, userId: string, muted: boolean, deafened: boolean): void;
+}
+
 // ─── Context ─────────────────────────────────────────────────────────────────
 
 const VoiceContext = createContext<VoiceContextValue | null>(null);
@@ -107,9 +129,16 @@ interface VoiceProviderProps {
    * room.localParticipant.identity is not yet available.
    */
   currentUserId?: string;
+  /**
+   * Optional ref populated by VoiceProvider with imperative update functions.
+   * HarmonyShell uses this to apply SSE voice events (join/leave/stateChange)
+   * to channelParticipants without requiring VoiceContext to be a parent of
+   * the component that subscribes to SSE events.
+   */
+  externalActionsRef?: MutableRefObject<VoiceExternalActions | null>;
 }
 
-export function VoiceProvider({ children, serverId, voiceChannelIds, currentUserId }: VoiceProviderProps) {
+export function VoiceProvider({ children, serverId, voiceChannelIds, currentUserId, externalActionsRef }: VoiceProviderProps) {
   const { showToast } = useToast();
 
   const [connectedChannelId, setConnectedChannelId] = useState<string | null>(null);
@@ -146,6 +175,37 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
   // Twilio does not auto-play subscribed tracks; we must attach them to <audio> elements.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const remoteAudioTracksRef = useRef<Map<string, any[]>>(new Map());
+
+  // ── Populate externalActionsRef so HarmonyShell can push SSE voice events in ──
+  useEffect(() => {
+    if (!externalActionsRef) return;
+    externalActionsRef.current = {
+      notifyUserJoined(channelId: string, userId: string) {
+        setChannelParticipants((prev: Record<string, VoiceParticipant[]>) => {
+          const list = prev[channelId] ?? [];
+          if (list.some((p: VoiceParticipant) => p.userId === userId)) return prev;
+          return { ...prev, [channelId]: [...list, { userId, muted: false, deafened: false }] };
+        });
+      },
+      notifyUserLeft(channelId: string, userId: string) {
+        setChannelParticipants((prev: Record<string, VoiceParticipant[]>) => ({
+          ...prev,
+          [channelId]: (prev[channelId] ?? []).filter((p: VoiceParticipant) => p.userId !== userId),
+        }));
+      },
+      notifyStateChanged(channelId: string, userId: string, muted: boolean, deafened: boolean) {
+        setChannelParticipants((prev: Record<string, VoiceParticipant[]>) => ({
+          ...prev,
+          [channelId]: (prev[channelId] ?? []).map((p: VoiceParticipant) =>
+            p.userId === userId ? { ...p, muted, deafened } : p,
+          ),
+        }));
+      },
+    };
+    return () => {
+      externalActionsRef.current = null;
+    };
+  }, [externalActionsRef]);
 
   // ── Fetch participant lists for all voice channels on mount / server change ──
   // This populates the sidebar before the user has joined any channel.
@@ -290,9 +350,16 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
 
         // Dynamic import keeps the Twilio SDK out of SSR.
         const TwilioVideo = await import('twilio-video');
+        const storedInputId = typeof window !== 'undefined'
+          ? (localStorage.getItem(AUDIO_INPUT_DEVICE_KEY) ?? 'default')
+          : 'default';
+        const audioConstraints =
+          storedInputId && storedInputId !== 'default'
+            ? { deviceId: { exact: storedInputId } }
+            : true;
         const room = await TwilioVideo.connect(token, {
           name: channelId,
-          audio: true,
+          audio: audioConstraints,
           video: false,
           dominantSpeaker: true,
         });
@@ -381,6 +448,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
           participant.audioTracks.forEach((pub: any) => {
             if (pub.track) {
               const el: HTMLAudioElement = pub.track.attach();
+              applyOutputDevice(el);
               document.body.appendChild(el);
               const existing = remoteAudioTracksRef.current.get(participant.identity) ?? [];
               remoteAudioTracksRef.current.set(participant.identity, [...existing, pub.track]);
@@ -418,6 +486,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
           participant.on('trackSubscribed', (track: any) => {
             if (track.kind === 'audio') {
               const el: HTMLAudioElement = track.attach();
+              applyOutputDevice(el);
               document.body.appendChild(el);
               const existing = remoteAudioTracksRef.current.get(participant.identity) ?? [];
               remoteAudioTracksRef.current.set(participant.identity, [...existing, track]);
