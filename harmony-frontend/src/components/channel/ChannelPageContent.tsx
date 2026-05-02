@@ -62,7 +62,10 @@ export async function ChannelPageContent({
     sessionUser?.isSystemAdmin ||
     currentMember?.role === 'admin' ||
     currentMember?.role === 'owner';
-  const isLockedPrivateChannel = channel.visibility === ChannelVisibility.PRIVATE && !isServerAdmin;
+  // Non-admin, non-authenticated users should not reach here with a private channel
+  // because getChannels filters inaccessible channels server-side. The lock pane
+  // still displays for unauthenticated guest views (/c/* route).
+  const isLockedPrivateChannel = channel.visibility === ChannelVisibility.PRIVATE && !isServerAdmin && !sessionUser;
   const sortedMessages = isLockedPrivateChannel
     ? []
     : [...(await getMessages(channel.id, 1, { serverId: server.id })).messages].reverse();

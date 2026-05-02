@@ -234,7 +234,7 @@ class ApiClient {
 
   /** Call a tRPC mutation procedure (POST). Returns the unwrapped data. */
   async trpcMutation<T>(procedure: string, input?: unknown): Promise<T> {
-    const res = await this.client.post<TrpcResponse<T>>(`/trpc/${procedure}`, input ?? null);
+    const res = await this.client.post<TrpcResponse<T>>(`/trpc/${procedure}`, input);
     return res.data.result.data;
   }
 }
