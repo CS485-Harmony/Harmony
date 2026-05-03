@@ -29,6 +29,7 @@ export function frontendEnv(env = process.env) {
     ...cleanEnv(env),
     PORT: String(FRONTEND_PORT),
     NEXT_PUBLIC_API_URL: BACKEND_URL,
+    JWT_ACCESS_SECRET: 'harmony-e2e-access-secret',
   };
 }
 

@@ -133,6 +133,8 @@ Required runtime values:
   `robots.txt`, and sitemap entrypoints
 - `NEXT_PUBLIC_API_URL`: public backend API origin used by browser code and server-side frontend
   fetches
+- `JWT_ACCESS_SECRET`: shared backend access-token secret used by Edge middleware to verify the
+  `auth_token` JWT before rendering protected routes
 
 Per `docs/deployment/deployment-architecture.md`, the frontend apex domain owns the public SEO
 contract. The frontend hosts canonical URLs, `metadataBase`, `robots.txt`, and sitemap entrypoints,

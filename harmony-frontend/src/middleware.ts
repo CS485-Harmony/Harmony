@@ -11,13 +11,12 @@
  * The middleware reads the `auth_token` httpOnly cookie set by the
  * `setSessionCookie` server action (or, after #113, by the backend directly).
  *
- * NOTE: The cookie payload is base64-decoded for routing decisions only.
- * All real authorization is enforced by the backend on every API call.
- * When #113 lands with real JWT, replace `decodeSessionCookie` with
- * `jose.jwtVerify` using the shared JWT_ACCESS_SECRET.
+ * The cookie is verified with the same JWT_ACCESS_SECRET used by the backend
+ * before protected routes are allowed through.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
+import { jwtVerify } from 'jose/jwt/verify';
 import { AUTH_COOKIE_NAME } from '@/lib/auth-constants';
 
 // NOTE: Role-based access for /settings/* is intentionally NOT enforced here.
@@ -32,49 +31,36 @@ interface SessionPayload {
 }
 
 /**
- * Decodes the session cookie payload.
+ * Verifies the signed access-token cookie before using its claims for routing.
  *
- * Supports two formats:
- *   1. base64url-encoded JSON `{ sub, username, role }` — set by `setSessionCookie`
- *   2. A real JWT (`xxxxx.yyyyy.zzzzz`) — set by the backend after #113 ships.
- *      In JWT mode the payload (middle segment) is decoded but NOT verified —
- *      verification is the backend's responsibility on every API call.
- *
- * Returns null if the cookie is missing, malformed, or cannot be decoded.
+ * Returns null if the cookie is missing, malformed, expired, signed with the
+ * wrong secret, or missing the required subject claim.
  */
-function decodeSessionCookie(cookieValue: string): SessionPayload | null {
+async function verifySessionCookie(cookieValue: string): Promise<SessionPayload | null> {
+  const accessSecret = process.env.JWT_ACCESS_SECRET;
+  if (!accessSecret) {
+    return null;
+  }
+
   try {
-    // Detect JWT format (three base64url segments separated by dots)
-    const parts = cookieValue.split('.');
-    const segment = parts.length === 3 ? parts[1] : cookieValue;
+    const { payload } = await jwtVerify(cookieValue, new TextEncoder().encode(accessSecret), {
+      algorithms: ['HS256'],
+    });
 
-    // Convert base64url → base64 for atob (Edge-runtime compatible)
-    const base64 = segment.replace(/-/g, '+').replace(/_/g, '/').padEnd(
-      segment.length + ((4 - (segment.length % 4)) % 4),
-      '=',
-    );
-    const json = atob(base64);
-    const parsed: unknown = JSON.parse(json);
-
-    if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      typeof (parsed as Record<string, unknown>).sub !== 'string'
-    ) {
+    if (typeof payload.sub !== 'string') {
       return null;
     }
 
-    const obj = parsed as Record<string, unknown>;
     return {
-      sub: obj.sub as string,
-      username: typeof obj.username === 'string' ? obj.username : '',
+      sub: payload.sub,
+      username: typeof payload.username === 'string' ? payload.username : '',
     };
   } catch {
     return null;
   }
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isChannelsRoute = pathname.startsWith('/channels/') || pathname === '/channels';
@@ -101,7 +87,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  const session = decodeSessionCookie(tokenCookie.value);
+  const session = await verifySessionCookie(tokenCookie.value);
 
   // Malformed cookie — treat as unauthenticated
   if (!session) {

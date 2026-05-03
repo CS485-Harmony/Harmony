@@ -13,8 +13,7 @@ const MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
  *
  * Stores the raw JWT access token so that server-side tRPC calls
  * (in trpc-client.ts) can forward it as a Bearer token to the backend.
- * The middleware decodes the JWT payload for routing decisions only —
- * all real authorization is enforced by the backend on every API call.
+ * The middleware verifies the JWT signature before making routing decisions.
  */
 export async function setSessionCookie(accessToken: string): Promise<void> {
   const cookieStore = await cookies();
