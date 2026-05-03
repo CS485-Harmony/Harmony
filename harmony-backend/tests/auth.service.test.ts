@@ -14,6 +14,7 @@ jest.mock('../src/db/prisma', () => ({
       findUnique: jest.fn(),
       create: jest.fn(),
       upsert: jest.fn(),
+      update: jest.fn(),
     },
     refreshToken: {
       create: jest.fn(),
@@ -36,7 +37,7 @@ jest.mock('../src/services/serverMember.service', () => ({
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { Prisma } from '@prisma/client';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { prisma } from '../src/db/prisma';
 import { serverMemberService } from '../src/services/serverMember.service';
 import { authService } from '../src/services/auth.service';
@@ -55,6 +56,7 @@ const mockPrisma = prisma as unknown as {
     findUnique: jest.Mock;
     create: jest.Mock;
     upsert: jest.Mock;
+    update: jest.Mock;
   };
   refreshToken: {
     create: jest.Mock;
@@ -121,6 +123,7 @@ beforeEach(() => {
     username: 'admin',
     displayName: 'System Admin',
   });
+  mockPrisma.user.update.mockResolvedValue(mockUser);
   mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshTokenRecord);
   mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
   mockPrisma.server.findFirst.mockResolvedValue(null);
@@ -206,7 +209,7 @@ describe('authService.register', () => {
   });
 
   it('maps Prisma P2002 race conditions to CONFLICT', async () => {
-    const p2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    const p2002 = new PrismaClientKnownRequestError('Unique constraint failed', {
       code: 'P2002',
       clientVersion: '5.0.0',
     });
@@ -499,6 +502,55 @@ describe('authService.login', () => {
   });
 });
 
+describe('authService.resetRequiredPassword', () => {
+  it('stores a new verifier record for an account with an invalid password hash', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({ ...mockUser, passwordHash: '!' });
+
+    await authService.resetRequiredPassword(
+      mockUser.email,
+      PASSWORD_SALT,
+      derivePasswordVerifier('NewSecurePass123!'),
+    );
+
+    const updateArgs = mockPrisma.user.update.mock.calls[0][0] as {
+      where: { id: string };
+      data: { passwordHash: string };
+    };
+    expect(updateArgs.where.id).toBe(mockUser.id);
+    expect(updateArgs.data.passwordHash).toMatch(new RegExp(`^v1\\$${PASSWORD_SALT}\\$\\$2`));
+    expect(updateArgs.data.passwordHash).not.toContain('NewSecurePass123!');
+  });
+
+  it('rejects reset attempts for accounts that already have a valid verifier record', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+
+    await expect(
+      authService.resetRequiredPassword(
+        mockUser.email,
+        PASSWORD_SALT,
+        derivePasswordVerifier('NewSecurePass123!'),
+      ),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: 'Password reset is not required for this account.',
+    });
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('does not reveal whether an email exists during reset', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+
+    await expect(
+      authService.resetRequiredPassword(
+        'missing@example.com',
+        PASSWORD_SALT,
+        derivePasswordVerifier('NewSecurePass123!'),
+      ),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+  });
+});
+
 describe('authService.logout', () => {
   it('revokes the matching refresh token hash', async () => {
     const rawToken = signTestRefreshToken(mockUserId);
@@ -538,9 +590,7 @@ describe('authService.logout', () => {
     const args = mockPrisma.refreshToken.updateMany.mock.calls[0][0] as {
       where: { tokenHash: string };
     };
-    expect(args.where.tokenHash).toBe(
-      crypto.createHash('sha256').update(rawToken).digest('hex'),
-    );
+    expect(args.where.tokenHash).toBe(crypto.createHash('sha256').update(rawToken).digest('hex'));
   });
 });
 

@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { Prisma } from '@prisma/client';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TRPCError } from '@trpc/server';
 import { serverMemberService } from './serverMember.service';
 import { ADMIN_EMAIL, RESERVED_EMAILS, RESERVED_USERNAMES } from '../lib/admin.utils';
@@ -53,6 +53,16 @@ export interface JwtPayload {
 
 function encodePasswordVerifierRecord(passwordSalt: string, bcryptHash: string): string {
   return `${PASSWORD_VERIFIER_PREFIX}$${passwordSalt}$${bcryptHash}`;
+}
+
+async function createPasswordVerifierRecord(
+  passwordSalt: string,
+  passwordVerifier: string,
+): Promise<string> {
+  return encodePasswordVerifierRecord(
+    passwordSalt,
+    await bcrypt.hash(passwordVerifier, BCRYPT_ROUNDS),
+  );
 }
 
 function decodePasswordVerifierRecord(
@@ -166,7 +176,11 @@ export const authService = {
   },
 
   async getLoginPasswordSalt(email: string): Promise<string> {
-    if (process.env.NODE_ENV === 'development' && process.env.ENABLE_DEV_ADMIN === 'true' && email === ADMIN_EMAIL) {
+    if (
+      process.env.NODE_ENV === 'development' &&
+      process.env.ENABLE_DEV_ADMIN === 'true' &&
+      email === ADMIN_EMAIL
+    ) {
       return DEV_ADMIN_PASSWORD_SALT;
     }
 
@@ -201,10 +215,7 @@ export const authService = {
 
     // Store a bcrypt hash of the client-derived verifier so the raw password
     // never traverses the wire or lands in request-body logs.
-    const passwordHash = encodePasswordVerifierRecord(
-      passwordSalt,
-      await bcrypt.hash(passwordVerifier, BCRYPT_ROUNDS),
-    );
+    const passwordHash = await createPasswordVerifierRecord(passwordSalt, passwordVerifier);
 
     let user: Awaited<ReturnType<typeof userRepository.create>>;
     try {
@@ -215,7 +226,7 @@ export const authService = {
         displayName: username,
       });
     } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (err instanceof PrismaClientKnownRequestError && err.code === 'P2002') {
         throw new TRPCError({ code: 'CONFLICT', message: 'Email or username already in use' });
       }
       throw err;
@@ -239,6 +250,29 @@ export const authService = {
     await storeRefreshToken(user.id, refreshToken);
 
     return { accessToken, refreshToken };
+  },
+
+  async resetRequiredPassword(
+    email: string,
+    passwordSalt: string,
+    passwordVerifier: string,
+  ): Promise<void> {
+    const user = await userRepository.findByEmail(email);
+    if (!user) {
+      await bcrypt.compare(passwordVerifier, TIMING_DUMMY_HASH);
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
+    }
+
+    if (decodePasswordVerifierRecord(user.passwordHash)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Password reset is not required for this account.',
+      });
+    }
+
+    await userRepository.update(user.id, {
+      passwordHash: await createPasswordVerifierRecord(passwordSalt, passwordVerifier),
+    });
   },
 
   async login(email: string, passwordVerifier: string): Promise<AuthTokens> {

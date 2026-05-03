@@ -154,6 +154,22 @@ export async function login(email: string, password: string): Promise<User> {
 }
 
 /**
+ * Replaces the password for accounts whose stored verifier record is invalid.
+ * This does not create a session; callers should log in with the new password.
+ */
+export async function resetRequiredPassword(email: string, password: string): Promise<void> {
+  const { passwordSalt } = await apiClient.post<PasswordChallengeResponse>(
+    '/api/auth/password-reset-required/challenge',
+  );
+  const passwordVerifier = await derivePasswordVerifier(password, passwordSalt);
+  await apiClient.post('/api/auth/password-reset-required', {
+    email,
+    passwordSalt,
+    passwordVerifier,
+  });
+}
+
+/**
  * Creates a new account and logs the user in.
  * If a displayName different from the username is provided, it is applied via
  * an immediate updateUser call so the profile reflects it straight away.

@@ -26,6 +26,7 @@ import {
   getCurrentUser,
   login,
   register,
+  resetRequiredPassword,
   shouldEnablePresenceTracking,
   updateCurrentUser,
 } from '@/services/authService';
@@ -114,6 +115,34 @@ describe('authService password transport hardening', () => {
       password: 'plain-text-password',
     });
     expect(setSessionCookie).toHaveBeenCalledWith('access');
+  });
+
+  it('resets a password-required account without posting the raw password', async () => {
+    mockedApiClient.post
+      .mockResolvedValueOnce({ passwordSalt: 'ffeeddccbbaa99887766554433221100' })
+      .mockResolvedValueOnce(undefined);
+
+    await resetRequiredPassword('user@example.com', 'new-plain-password');
+
+    expect(mockedApiClient.post).toHaveBeenNthCalledWith(
+      1,
+      '/api/auth/password-reset-required/challenge',
+    );
+    expect(mockedDerivePasswordVerifier).toHaveBeenCalledWith(
+      'new-plain-password',
+      'ffeeddccbbaa99887766554433221100',
+    );
+    expect(mockedApiClient.post).toHaveBeenNthCalledWith(2, '/api/auth/password-reset-required', {
+      email: 'user@example.com',
+      passwordSalt: 'ffeeddccbbaa99887766554433221100',
+      passwordVerifier: 'derived-password-verifier',
+    });
+    expect(mockedApiClient.post).not.toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/password-reset-required',
+      expect.objectContaining({ password: 'new-plain-password' }),
+    );
+    expect(setSessionCookie).not.toHaveBeenCalled();
   });
 
   it('clears the server auth cookie on logout', async () => {

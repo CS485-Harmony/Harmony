@@ -45,6 +45,7 @@ jest.mock('../src/db/prisma', () => ({
       findUnique: jest.fn(),
       create: jest.fn(),
       upsert: jest.fn(),
+      update: jest.fn(),
     },
     refreshToken: {
       create: jest.fn(),
@@ -74,6 +75,7 @@ const mockPrisma = prisma as unknown as {
     findUnique: jest.Mock;
     create: jest.Mock;
     upsert: jest.Mock;
+    update: jest.Mock;
   };
   refreshToken: {
     create: jest.Mock;
@@ -296,6 +298,72 @@ describe('POST /api/auth/login', () => {
       .send({ email: 'not-an-email' });
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/auth/password-reset-required', () => {
+  it('resets an account with an invalid password hash and allows login with the new verifier', async () => {
+    const resetUser = { ...mockUser, passwordHash: '!' };
+    mockPrisma.user.findUnique.mockResolvedValueOnce(resetUser);
+    mockPrisma.user.update.mockImplementation(
+      async ({ data }: { data: { passwordHash: string } }) => {
+        resetUser.passwordHash = data.passwordHash;
+        return resetUser;
+      },
+    );
+
+    const challengeRes = await request(app)
+      .post('/api/auth/password-reset-required/challenge')
+      .set('Origin', 'http://localhost:3000')
+      .send({});
+
+    expect(challengeRes.status).toBe(200);
+    expect(challengeRes.body.passwordSalt).toMatch(/^[0-9a-f]{32}$/i);
+
+    const resetVerifier = derivePasswordVerifier(
+      'new-password-123',
+      challengeRes.body.passwordSalt,
+    );
+    const resetRes = await request(app)
+      .post('/api/auth/password-reset-required')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: 'alice@example.com',
+        passwordSalt: challengeRes.body.passwordSalt,
+        passwordVerifier: resetVerifier,
+      });
+
+    expect(resetRes.status).toBe(204);
+
+    mockPrisma.user.findUnique.mockResolvedValueOnce(resetUser);
+    mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshToken);
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: 'alice@example.com',
+        passwordVerifier: resetVerifier,
+      });
+
+    expect(loginRes.status).toBe(200);
+    expect(typeof loginRes.body.accessToken).toBe('string');
+  });
+
+  it('rejects reset when the account does not require one', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+
+    const res = await request(app)
+      .post('/api/auth/password-reset-required')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: 'alice@example.com',
+        passwordSalt: PASSWORD_SALT,
+        passwordVerifier: derivePasswordVerifier('new-password-123'),
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Password reset is not required for this account.');
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
   });
 });
 

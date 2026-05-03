@@ -40,6 +40,12 @@ const loginSchema = z.object({
   passwordVerifier: passwordVerifierSchema,
 });
 
+const resetRequiredPasswordSchema = z.object({
+  email: z.string().email({ message: 'Please enter a valid email address' }),
+  passwordSalt: passwordSaltSchema,
+  passwordVerifier: passwordVerifierSchema,
+});
+
 const logoutSchema = z.object({
   refreshToken: z.string().min(1),
 });
@@ -145,6 +151,34 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     const { email, passwordVerifier } = parsed.data;
     const tokens = await authService.login(email, passwordVerifier);
     res.status(200).json(tokens);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+/**
+ * POST /api/auth/password-reset-required/challenge
+ * Returns a fresh salt for replacing an invalid stored verifier record.
+ */
+authRouter.post('/password-reset-required/challenge', (_req: Request, res: Response) => {
+  res.status(200).json({ passwordSalt: authService.generatePasswordSalt() });
+});
+
+/**
+ * POST /api/auth/password-reset-required
+ * Replaces the password verifier only for accounts already flagged by an invalid hash.
+ */
+authRouter.post('/password-reset-required', async (req: Request, res: Response) => {
+  const parsed = resetRequiredPasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Validation failed', details: parsed.error.errors });
+    return;
+  }
+
+  try {
+    const { email, passwordSalt, passwordVerifier } = parsed.data;
+    await authService.resetRequiredPassword(email, passwordSalt, passwordVerifier);
+    res.status(204).send();
   } catch (err) {
     handleError(res, err);
   }

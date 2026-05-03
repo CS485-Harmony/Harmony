@@ -18,6 +18,12 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 
 <!-- Most recent entries at the top -->
 
+**Date:** 2026-05-03
+**Caught by:** [Human: user]
+**Related Issue:** #514
+**Mistake / Situation:** I began issue work in the shared Codex worktree before the coordination update specified an isolated per-issue worktree under `/private/tmp`.
+**Rule / Fix:** For coordinated Harmony issue work, use the explicitly requested per-issue worktree before editing project files, and leave the original checkout untouched except for read-only inspection or necessary worktree setup.
+
 **Date:** 2026-04-28  
 **Caught by:** [Human: user]  
 **Related Issue:** N/A  
