@@ -11,6 +11,36 @@ import { inviteService } from '../services/invite.service';
 
 const logger = createLogger({ component: 'public-router' });
 
+const PUBLIC_ATTACHMENT_SELECT = {
+  id: true,
+  url: true,
+  filename: true,
+  contentType: true,
+} as const;
+
+type PublicMessageRecord = {
+  attachments?: Array<{
+    id: string;
+    url: string;
+    filename: string;
+    contentType: string;
+  }>;
+};
+
+function toJsonSafePublicMessage<T extends PublicMessageRecord>(message: T) {
+  const { attachments = [], ...rest } = message;
+
+  return {
+    ...rest,
+    attachments: attachments.map((attachment) => ({
+      id: attachment.id,
+      url: attachment.url,
+      filename: attachment.filename,
+      contentType: attachment.contentType,
+    })),
+  };
+}
+
 /**
  * Factory so createApp() can inject a rate-limit store (e.g. a mock in tests
  * or a RedisStore in production) without requiring a real Redis connection in
@@ -63,13 +93,13 @@ export function createPublicRouter(store?: Store) {
             editedAt: true,
             author: { select: { id: true, username: true } },
             attachments: {
-              select: { id: true, url: true, filename: true, contentType: true, sizeBytes: true },
+              select: PUBLIC_ATTACHMENT_SELECT,
             },
           },
         });
 
         res.set('Cache-Control', `public, max-age=${CacheTTL.channelMessages}`);
-        res.json({ messages, page, pageSize });
+        res.json({ messages: messages.map(toJsonSafePublicMessage), page, pageSize });
       } catch (err) {
         logger.error({ err, channelId: req.params.channelId }, 'Public messages route failed');
         if (!res.headersSent) {
@@ -115,7 +145,7 @@ export function createPublicRouter(store?: Store) {
             editedAt: true,
             author: { select: { id: true, username: true } },
             attachments: {
-              select: { id: true, url: true, filename: true, contentType: true, sizeBytes: true },
+              select: PUBLIC_ATTACHMENT_SELECT,
             },
           },
         });
@@ -126,7 +156,7 @@ export function createPublicRouter(store?: Store) {
         }
 
         res.set('Cache-Control', `public, max-age=${CacheTTL.channelMessages}`);
-        res.json(message);
+        res.json(toJsonSafePublicMessage(message));
       } catch (err) {
         logger.error(
           { err, channelId: req.params.channelId, messageId: req.params.messageId },
@@ -247,7 +277,9 @@ export function createPublicRouter(store?: Store) {
         const channels = await prisma.channel.findMany({
           where: {
             serverId: server.id,
-            visibility: { in: [ChannelVisibility.PUBLIC_INDEXABLE, ChannelVisibility.PUBLIC_NO_INDEX] },
+            visibility: {
+              in: [ChannelVisibility.PUBLIC_INDEXABLE, ChannelVisibility.PUBLIC_NO_INDEX],
+            },
           },
           orderBy: { position: 'asc' },
           select: { id: true, name: true, slug: true, type: true, topic: true },
