@@ -50,6 +50,15 @@ describe('auth rate limiters — store delegation (Issue #318)', () => {
     expect(incrementCalls.length).toBeGreaterThan(0);
   });
 
+  it('calls increment() on the injected store for POST /api/auth/login/challenge', async () => {
+    const { factory, incrementCalls } = createStoreFactory();
+    const app = createApp({ rateLimitStore: factory });
+
+    await request(app).post('/api/auth/login/challenge').send({ email: 'alice@example.com' });
+
+    expect(incrementCalls.length).toBeGreaterThan(0);
+  });
+
   it('calls increment() on the injected store for POST /api/auth/register', async () => {
     const { factory, incrementCalls } = createStoreFactory();
     const app = createApp({ rateLimitStore: factory });
@@ -68,17 +77,17 @@ describe('auth rate limiters — store delegation (Issue #318)', () => {
     expect(incrementCalls.length).toBeGreaterThan(0);
   });
 
-  it('uses the injected store for all three auth limiters (shared counting via factory)', async () => {
+  it('uses the injected store for all four auth limiters (shared counting via factory)', async () => {
     const { factory, incrementCalls } = createStoreFactory();
     const app = createApp({ rateLimitStore: factory });
 
     await request(app).post('/api/auth/login').send({});
+    await request(app).post('/api/auth/login/challenge').send({ email: 'alice@example.com' });
     await request(app).post('/api/auth/register').send({});
     await request(app).post('/api/auth/refresh').send({});
 
-    // All three routes delegated to stores created by the same factory →
-    // 3 increment calls recorded in the shared array
-    expect(incrementCalls.length).toBe(3);
+    // All four routes delegated to stores created by the same factory.
+    expect(incrementCalls.length).toBe(4);
   });
 
   it('does not lock out local development after 10 login attempts', async () => {

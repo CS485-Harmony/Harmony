@@ -197,7 +197,7 @@ export function createApp(options: CreateAppOptions = {}) {
   app.use(seoRouter);
 
   // Auth endpoints
-  app.use('/api/auth/login', loginLimiter);
+  app.use(['/api/auth/login', '/api/auth/login/challenge'], loginLimiter);
   app.use('/api/auth/register', registerLimiter);
   app.use('/api/auth/refresh', refreshLimiter);
   app.use('/api/auth', authRouter);
