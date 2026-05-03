@@ -5,9 +5,8 @@ jest.mock('@/lib/api-client', () => ({
     trpcMutation: jest.fn(),
   },
   setTokens: jest.fn(),
-  clearTokens: jest.fn(),
+  clearTokens: jest.fn(() => window.localStorage.removeItem('harmony_refresh_token')),
   getAccessToken: jest.fn(() => null),
-  getRefreshToken: jest.fn(() => null),
 }));
 
 jest.mock('@/lib/passwordAuth', () => ({
@@ -67,7 +66,7 @@ describe('authService password transport hardening', () => {
   it('requests a login salt and never posts the raw password during login', async () => {
     mockedApiClient.post
       .mockResolvedValueOnce({ passwordSalt: '00112233445566778899aabbccddeeff' })
-      .mockResolvedValueOnce({ accessToken: 'access', refreshToken: 'refresh' });
+      .mockResolvedValueOnce({ accessToken: 'access' });
 
     await login('user@example.com', 'plain-text-password');
 
@@ -86,14 +85,15 @@ describe('authService password transport hardening', () => {
       email: 'user@example.com',
       password: 'plain-text-password',
     });
-    expect(mockedSetTokens).toHaveBeenCalledWith('access', 'refresh');
+    expect(mockedSetTokens).toHaveBeenCalledWith('access');
+    expect(window.localStorage.getItem('harmony_refresh_token')).toBeNull();
     expect(setSessionCookie).toHaveBeenCalledWith('access');
   });
 
   it('requests a registration salt and never posts the raw password during signup', async () => {
     mockedApiClient.post
       .mockResolvedValueOnce({ passwordSalt: 'ffeeddccbbaa99887766554433221100' })
-      .mockResolvedValueOnce({ accessToken: 'access', refreshToken: 'refresh' });
+      .mockResolvedValueOnce({ accessToken: 'access' });
 
     await register('user@example.com', 'alice', 'Alice', 'plain-text-password');
 
@@ -113,17 +113,21 @@ describe('authService password transport hardening', () => {
       username: 'alice',
       password: 'plain-text-password',
     });
+    expect(mockedSetTokens).toHaveBeenCalledWith('access');
+    expect(window.localStorage.getItem('harmony_refresh_token')).toBeNull();
     expect(setSessionCookie).toHaveBeenCalledWith('access');
   });
 
-  it('clears the server auth cookie on logout', async () => {
+  it('logs out without posting a refresh token from localStorage', async () => {
     const { logout } = await import('@/services/authService');
     window.localStorage.setItem('harmony_refresh_token', 'refresh-token');
     mockedApiClient.post.mockResolvedValueOnce(undefined);
 
     await logout();
 
+    expect(mockedApiClient.post).toHaveBeenCalledWith('/api/auth/logout');
     expect(clearSessionCookie).toHaveBeenCalled();
+    expect(window.localStorage.getItem('harmony_refresh_token')).toBeNull();
   });
 
   it('preserves backend OFFLINE until live presence tracking marks the session online', async () => {

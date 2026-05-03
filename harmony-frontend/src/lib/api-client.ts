@@ -10,10 +10,11 @@ import { setSessionCookie } from '@/app/actions/session';
 // ─── Token storage ────────────────────────────────────────────────────────────
 // Access token is kept only in module-level memory (never persisted) so it is
 // cleared on page refresh and cannot be read by injected scripts via localStorage.
-// Refresh token is stored in localStorage so users stay logged-in across reloads.
+// Refresh tokens are stored by the backend in httpOnly cookies so injected
+// scripts cannot read or exfiltrate them from browser storage.
 
-const REFRESH_TOKEN_KEY = 'harmony_refresh_token';
 const logger = createFrontendLogger({ component: 'api-client' });
+const LEGACY_REFRESH_TOKEN_KEY = 'harmony_refresh_token';
 
 let _accessToken: string | null = null;
 let _isRefreshing = false;
@@ -24,27 +25,19 @@ function notifyRefreshQueue(token: string | null) {
   _refreshQueue = [];
 }
 
-export function setTokens(accessToken: string, refreshToken: string): void {
+export function setTokens(accessToken: string): void {
   _accessToken = accessToken;
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-  }
 }
 
 export function clearTokens(): void {
   _accessToken = null;
   if (typeof window !== 'undefined') {
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY);
   }
 }
 
 export function getAccessToken(): string | null {
   return _accessToken;
-}
-
-export function getRefreshToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
 // ─── tRPC HTTP helpers ────────────────────────────────────────────────────────
@@ -71,6 +64,7 @@ class ApiClient {
       baseURL: API_CONFIG.BASE_URL,
       timeout: API_CONFIG.TIMEOUT,
       headers: { 'Content-Type': 'application/json' },
+      withCredentials: true,
     });
 
     this.setupInterceptors();
@@ -104,20 +98,6 @@ class ApiClient {
         const route = typeof originalRequest?.url === 'string' ? originalRequest.url : undefined;
 
         if (statusCode === 401 && !originalRequest._retry) {
-          const refreshToken = getRefreshToken();
-          if (!refreshToken) {
-            logger.warn('Auth session refresh skipped because no refresh token is stored', {
-              feature: 'auth',
-              event: 'refresh_skipped',
-              method,
-              route,
-              statusCode,
-              reason: 'missing_refresh_token',
-            });
-            clearTokens();
-            return Promise.reject(error);
-          }
-
           if (_isRefreshing) {
             // Queue concurrent requests until the refresh completes
             return new Promise(resolve => {
@@ -137,12 +117,13 @@ class ApiClient {
           _isRefreshing = true;
 
           try {
-            const res = await axios.post<{ accessToken: string; refreshToken: string }>(
+            const res = await axios.post<{ accessToken: string }>(
               `${API_CONFIG.BASE_URL}/api/auth/refresh`,
-              { refreshToken },
+              {},
+              { withCredentials: true },
             );
-            const { accessToken: newAt, refreshToken: newRt } = res.data;
-            setTokens(newAt, newRt);
+            const { accessToken: newAt } = res.data;
+            setTokens(newAt);
             // Sync the httpOnly cookie so server-side code (Server Components, Server Actions,
             // tRPC routes) reads the fresh token. Without this, the cookie stays stale after
             // the in-memory token is refreshed and all server-side calls return 401.
@@ -252,7 +233,7 @@ export async function fetchSseTicket(apiBaseUrl: string, accessToken: string): P
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`Failed to fetch SSE ticket: ${res.status}`);
-  const data = await res.json() as { ticket: string };
+  const data = (await res.json()) as { ticket: string };
   return data.ticket;
 }
 
@@ -272,9 +253,6 @@ export async function fetchSseTicket(apiBaseUrl: string, accessToken: string): P
 export async function refreshAccessToken(): Promise<void> {
   if (typeof window === 'undefined') return;
 
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return;
-
   // Piggyback on an in-flight interceptor refresh rather than racing it.
   if (_isRefreshing) {
     await new Promise<void>(resolve => {
@@ -285,12 +263,13 @@ export async function refreshAccessToken(): Promise<void> {
 
   _isRefreshing = true;
   try {
-    const res = await axios.post<{ accessToken: string; refreshToken: string }>(
+    const res = await axios.post<{ accessToken: string }>(
       `${API_CONFIG.BASE_URL}/api/auth/refresh`,
-      { refreshToken },
+      {},
+      { withCredentials: true },
     );
-    const { accessToken: newAt, refreshToken: newRt } = res.data;
-    setTokens(newAt, newRt);
+    const { accessToken: newAt } = res.data;
+    setTokens(newAt);
     try {
       await setSessionCookie(newAt);
     } catch {

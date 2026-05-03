@@ -46,7 +46,7 @@ const mockAxiosInstance: jest.Mock & Record<string, any> = Object.assign(
 );
 
 const mockAxiosPost = jest.fn().mockResolvedValue({
-  data: { accessToken: 'refreshed-access-token', refreshToken: 'refreshed-refresh-token' },
+  data: { accessToken: 'refreshed-access-token' },
 });
 
 // ─── Jest module mocks ────────────────────────────────────────────────────────
@@ -88,18 +88,16 @@ describe('Fix 1 — api-client: setSessionCookie is called after token refresh',
   beforeEach(() => {
     jest.clearAllMocks();
     mockAxiosPost.mockResolvedValue({
-      data: { accessToken: 'refreshed-access-token', refreshToken: 'refreshed-refresh-token' },
+      data: { accessToken: 'refreshed-access-token' },
     });
     // Re-configure the callable mock so the retry (this.client(req)) resolves
     mockAxiosInstance.mockResolvedValue({ data: {} });
-    window.localStorage.setItem('harmony_refresh_token', 'stored-refresh-token');
     // Suppress jsdom "not implemented: navigation" from window.location.href = '/auth/login'
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
-    window.localStorage.removeItem('harmony_refresh_token');
   });
 
   it('registers a response error interceptor during ApiClient construction', () => {
@@ -120,18 +118,20 @@ describe('Fix 1 — api-client: setSessionCookie is called after token refresh',
     expect(setSessionCookie).toHaveBeenCalledWith('refreshed-access-token');
   });
 
-  it('does NOT call setSessionCookie when there is no stored refresh token', async () => {
-    window.localStorage.removeItem('harmony_refresh_token');
-
+  it('attempts refresh with credentials even without a JavaScript-readable refresh token', async () => {
     const mock401Error = {
       config: { _retry: false, headers: {} },
       response: { status: 401 },
     };
 
-    // Without a refresh token the interceptor rejects immediately (no refresh attempt)
-    await mockCapturedResponseErrorHandler!(mock401Error).catch(() => undefined);
+    await mockCapturedResponseErrorHandler!(mock401Error);
 
-    expect(setSessionCookie).not.toHaveBeenCalled();
+    expect(mockAxiosPost).toHaveBeenCalledWith(
+      expect.stringContaining('/api/auth/refresh'),
+      {},
+      { withCredentials: true },
+    );
+    expect(setSessionCookie).toHaveBeenCalledWith('refreshed-access-token');
   });
 
   it('continues with the client-side retry even when setSessionCookie throws', async () => {

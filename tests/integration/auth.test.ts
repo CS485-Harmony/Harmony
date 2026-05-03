@@ -56,12 +56,15 @@ describe('Auth Smoke', () => {
 localOnlyDescribe('Auth (local-only)', () => {
   const { email, password } = LOCAL_SEEDS.alice;
 
-  test('AUTH-1: successful login returns accessToken and refreshToken', async () => {
+  test('AUTH-1: successful login returns accessToken and an httpOnly refresh cookie', async () => {
     const tokens = await login(email, password);
     expect(typeof tokens.accessToken).toBe('string');
     expect(typeof tokens.refreshToken).toBe('string');
     expect(tokens.accessToken.split('.')).toHaveLength(3);
     expect(tokens.refreshToken.split('.')).toHaveLength(3);
+    expect(tokens.refreshCookie).toContain('HttpOnly');
+    expect(tokens.refreshCookie).toContain('SameSite=Strict');
+    expect(tokens.refreshCookie).toContain('Path=/api/auth/refresh');
   });
 
   test('AUTH-2: login with wrong password returns 401', async () => {
@@ -115,12 +118,15 @@ localOnlyDescribe('Auth (local-only)', () => {
     expect(body.result?.data?.email).toBe(email);
   });
 
-  test('AUTH-6: valid refresh token issues new access and refresh tokens', async () => {
+  test('AUTH-6: valid refresh cookie issues a new access token and rotated refresh cookie', async () => {
     const first = await login(email, password);
     const res = await fetch(`${BACKEND_URL}/api/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: first.refreshToken }),
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: first.refreshCookie,
+      },
+      body: JSON.stringify({}),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -128,13 +134,18 @@ localOnlyDescribe('Auth (local-only)', () => {
       refreshToken?: string;
     };
     expect(typeof body.accessToken).toBe('string');
-    expect(typeof body.refreshToken).toBe('string');
+    expect(body.refreshToken).toBeUndefined();
+    const headers = res.headers as Headers & { getSetCookie?: () => string[] };
+    const rotatedRefreshCookie = headers
+      .getSetCookie?.()
+      .find((value) => value.startsWith('harmony_refresh_token='));
+    expect(rotatedRefreshCookie).toBeDefined();
 
     // Revoke to clean up
     await fetch(`${BACKEND_URL}/api/auth/logout`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: body.refreshToken }),
+      headers: { 'Content-Type': 'application/json', Cookie: rotatedRefreshCookie! },
+      body: JSON.stringify({}),
     });
   });
 
@@ -148,12 +159,12 @@ localOnlyDescribe('Auth (local-only)', () => {
   });
 
   localOnlyTest('AUTH-8: logout invalidates the refresh token', async () => {
-    const { refreshToken } = await login(email, password);
+    const { refreshCookie, refreshToken } = await login(email, password);
 
     const logoutRes = await fetch(`${BACKEND_URL}/api/auth/logout`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
+      headers: { 'Content-Type': 'application/json', Cookie: refreshCookie },
+      body: JSON.stringify({}),
     });
     expect(logoutRes.status).toBe(204);
 

@@ -115,8 +115,24 @@ describe('POST /api/auth/register/challenge', () => {
   });
 });
 
+function getSetCookieHeaders(res: request.Response): string[] {
+  const header = res.headers['set-cookie'];
+  if (!header) return [];
+  return Array.isArray(header) ? header : [header];
+}
+
+function expectRefreshCookie(res: request.Response): string {
+  const cookies = getSetCookieHeaders(res);
+  const refreshCookie = cookies.find((cookie) => cookie.startsWith('harmony_refresh_token='));
+  expect(refreshCookie).toBeDefined();
+  expect(refreshCookie).toContain('HttpOnly');
+  expect(refreshCookie).toContain('SameSite=Strict');
+  expect(refreshCookie).toContain('Path=/api/auth/refresh');
+  return refreshCookie!;
+}
+
 describe('POST /api/auth/register', () => {
-  it('creates a new user and returns access + refresh tokens', async () => {
+  it('creates a new user and returns an access token with the refresh token in an httpOnly cookie', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(null);
     mockPrisma.user.create.mockResolvedValue(mockUser);
     mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshToken);
@@ -133,7 +149,8 @@ describe('POST /api/auth/register', () => {
 
     expect(res.status).toBe(201);
     expect(typeof res.body.accessToken).toBe('string');
-    expect(typeof res.body.refreshToken).toBe('string');
+    expect(res.body.refreshToken).toBeUndefined();
+    expectRefreshCookie(res);
   });
 
   it('returns 400 when the verifier payload is missing', async () => {
@@ -243,7 +260,7 @@ describe('POST /api/auth/login/challenge', () => {
 });
 
 describe('POST /api/auth/login', () => {
-  it('returns access + refresh tokens on a valid verifier payload', async () => {
+  it('returns an access token and stores the refresh token in an httpOnly cookie', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(mockUser);
     mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshToken);
 
@@ -257,7 +274,8 @@ describe('POST /api/auth/login', () => {
 
     expect(res.status).toBe(200);
     expect(typeof res.body.accessToken).toBe('string');
-    expect(typeof res.body.refreshToken).toBe('string');
+    expect(res.body.refreshToken).toBeUndefined();
+    expectRefreshCookie(res);
   });
 
   it('returns 401 for the wrong verifier', async () => {
@@ -300,7 +318,7 @@ describe('POST /api/auth/login', () => {
 });
 
 describe('POST /api/auth/logout', () => {
-  it('revokes the refresh token and returns 204', async () => {
+  it('revokes the refresh token cookie, clears auth cookies, and returns 204', async () => {
     mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.user.findUnique.mockResolvedValue(mockUser);
     mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshToken);
@@ -313,29 +331,35 @@ describe('POST /api/auth/logout', () => {
         passwordVerifier: derivePasswordVerifier('password123'),
       });
 
-    const { refreshToken } = loginRes.body as { refreshToken: string };
+    const refreshCookie = expectRefreshCookie(loginRes);
 
     const logoutRes = await request(app)
       .post('/api/auth/logout')
       .set('Origin', 'http://localhost:3000')
-      .send({ refreshToken });
+      .set('Cookie', refreshCookie)
+      .send({});
 
     expect(logoutRes.status).toBe(204);
     expect(mockPrisma.refreshToken.updateMany).toHaveBeenCalledTimes(1);
+    const clearedCookies = getSetCookieHeaders(logoutRes);
+    expect(clearedCookies.some((cookie) => cookie.startsWith('harmony_refresh_token=;'))).toBe(
+      true,
+    );
   });
 
-  it('returns 400 when refreshToken is missing', async () => {
+  it('returns 204 and clears auth cookies when refresh token is already missing', async () => {
     const res = await request(app)
       .post('/api/auth/logout')
       .set('Origin', 'http://localhost:3000')
       .send({});
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(204);
+    expect(mockPrisma.refreshToken.updateMany).not.toHaveBeenCalled();
   });
 });
 
 describe('POST /api/auth/refresh', () => {
-  it('issues new tokens when given a valid refresh token', async () => {
+  it('rotates the httpOnly refresh cookie and returns only a new access token', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(mockUser);
     mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshToken);
 
@@ -347,7 +371,7 @@ describe('POST /api/auth/refresh', () => {
         passwordVerifier: derivePasswordVerifier('password123'),
       });
 
-    const { refreshToken } = loginRes.body as { refreshToken: string };
+    const refreshCookie = expectRefreshCookie(loginRes);
 
     mockPrisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshToken);
@@ -355,11 +379,13 @@ describe('POST /api/auth/refresh', () => {
     const refreshRes = await request(app)
       .post('/api/auth/refresh')
       .set('Origin', 'http://localhost:3000')
-      .send({ refreshToken });
+      .set('Cookie', refreshCookie)
+      .send({});
 
     expect(refreshRes.status).toBe(200);
     expect(typeof refreshRes.body.accessToken).toBe('string');
-    expect(typeof refreshRes.body.refreshToken).toBe('string');
+    expect(refreshRes.body.refreshToken).toBeUndefined();
+    expectRefreshCookie(refreshRes);
   });
 });
 

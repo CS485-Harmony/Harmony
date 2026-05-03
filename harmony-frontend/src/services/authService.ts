@@ -7,19 +7,14 @@
  *
  * Token strategy:
  *   - accessToken  : kept in module memory (cleared on page refresh, never in localStorage)
- *   - refreshToken : stored in localStorage so sessions survive page reloads
+ *   - refreshToken : stored in a backend-set httpOnly cookie so sessions survive reloads
+ *                    without exposing long-lived tokens to JavaScript
  *
  * The api-client handles silent token refresh automatically on 401 responses.
  */
 
 import type { User, UserStatus } from '@/types';
-import {
-  apiClient,
-  setTokens,
-  clearTokens,
-  getAccessToken,
-  getRefreshToken,
-} from '@/lib/api-client';
+import { apiClient, setTokens, clearTokens } from '@/lib/api-client';
 import { derivePasswordVerifier } from '@/lib/passwordAuth';
 import { clearSessionCookie, setSessionCookie } from '@/app/actions/session';
 
@@ -27,7 +22,6 @@ import { clearSessionCookie, setSessionCookie } from '@/app/actions/session';
 
 interface AuthTokensResponse {
   accessToken: string;
-  refreshToken: string;
 }
 
 interface PasswordChallengeResponse {
@@ -115,13 +109,11 @@ export function shouldEnablePresenceTracking(user: Pick<User, 'id' | 'status'> |
 
 /**
  * Returns the current authenticated user by fetching from the backend.
- * Returns null if no access token is present or the token is expired/invalid.
- * The api-client will silently refresh the access token if a refresh token is
- * available, so callers rarely need to handle 401 themselves.
+ * Returns null if the session is missing or invalid. If only the httpOnly
+ * refresh cookie remains after a reload, the api-client will receive a 401,
+ * refresh with browser credentials, and retry this request.
  */
 export async function getCurrentUser(): Promise<User | null> {
-  // No access token and no refresh token → definitely not logged in
-  if (!getAccessToken() && !getRefreshToken()) return null;
   try {
     const user = await apiClient.trpcQuery<BackendUser>('user.getCurrentUser');
     return applyStoredManualStatusOverride(mapBackendUser(user));
@@ -146,7 +138,7 @@ export async function login(email: string, password: string): Promise<User> {
     email,
     passwordVerifier,
   });
-  setTokens(tokens.accessToken, tokens.refreshToken);
+  setTokens(tokens.accessToken);
   await setSessionCookie(tokens.accessToken);
 
   const user = await apiClient.trpcQuery<BackendUser>('user.getCurrentUser');
@@ -174,7 +166,7 @@ export async function register(
     passwordSalt,
     passwordVerifier,
   });
-  setTokens(tokens.accessToken, tokens.refreshToken);
+  setTokens(tokens.accessToken);
   await setSessionCookie(tokens.accessToken);
 
   let user = await apiClient.trpcQuery<BackendUser>('user.getCurrentUser');
@@ -188,16 +180,13 @@ export async function register(
 }
 
 /**
- * Revokes the stored refresh token on the server and clears local token storage.
+ * Revokes the httpOnly refresh cookie on the server and clears local token storage.
  */
 export async function logout(): Promise<void> {
-  const refreshToken = getRefreshToken();
-  if (refreshToken) {
-    try {
-      await apiClient.post('/api/auth/logout', { refreshToken });
-    } catch {
-      // Best-effort: clear tokens locally even if the server call fails
-    }
+  try {
+    await apiClient.post('/api/auth/logout');
+  } catch {
+    // Best-effort: clear tokens locally even if the server call fails
   }
   clearTokens();
   await clearSessionCookie();

@@ -59,6 +59,24 @@ function expectJwtForUser(token: string, userId: string) {
   expect(decoded?.sub).toBe(userId);
 }
 
+function getSetCookieHeaders(res: request.Response): string[] {
+  const header = res.headers['set-cookie'];
+  if (!header) return [];
+  return Array.isArray(header) ? header : [header];
+}
+
+function getRefreshCookie(res: request.Response): string {
+  const refreshCookie = getSetCookieHeaders(res).find((cookie) =>
+    cookie.startsWith('harmony_refresh_token='),
+  );
+  expect(refreshCookie).toBeDefined();
+  return refreshCookie!;
+}
+
+function getRefreshTokenFromCookie(res: request.Response): string {
+  return decodeURIComponent(getRefreshCookie(res).split(';')[0].split('=')[1]);
+}
+
 describe('auth flow integration', () => {
   let app: Express;
   const createdUserIds: string[] = [];
@@ -107,7 +125,7 @@ describe('auth flow integration', () => {
       username,
       userId: createdUser!.id,
       accessToken: response.body.accessToken,
-      refreshToken: response.body.refreshToken,
+      refreshToken: getRefreshTokenFromCookie(response),
     };
   }
 
@@ -117,6 +135,7 @@ describe('auth flow integration', () => {
     expect(registered.response.status).toBe(201);
     expect(typeof registered.accessToken).toBe('string');
     expect(typeof registered.refreshToken).toBe('string');
+    expect(registered.response.body.refreshToken).toBeUndefined();
     expectJwtForUser(registered.accessToken, registered.userId);
     expectJwtForUser(registered.refreshToken, registered.userId);
 
@@ -222,7 +241,8 @@ describe('auth flow integration', () => {
     // describe only the login -> refresh -> logout lifecycle under test.
     const initialLogoutRes = await request(app)
       .post('/api/auth/logout')
-      .send({ refreshToken: registered.refreshToken });
+      .set('Cookie', getRefreshCookie(registered.response))
+      .send({});
 
     expect(initialLogoutRes.status).toBe(204);
 
@@ -238,7 +258,11 @@ describe('auth flow integration', () => {
 
     expect(loginRes.status).toBe(200);
 
-    const loginTokens = loginRes.body as AuthTokens;
+    const loginTokens: AuthTokens = {
+      accessToken: loginRes.body.accessToken,
+      refreshToken: getRefreshTokenFromCookie(loginRes),
+    };
+    expect(loginRes.body.refreshToken).toBeUndefined();
     expectJwtForUser(loginTokens.accessToken, registered.userId);
     expectJwtForUser(loginTokens.refreshToken, registered.userId);
 
@@ -263,14 +287,16 @@ describe('auth flow integration', () => {
 
     const refreshRes = await request(app)
       .post('/api/auth/refresh')
-      .send({ refreshToken: loginTokens.refreshToken });
+      .set('Cookie', getRefreshCookie(loginRes))
+      .send({});
 
     expect(refreshRes.status).toBe(200);
     expect(typeof refreshRes.body.accessToken).toBe('string');
-    expect(typeof refreshRes.body.refreshToken).toBe('string');
-    expect(refreshRes.body.refreshToken).not.toBe(loginTokens.refreshToken);
+    expect(refreshRes.body.refreshToken).toBeUndefined();
+    const rotatedRefreshToken = getRefreshTokenFromCookie(refreshRes);
+    expect(rotatedRefreshToken).not.toBe(loginTokens.refreshToken);
     expectJwtForUser(refreshRes.body.accessToken, registered.userId);
-    expectJwtForUser(refreshRes.body.refreshToken, registered.userId);
+    expectJwtForUser(rotatedRefreshToken, registered.userId);
 
     const reusedOldRefreshRes = await request(app)
       .post('/api/auth/refresh')
@@ -288,13 +314,14 @@ describe('auth flow integration', () => {
 
     const logoutRes = await request(app)
       .post('/api/auth/logout')
-      .send({ refreshToken: refreshRes.body.refreshToken });
+      .set('Cookie', getRefreshCookie(refreshRes))
+      .send({});
 
     expect(logoutRes.status).toBe(204);
 
     const revokedRefreshRes = await request(app)
       .post('/api/auth/refresh')
-      .send({ refreshToken: refreshRes.body.refreshToken });
+      .send({ refreshToken: rotatedRefreshToken });
 
     expect(revokedRefreshRes.status).toBe(401);
     expect(revokedRefreshRes.body.error).toMatch(/revoked|expired/i);
