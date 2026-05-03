@@ -43,15 +43,35 @@ describe('404 handler', () => {
 });
 
 describe('CORS', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
   it('returns 403 for disallowed origins', async () => {
     const res = await request(app).get('/health').set('Origin', 'https://evil.example.com');
     expect(res.status).toBe(403);
     expect(res.body).toMatchObject({ error: 'CORS: origin not allowed' });
   });
 
-  it('allows requests from localhost:3000', async () => {
+  it('allows requests from localhost:3000 outside production', async () => {
+    process.env.NODE_ENV = 'development';
+
     const res = await request(app).get('/health').set('Origin', 'http://localhost:3000');
     expect(res.status).toBe(200);
+  });
+
+  it('rejects requests from localhost:3000 in production', async () => {
+    process.env.NODE_ENV = 'production';
+
+    const res = await request(app).get('/health').set('Origin', 'http://localhost:3000');
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ error: 'CORS: origin not allowed' });
   });
 
   describe('FRONTEND_URL comma-separated origins', () => {

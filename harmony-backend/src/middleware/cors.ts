@@ -8,7 +8,9 @@ export class CorsError extends Error {
   }
 }
 
-const defaultAllowedOrigins = ['http://localhost:3000'];
+function getDefaultAllowedOrigins(): string[] {
+  return process.env.NODE_ENV !== 'production' ? ['http://localhost:3000'] : [];
+}
 
 // FRONTEND_URL may be a comma-separated list of allowed origins so that
 // preview and production frontend URLs can both be permitted without a
@@ -25,7 +27,7 @@ export const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
     // Build allowed origins at request time so env-based URLs reflect current configuration
     const allowedOrigins = [
-      ...defaultAllowedOrigins,
+      ...getDefaultAllowedOrigins(),
       ...parseFrontendOrigins(process.env.FRONTEND_URL),
     ];
     // Allow server-to-server requests (no Origin header) so internal callers
