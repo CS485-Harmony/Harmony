@@ -9,7 +9,7 @@ import { AUTH_COOKIE_NAME } from '@/lib/auth-constants';
 const MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
 /**
- * Sets the auth session cookie (httpOnly, SameSite=Lax).
+ * Sets the auth session cookie (httpOnly, SameSite=Strict).
  *
  * Stores the raw JWT access token so that server-side tRPC calls
  * (in trpc-client.ts) can forward it as a Bearer token to the backend.
@@ -21,7 +21,7 @@ export async function setSessionCookie(accessToken: string): Promise<void> {
   cookieStore.set(AUTH_COOKIE_NAME, accessToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: 'strict',
     path: '/',
     maxAge: MAX_AGE_SECONDS,
   });
