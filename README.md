@@ -16,7 +16,9 @@ Important deployment note:
 
 Submission references:
 
+- Final submission package: `planning/FINAL_SUBMISSION.md`
 - SEO evidence bundle index: `docs/submission/seo-evidence/README.md`
+- Branch protection evidence: `docs/submission/branch-protection-main-2026-05-03.json`
 - Frontend deploy guide: `docs/deployment/vercel-setup.md`
 - Backend deployment architecture: `docs/deployment/deployment-architecture.md`
 

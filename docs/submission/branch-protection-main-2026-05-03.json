@@ -1,0 +1,46 @@
+{
+  "capturedAt": "2026-05-03T20:07:00Z",
+  "source": "gh api repos/CS485-Harmony/Harmony/branches/main/protection",
+  "branch": "main",
+  "required_status_checks": {
+    "strict": false,
+    "contexts": [
+      "Backend Lint and Build",
+      "Frontend Lint and Build",
+      "Run Backend Tests",
+      "Run Frontend Tests",
+      "Run Integration Tests"
+    ],
+    "checks": [
+      { "context": "Backend Lint and Build", "app_id": 15368 },
+      { "context": "Frontend Lint and Build", "app_id": 15368 },
+      { "context": "Run Backend Tests", "app_id": 15368 },
+      { "context": "Run Frontend Tests", "app_id": 15368 },
+      { "context": "Run Integration Tests", "app_id": 15368 }
+    ]
+  },
+  "required_pull_request_reviews": {
+    "dismiss_stale_reviews": false,
+    "require_code_owner_reviews": false,
+    "require_last_push_approval": false,
+    "required_approving_review_count": 1
+  },
+  "enforce_admins": {
+    "enabled": true
+  },
+  "required_signatures": {
+    "enabled": false
+  },
+  "required_linear_history": {
+    "enabled": false
+  },
+  "allow_force_pushes": {
+    "enabled": false
+  },
+  "allow_deletions": {
+    "enabled": false
+  },
+  "required_conversation_resolution": {
+    "enabled": false
+  }
+}
