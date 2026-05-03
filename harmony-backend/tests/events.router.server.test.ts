@@ -324,15 +324,12 @@ describe('GET /api/events/server/:serverId — subscription readiness', () => {
     const chunks: string[] = [];
     let response: http.IncomingMessage | null = null;
     await new Promise<void>((resolve, reject) => {
-      const req = http.get(
-        { hostname: 'localhost', port, path: sseUrl },
-        (res) => {
-          response = res;
-          responseStarted.resolve();
-          res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
-          res.on('error', reject);
-        },
-      );
+      const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+        response = res;
+        responseStarted.resolve();
+        res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+        res.on('error', reject);
+      });
 
       req.on('error', reject);
 
@@ -462,14 +459,11 @@ describe('GET /api/events/server/:serverId — Last-Event-ID replay', () => {
     const chunks: string[] = [];
     const responseStarted = createDeferred<void>();
     await new Promise<void>((resolve, reject) => {
-      const req = http.get(
-        { hostname: 'localhost', port, path: sseUrlWithReplay },
-        (res) => {
-          responseStarted.resolve();
-          res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
-          res.on('error', reject);
-        },
-      );
+      const req = http.get({ hostname: 'localhost', port, path: sseUrlWithReplay }, (res) => {
+        responseStarted.resolve();
+        res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+        res.on('error', reject);
+      });
       req.on('error', reject);
 
       setTimeout(async () => {
@@ -558,6 +552,82 @@ describe('GET /api/events/server/:serverId — authorisation', () => {
       `/api/events/server/${VALID_SERVER_ID}?ticket=${SSE_TEST_TICKET}`,
     );
     expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /api/events/server/:serverId — membership revocation', () => {
+  const sseUrl = `/api/events/server/${VALID_SERVER_ID}?ticket=${SSE_TEST_TICKET}`;
+
+  it('closes the stream instead of forwarding member:left when the connected user is removed', async () => {
+    let memberLeftHandler: ((payload: unknown) => void) | null = null;
+    const unsubscribes: jest.Mock[] = [];
+
+    mockSubscribe.mockImplementation((channel: string, handler: (payload: unknown) => void) => {
+      if (channel === 'harmony:MEMBER_LEFT') {
+        memberLeftHandler = handler;
+      }
+      const unsubscribe = jest.fn();
+      unsubscribes.push(unsubscribe);
+      return { unsubscribe, ready: Promise.resolve() };
+    });
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    const chunks: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+        res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+        res.on('close', resolve);
+        res.on('error', reject);
+
+        setTimeout(() => {
+          if (!memberLeftHandler) {
+            reject(new Error('MEMBER_LEFT handler was not registered'));
+            return;
+          }
+          memberLeftHandler({
+            userId: 'test-user-id',
+            serverId: VALID_SERVER_ID,
+            reason: 'KICKED',
+            timestamp: new Date().toISOString(),
+          });
+        }, 50);
+      });
+      req.on('error', reject);
+    });
+
+    expect(chunks.join('')).not.toContain('event: member:left');
+    expect(unsubscribes.length).toBeGreaterThan(0);
+    expect(unsubscribes.every((unsubscribe) => unsubscribe.mock.calls.length === 1)).toBe(true);
+  });
+
+  it('periodically revalidates membership and closes when server access is revoked', async () => {
+    process.env.SSE_MEMBERSHIP_REVALIDATION_INTERVAL_MS = '20';
+    (prisma.serverMember.findFirst as jest.Mock)
+      .mockResolvedValueOnce({ userId: 'test-user-id' })
+      .mockResolvedValueOnce(null);
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+        res.on('data', () => {});
+        res.on('close', resolve);
+        res.on('error', reject);
+      });
+      req.on('error', reject);
+      req.setTimeout(1_000, () => {
+        req.destroy();
+        reject(new Error('SSE stream did not close after membership revalidation'));
+      });
+    });
+
+    expect(prisma.serverMember.findFirst).toHaveBeenCalledTimes(2);
+    delete process.env.SSE_MEMBERSHIP_REVALIDATION_INTERVAL_MS;
   });
 });
 

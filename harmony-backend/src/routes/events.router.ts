@@ -147,6 +147,7 @@ type BufferedSseState = {
   ready: boolean;
   pendingFrames: string[];
   heartbeat: ReturnType<typeof setInterval> | null;
+  authorizationRevalidation: ReturnType<typeof setInterval> | null;
 };
 
 function formatEvent(eventType: string, data: unknown, id?: string): string {
@@ -160,6 +161,7 @@ function createBufferedSseState(): BufferedSseState {
     ready: false,
     pendingFrames: [],
     heartbeat: null,
+    authorizationRevalidation: null,
   };
 }
 
@@ -170,10 +172,97 @@ function cleanupSseConnection(state: BufferedSseState, subscriptions: EventSubsc
     clearInterval(state.heartbeat);
     state.heartbeat = null;
   }
+  if (state.authorizationRevalidation) {
+    clearInterval(state.authorizationRevalidation);
+    state.authorizationRevalidation = null;
+  }
   state.pendingFrames.length = 0;
   for (const subscription of subscriptions) {
     subscription.unsubscribe();
   }
+}
+
+function closeSseForRevokedAccess(
+  res: Response,
+  state: BufferedSseState,
+  subscriptions: EventSubscription[],
+): void {
+  if (state.closed) return;
+  cleanupSseConnection(state, subscriptions);
+  if (res.headersSent) {
+    res.end();
+    return;
+  }
+  res.status(403).json({ error: 'SSE authorization revoked' });
+}
+
+async function isServerMember(userId: string, serverId: string): Promise<boolean> {
+  const membership = await prisma.serverMember.findFirst({
+    where: { userId, serverId },
+    select: { userId: true },
+  });
+  return Boolean(membership);
+}
+
+async function canAccessChannelStream(
+  userId: string,
+  channelId: string,
+  serverId: string,
+): Promise<boolean> {
+  const membership = await prisma.serverMember.findFirst({
+    where: { userId, serverId },
+    select: { role: true },
+  });
+  if (!membership) return false;
+
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: { serverId: true, visibility: true },
+  });
+  if (!channel || channel.serverId !== serverId) return false;
+  if (channel.visibility !== 'PRIVATE') return true;
+  if (membership.role === 'OWNER' || membership.role === 'ADMIN') return true;
+
+  const channelMembership = await prisma.channelMember.findUnique({
+    where: { userId_channelId: { userId, channelId } },
+    select: { userId: true },
+  });
+  return Boolean(channelMembership);
+}
+
+function startAuthorizationRevalidation(
+  res: Response,
+  state: BufferedSseState,
+  subscriptions: EventSubscription[],
+  isStillAuthorized: () => Promise<boolean>,
+  logContext: Record<string, string>,
+): void {
+  let revalidationInFlight = false;
+  const configuredIntervalMs = Number(process.env.SSE_MEMBERSHIP_REVALIDATION_INTERVAL_MS);
+  const intervalMs =
+    Number.isFinite(configuredIntervalMs) && configuredIntervalMs > 0
+      ? configuredIntervalMs
+      : 30_000;
+
+  state.authorizationRevalidation = setInterval(async () => {
+    if (state.closed || revalidationInFlight) return;
+    revalidationInFlight = true;
+    try {
+      const authorized = await isStillAuthorized();
+      if (!authorized) {
+        closeSseForRevokedAccess(res, state, subscriptions);
+      }
+    } catch (err) {
+      logger.warn(
+        { err, ...logContext },
+        'SSE membership revalidation failed; keeping stream open',
+      );
+    } finally {
+      revalidationInFlight = false;
+    }
+  }, intervalMs);
+
+  state.authorizationRevalidation.unref?.();
 }
 
 function createBufferedEventWriter(
@@ -276,18 +365,14 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
   // ── Authorisation — verify user is a member of the channel's server ───────
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
-    select: { serverId: true },
+    select: { serverId: true, visibility: true },
   });
   if (!channel) {
     res.status(404).json({ error: 'Channel not found' });
     return;
   }
 
-  const membership = await prisma.serverMember.findFirst({
-    where: { userId, serverId: channel.serverId },
-    select: { userId: true },
-  });
-  if (!membership) {
+  if (!(await canAccessChannelStream(userId, channelId, channel.serverId))) {
     res.status(403).json({ error: 'You are not a member of this server' });
     return;
   }
@@ -438,6 +523,23 @@ eventsRouter.get('/channel/:channelId', async (req: Request, res: Response) => {
     reactionRemovedSubscription,
   ];
 
+  const memberLeftSubscription = eventBus.subscribe(
+    EventChannels.MEMBER_LEFT,
+    (payload: MemberLeftPayload) => {
+      if (payload.serverId !== channel.serverId || payload.userId !== userId) return;
+      closeSseForRevokedAccess(res, sseState, channelSubscriptions);
+    },
+  );
+  channelSubscriptions.push(memberLeftSubscription);
+
+  startAuthorizationRevalidation(
+    res,
+    sseState,
+    channelSubscriptions,
+    () => canAccessChannelStream(userId, channelId, channel.serverId),
+    { route: 'channel-events', channelId, serverId: channel.serverId, userId },
+  );
+
   // ── Replay messages missed during reconnect gap ──────────────────────────
   const replayFrames = lastEventId
     ? async (): Promise<string[]> => {
@@ -550,11 +652,7 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     return;
   }
 
-  const membership = await prisma.serverMember.findFirst({
-    where: { userId, serverId },
-    select: { userId: true },
-  });
-  if (!membership) {
+  if (!(await isServerMember(userId, serverId))) {
     res.status(403).json({ error: 'You are not a member of this server' });
     return;
   }
@@ -851,10 +949,22 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     EventChannels.MEMBER_LEFT,
     (payload: MemberLeftPayload) => {
       if (payload.serverId !== serverId) return;
+      if (payload.userId === userId) {
+        closeSseForRevokedAccess(res, sseState, subscriptions);
+        return;
+      }
       writeEvent('member:left', { userId: payload.userId });
     },
   );
   subscriptions.push(memberLeftSubscription);
+
+  startAuthorizationRevalidation(
+    res,
+    sseState,
+    subscriptions,
+    () => isServerMember(userId, serverId),
+    { route: 'server-events', serverId, userId },
+  );
 
   const visibilityChangedSubscription = eventBus.subscribe(
     EventChannels.VISIBILITY_CHANGED,
@@ -954,7 +1064,14 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
       }
     : undefined;
 
-  await finalizeSseSetup(req, res, sseState, subscriptions, { route: 'server-events', serverId }, serverReplayFrames);
+  await finalizeSseSetup(
+    req,
+    res,
+    sseState,
+    subscriptions,
+    { route: 'server-events', serverId },
+    serverReplayFrames,
+  );
 });
 
 // ─── User-scoped notification SSE route ──────────────────────────────────────
@@ -998,5 +1115,8 @@ eventsRouter.get('/user', async (req: Request, res: Response) => {
     },
   );
 
-  await finalizeSseSetup(req, res, sseState, [mentionSubscription], { route: 'user-events', userId });
+  await finalizeSseSetup(req, res, sseState, [mentionSubscription], {
+    route: 'user-events',
+    userId,
+  });
 });

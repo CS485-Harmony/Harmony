@@ -31,6 +31,7 @@ jest.mock('../src/events/eventBus', () => ({
     MESSAGE_CREATED: 'harmony:MESSAGE_CREATED',
     MESSAGE_EDITED: 'harmony:MESSAGE_EDITED',
     MESSAGE_DELETED: 'harmony:MESSAGE_DELETED',
+    MEMBER_LEFT: 'harmony:MEMBER_LEFT',
   },
 }));
 
@@ -49,6 +50,7 @@ jest.mock('../src/db/prisma', () => ({
     message: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     channel: { findUnique: jest.fn() },
     serverMember: { findFirst: jest.fn() },
+    channelMember: { findUnique: jest.fn() },
   },
 }));
 
@@ -142,7 +144,11 @@ beforeEach(() => {
   mockSubscribe.mockReturnValue({ unsubscribe: jest.fn(), ready: Promise.resolve() });
   // Default prisma mocks for auth path through SSE endpoint
   (prisma.channel.findUnique as jest.Mock).mockResolvedValue({ serverId: 'test-server-id' });
-  (prisma.serverMember.findFirst as jest.Mock).mockResolvedValue({ userId: 'test-user-id' });
+  (prisma.serverMember.findFirst as jest.Mock).mockResolvedValue({
+    userId: 'test-user-id',
+    role: 'MEMBER',
+  });
+  (prisma.channelMember.findUnique as jest.Mock).mockResolvedValue(null);
   (prisma.message.findMany as jest.Mock).mockResolvedValue([]);
 });
 
@@ -289,6 +295,87 @@ describe('GET /api/events/channel/:channelId — subscription readiness', () => 
     const body = chunks.join('');
     expect(body).toContain('event: message:created');
     expect(body).toContain('hello from the setup window');
+  });
+});
+
+describe('GET /api/events/channel/:channelId — membership revocation', () => {
+  const VALID_CHANNEL_ID = '550e8400-e29b-41d4-a716-446655440001';
+  const sseUrl = `/api/events/channel/${VALID_CHANNEL_ID}?ticket=${SSE_TEST_TICKET}`;
+
+  it('closes the stream when the connected user is removed from the server', async () => {
+    let memberLeftHandler: ((payload: unknown) => void) | null = null;
+    const unsubscribes: jest.Mock[] = [];
+
+    mockSubscribe.mockImplementation((channel: string, handler: (payload: unknown) => void) => {
+      if (channel === 'harmony:MEMBER_LEFT') {
+        memberLeftHandler = handler;
+      }
+      const unsubscribe = jest.fn();
+      unsubscribes.push(unsubscribe);
+      return { unsubscribe, ready: Promise.resolve() };
+    });
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    const chunks: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+        res.on('data', (chunk: Buffer) => chunks.push(chunk.toString()));
+        res.on('close', resolve);
+        res.on('error', reject);
+
+        setTimeout(() => {
+          if (!memberLeftHandler) {
+            reject(new Error('MEMBER_LEFT handler was not registered'));
+            return;
+          }
+          memberLeftHandler({
+            userId: 'test-user-id',
+            serverId: 'test-server-id',
+            reason: 'KICKED',
+            timestamp: new Date().toISOString(),
+          });
+        }, 50);
+      });
+      req.on('error', reject);
+    });
+
+    expect(chunks.join('')).not.toContain('event: member:left');
+    expect(unsubscribes.length).toBeGreaterThan(0);
+    expect(unsubscribes.every((unsubscribe) => unsubscribe.mock.calls.length === 1)).toBe(true);
+  });
+
+  it('periodically revalidates access and closes when private-channel membership is revoked', async () => {
+    process.env.SSE_MEMBERSHIP_REVALIDATION_INTERVAL_MS = '20';
+    (prisma.channel.findUnique as jest.Mock).mockResolvedValue({
+      serverId: 'test-server-id',
+      visibility: 'PRIVATE',
+    });
+    (prisma.channelMember.findUnique as jest.Mock)
+      .mockResolvedValueOnce({ userId: 'test-user-id' })
+      .mockResolvedValueOnce(null);
+
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Bad server address');
+    const port = addr.port;
+
+    await new Promise<void>((resolve, reject) => {
+      const req = http.get({ hostname: 'localhost', port, path: sseUrl }, (res) => {
+        res.on('data', () => {});
+        res.on('close', resolve);
+        res.on('error', reject);
+      });
+      req.on('error', reject);
+      req.setTimeout(1_000, () => {
+        req.destroy();
+        reject(new Error('SSE stream did not close after membership revalidation'));
+      });
+    });
+
+    expect(prisma.channelMember.findUnique).toHaveBeenCalledTimes(2);
+    delete process.env.SSE_MEMBERSHIP_REVALIDATION_INTERVAL_MS;
   });
 });
 
