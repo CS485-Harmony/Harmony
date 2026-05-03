@@ -116,6 +116,31 @@ type DiscoveredServerFixture = {
 
 let cloudFixturePromise: Promise<CloudFixture> | null = null;
 
+async function resolveIndexableChannelSlugs(
+  serverSlug: string,
+  channels: Array<{ slug?: string }>,
+): Promise<string[]> {
+  const channelSlugs = channels
+    .filter((ch): ch is { slug: string } => typeof ch.slug === 'string' && ch.slug.length > 0)
+    .map((ch) => ch.slug);
+  const indexableChannelSlugs: string[] = [];
+
+  for (const channelSlug of channelSlugs) {
+    const channelRes = await fetch(
+      `${BACKEND_URL}/api/public/servers/${serverSlug}/channels/${channelSlug}`,
+    );
+    if (!channelRes.ok) continue;
+
+    const channel = (await channelRes.json()) as { visibility?: string };
+    if (channel.visibility !== 'PUBLIC_INDEXABLE') continue;
+
+    indexableChannelSlugs.push(channelSlug);
+    if (indexableChannelSlugs.length >= 3) break;
+  }
+
+  return indexableChannelSlugs;
+}
+
 async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
   const serversRes = await fetch(`${BACKEND_URL}/api/public/servers`);
   if (!serversRes.ok) {
@@ -139,10 +164,12 @@ async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
     const channelsBody = (await channelsRes.json()) as {
       channels?: Array<{ slug?: string }>;
     };
-    const publicChannels = (channelsBody.channels ?? [])
-      .filter((ch): ch is { slug: string } => typeof ch.slug === 'string' && ch.slug.length > 0)
-      .slice(0, 3)
-      .map((ch) => ch.slug);
+    // The channel list intentionally omits visibility, so treat it as candidates
+    // and confirm the indexable SEO fixture through the channel detail endpoint.
+    const publicChannels = await resolveIndexableChannelSlugs(
+      server.slug,
+      channelsBody.channels ?? [],
+    );
     if (!publicChannels.length) continue;
 
     discoveredFixtures.push({
