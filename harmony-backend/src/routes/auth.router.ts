@@ -28,8 +28,9 @@ const registerSchema = z.object({
     .string()
     .min(3, { message: 'Username must be at least 3 characters' })
     .max(32, { message: 'Username must be at most 32 characters' })
-    .regex(/^[a-zA-Z0-9_-]+$/, {
-      message: 'Username may only contain letters, numbers, underscores, and hyphens',
+    .regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/, {
+      message:
+        'Username must start with a letter or number and may only contain letters, numbers, underscores, and hyphens',
     }),
   passwordSalt: passwordSaltSchema,
   passwordVerifier: passwordVerifierSchema,

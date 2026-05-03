@@ -146,6 +146,29 @@ describe('POST /api/auth/register', () => {
     expect(res.body.error).toBe('Validation failed');
   });
 
+  it.each(['--admin', '_admin', '__system'])(
+    'rejects username %s because usernames must start with a letter or number',
+    async (username) => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({ ...mockUser, username });
+      mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshToken);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .set('Origin', 'http://localhost:3000')
+        .send({
+          email: `${username.replace(/[^a-zA-Z0-9]/g, '')}@example.com`,
+          username,
+          passwordSalt: PASSWORD_SALT,
+          passwordVerifier: derivePasswordVerifier('password123'),
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation failed');
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    },
+  );
+
   it('returns 409 when email is already in use', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(mockUser);
 
