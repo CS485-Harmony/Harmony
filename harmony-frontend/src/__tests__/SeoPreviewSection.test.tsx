@@ -66,6 +66,21 @@ describe('SeoPreviewSection', () => {
     expect(screen.queryByRole('button', { name: /save overrides/i })).not.toBeInTheDocument();
   });
 
+  it('shows a safe retry fallback when preview loading fails', async () => {
+    mockFetchSeoPreview.mockRejectedValue(
+      new Error(
+        'An error occurred in the Server Components render. The specific message is omitted in production builds.',
+      ),
+    );
+
+    render(<SeoPreviewSection serverSlug='demo' channelSlug='general' canManageSeo />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'SEO preview is temporarily unavailable. Please try again in a few minutes.',
+    );
+    expect(screen.queryByText(/specific message is omitted/i)).not.toBeInTheDocument();
+  });
+
   it('shows inline validation and submits valid overrides', async () => {
     mockSaveSeoOverrides.mockResolvedValue(
       buildPreview({

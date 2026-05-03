@@ -202,10 +202,19 @@ describe('GET /api/admin/channels/:channelId/meta-tags', () => {
     expect(res.status).toBe(404);
   });
 
-  it('returns 404 when meta tags record does not exist', async () => {
+  it('returns an ephemeral fallback preview when meta tags record does not exist', async () => {
     mockMetaTagRepo.findByChannelId.mockResolvedValue(null);
     const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
-    expect(res.status).toBe(404);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      isFallbackPreview: true,
+      isCustom: false,
+      customTitle: null,
+      customDescription: null,
+      customOgImage: null,
+    });
+    expect(res.body.searchPreview.url).toContain('/c/test-server/general');
   });
 
   it('returns 200 with MetaTagPreview on success', async () => {
@@ -615,7 +624,10 @@ describe('processRegenerationJob terminal states (AC-5)', () => {
     expect(parsed.startedAt).not.toBeNull();
     expect(parsed.completedAt).not.toBeNull();
     expect(parsed.errorCode).toBeNull();
-    expect(mockMetaTagRepo.saveGeneratedFields).toHaveBeenCalledWith(CHANNEL_ID, expect.any(Object));
+    expect(mockMetaTagRepo.saveGeneratedFields).toHaveBeenCalledWith(
+      CHANNEL_ID,
+      expect.any(Object),
+    );
   });
 
   it('transitions job to processing before succeeding', async () => {
@@ -628,7 +640,9 @@ describe('processRegenerationJob terminal states (AC-5)', () => {
       try {
         const parsed = JSON.parse(value) as MetaTagJobStatus;
         if (parsed.jobId === JOB_ID) states.push(parsed.status);
-      } catch { /* not a job record */ }
+      } catch {
+        /* not a job record */
+      }
       return origSet(key, value);
     });
 

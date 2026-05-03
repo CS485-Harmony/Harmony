@@ -13,6 +13,8 @@ import type { MetaTagJobStatus, MetaTagPreview } from '@/services/metaTagAdminSe
 const TITLE_MAX = 70;
 const DESCRIPTION_MAX = 200;
 const OG_IMAGE_MAX = 500;
+const SEO_PREVIEW_LOAD_ERROR =
+  'SEO preview is temporarily unavailable. Please try again in a few minutes.';
 
 function buildValidationError(value: string, max: number, label: string): string | null {
   if (value.length <= max) return null;
@@ -86,9 +88,9 @@ export function SeoPreviewSection({
         setCustomTitle(nextPreview.customTitle ?? '');
         setCustomDescription(nextPreview.customDescription ?? '');
         setCustomOgImage(nextPreview.customOgImage ?? '');
-      } catch (err) {
+      } catch {
         if (cancelled) return;
-        setError(getUserErrorMessage(err, 'Failed to load SEO preview.'));
+        setError(SEO_PREVIEW_LOAD_ERROR);
       } finally {
         if (!cancelled) setLoading(false);
       }

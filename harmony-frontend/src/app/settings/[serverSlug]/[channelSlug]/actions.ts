@@ -18,6 +18,7 @@ import {
   type ChannelMemberEntry,
 } from '@/services/channelService';
 import { getServer, getServerMembersWithRole } from '@/services/serverService';
+import { createFrontendLogger } from '@/lib/frontend-logger';
 import type { ServerMemberInfo } from '@/types';
 import type { Channel } from '@/types';
 import { ChannelVisibility } from '@/types';
@@ -31,6 +32,11 @@ import {
   type MetaTagJobStatus,
   type MetaTagPreview,
 } from '@/services/metaTagAdminService';
+
+const seoPreviewLogger = createFrontendLogger({
+  component: 'seo-preview-actions',
+  feature: 'seo-preview',
+});
 
 export async function saveChannelSettings(
   serverSlug: string,
@@ -107,7 +113,16 @@ export async function fetchSeoPreview(
   channelSlug: string,
 ): Promise<MetaTagPreview> {
   const channel = await resolveChannelForSeo(serverSlug, channelSlug);
-  return getMetaTagPreview(channel.id);
+  try {
+    return await getMetaTagPreview(channel.id);
+  } catch (err) {
+    seoPreviewLogger.error('SEO preview fetch failed', {
+      error: err,
+      operation: 'fetchSeoPreview',
+      route: `/settings/${serverSlug}/${channelSlug}`,
+    });
+    throw new Error('SEO preview is temporarily unavailable. Please try again in a few minutes.');
+  }
 }
 
 export async function saveSeoOverrides(

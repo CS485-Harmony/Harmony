@@ -143,7 +143,12 @@ adminMetaTagRouter.get(
       const record = await metaTagRepository.findByChannelId(channelId);
 
       if (!record) {
-        res.status(404).json({ error: 'Meta tags not found for this channel' });
+        logger.warn(
+          { channelId, operation: 'adminSeoPreviewFallback' },
+          'Admin SEO preview missing persisted meta tags; generating fallback preview',
+        );
+        const fallbackPreview = await metaTagService.getFallbackMetaTagsForPreview(channelId);
+        res.json(fallbackPreview);
         return;
       }
 
