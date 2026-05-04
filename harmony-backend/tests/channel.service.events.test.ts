@@ -28,6 +28,7 @@ const mockChannelCreate = jest.fn();
 const mockChannelUpdate = jest.fn();
 const mockChannelDelete = jest.fn();
 const mockChannelFindUnique = jest.fn();
+const mockChannelCount = jest.fn();
 const mockServerFindUnique = jest.fn();
 
 jest.mock('../src/db/prisma', () => ({
@@ -37,6 +38,7 @@ jest.mock('../src/db/prisma', () => ({
       update: mockChannelUpdate,
       delete: mockChannelDelete,
       findUnique: mockChannelFindUnique,
+      count: mockChannelCount,
     },
     server: {
       findUnique: mockServerFindUnique,
@@ -87,6 +89,7 @@ beforeEach(() => {
   mockChannelCreate.mockResolvedValue(MOCK_CHANNEL);
   mockChannelUpdate.mockResolvedValue({ ...MOCK_CHANNEL, name: 'renamed' });
   mockChannelDelete.mockResolvedValue(MOCK_CHANNEL);
+  mockChannelCount.mockResolvedValue(2); // >1 text channel by default so deletes succeed
 });
 
 // ─── createChannel publishes CHANNEL_CREATED ──────────────────────────────────

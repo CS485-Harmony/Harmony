@@ -19,7 +19,7 @@ import { ServerRail } from '@/components/server-rail/ServerRail';
 import { GuestPromoBanner } from '@/components/channel/GuestPromoBanner';
 import { CreateChannelModal } from '@/components/channel/CreateChannelModal';
 import { useAuth } from '@/hooks/useAuth';
-import { VoiceProvider, type VoiceExternalActions } from '@/contexts/VoiceContext';
+import { useVoiceOptional } from '@/contexts/VoiceContext';
 import { BrowseServersModal } from '@/components/server-rail/BrowseServersModal';
 import { useServerEvents } from '@/hooks/useServerEvents';
 import { useServerListSync } from '@/hooks/useServerListSync';
@@ -134,6 +134,7 @@ export function HarmonyShell({
   }
   // Local channels state so newly created channels appear immediately in the sidebar.
   const [localChannels, setLocalChannels] = useState<Channel[]>(channels);
+  const voice = useVoiceOptional();
   // Map of serverId → default channel slug — used by BrowseServersModal for "Open" navigation.
   // Mirrors the same derivation in ServerRail so both always agree on the default channel.
   const defaultChannelByServerId = useMemo(() => {
@@ -147,11 +148,16 @@ export function HarmonyShell({
     return map;
   }, [allChannels]);
 
-  // Stable list of voice channel IDs for VoiceProvider — recomputed only when channels change.
-  const voiceChannelIds = useMemo(
+  // Stable list of voice channel IDs for the layout-owned VoiceProvider.
+  const localVoiceChannelIds = useMemo(
     () => localChannels.filter(c => c.type === ChannelType.VOICE).map(c => c.id),
     [localChannels],
   );
+  const localVoiceChannelIdsKey = localVoiceChannelIds.join(',');
+  const setVoiceChannelIds = voice?.setVoiceChannelIds;
+  useEffect(() => {
+    setVoiceChannelIds?.(localVoiceChannelIds);
+  }, [setVoiceChannelIds, localVoiceChannelIds, localVoiceChannelIdsKey]);
   // Reset the synchronous loading mutex when the channel changes. This can't live
   // in the render-time block above (refs must not be written during render).
   useEffect(() => {
@@ -200,8 +206,6 @@ export function HarmonyShell({
   }
 
   const { notifyServerCreated, notifyServerJoined } = useServerListSync();
-  // Imperative handle for forwarding SSE voice events into VoiceContext.channelParticipants.
-  const voiceActionsRef = useRef<VoiceExternalActions | null>(null);
 
   const currentMemberRecord = useMemo(
     () => localMembers.find(m => m.id === authUser?.id),
@@ -548,6 +552,37 @@ export function HarmonyShell({
     ],
   );
 
+  const handleVoiceUserJoined = useCallback(
+    ({ channelId, userId }: { channelId: string; userId: string }) => {
+      voice?.notifyUserJoined(channelId, userId);
+    },
+    [voice],
+  );
+
+  const handleVoiceUserLeft = useCallback(
+    ({ channelId, userId }: { channelId: string; userId: string }) => {
+      voice?.notifyUserLeft(channelId, userId);
+    },
+    [voice],
+  );
+
+  const handleVoiceStateChanged = useCallback(
+    ({
+      channelId,
+      userId,
+      muted,
+      deafened,
+    }: {
+      channelId: string;
+      userId: string;
+      muted: boolean;
+      deafened: boolean;
+    }) => {
+      voice?.notifyStateChanged(channelId, userId, muted, deafened);
+    },
+    [voice],
+  );
+
   useServerEvents({
     serverId: currentServer.id,
     onChannelCreated: handleChannelCreated,
@@ -566,33 +601,11 @@ export function HarmonyShell({
     onServerUpdated: handleServerUpdated,
     onReactionAdded: isChannelLocked ? undefined : handleReactionAdded,
     onReactionRemoved: isChannelLocked ? undefined : handleReactionRemoved,
-    // Forward voice presence events into VoiceContext via the imperative ref so the
+    // Forward voice presence events into VoiceContext so the
     // sidebar shows real-time participant counts for channels we're not joined in.
-    onVoiceUserJoined: useCallback(
-      ({ channelId, userId }: { channelId: string; userId: string }) => {
-        voiceActionsRef.current?.notifyUserJoined(channelId, userId);
-      },
-      [],
-    ),
-    onVoiceUserLeft: useCallback(({ channelId, userId }: { channelId: string; userId: string }) => {
-      voiceActionsRef.current?.notifyUserLeft(channelId, userId);
-    }, []),
-    onVoiceStateChanged: useCallback(
-      ({
-        channelId,
-        userId,
-        muted,
-        deafened,
-      }: {
-        channelId: string;
-        userId: string;
-        muted: boolean;
-        deafened: boolean;
-      }) => {
-        voiceActionsRef.current?.notifyStateChanged(channelId, userId, muted, deafened);
-      },
-      [],
-    ),
+    onVoiceUserJoined: handleVoiceUserJoined,
+    onVoiceUserLeft: handleVoiceUserLeft,
+    onVoiceStateChanged: handleVoiceStateChanged,
     enabled: isAuthenticated,
   });
 
@@ -610,199 +623,192 @@ export function HarmonyShell({
   }, [isChannelLocked]);
 
   return (
-    <VoiceProvider
-      serverId={currentServer.id}
-      voiceChannelIds={voiceChannelIds}
-      currentUserId={authUser?.id}
-      externalActionsRef={voiceActionsRef}
-    >
-      <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
-        {/* Skip-to-content: visually hidden, appears on keyboard focus (WCAG 2.4.1) */}
-        <a
-          href='#main-content'
-          className='sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:z-50 focus-visible:m-2 focus-visible:rounded focus-visible:bg-[#5865f2] focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-semibold focus-visible:text-white focus-visible:outline-none'
-        >
-          Skip to content
-        </a>
+    <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
+      {/* Skip-to-content: visually hidden, appears on keyboard focus (WCAG 2.4.1) */}
+      <a
+        href='#main-content'
+        className='sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:z-50 focus-visible:m-2 focus-visible:rounded focus-visible:bg-[#5865f2] focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-semibold focus-visible:text-white focus-visible:outline-none'
+      >
+        Skip to content
+      </a>
 
-        {/* 1. Server rail — uses allChannels (full set) to derive default slug per server */}
-        <ServerRail
-          servers={localServers}
-          allChannels={allChannels}
-          currentServerId={currentServer.id}
-          basePath={basePath}
-          isMobileVisible={isMenuOpen}
-          mentionCountByServer={mentionCountByServer}
-          onBrowseServers={() => setIsBrowseServersOpen(true)}
-          onAddServer={
-            isAuthLoading
-              ? undefined
-              : () => {
-                  if (!isAuthenticated) {
-                    router.push('/auth/login');
-                    return;
-                  }
-                  setIsCreateServerOpen(true);
+      {/* 1. Server rail — uses allChannels (full set) to derive default slug per server */}
+      <ServerRail
+        servers={localServers}
+        allChannels={allChannels}
+        currentServerId={currentServer.id}
+        basePath={basePath}
+        isMobileVisible={isMenuOpen}
+        mentionCountByServer={mentionCountByServer}
+        onBrowseServers={() => setIsBrowseServersOpen(true)}
+        onAddServer={
+          isAuthLoading
+            ? undefined
+            : () => {
+                if (!isAuthenticated) {
+                  router.push('/auth/login');
+                  return;
                 }
-          }
+                setIsCreateServerOpen(true);
+              }
+        }
+      />
+
+      {/* 2. Channel sidebar — mobile overlay when isMenuOpen, always visible on desktop */}
+      <ChannelSidebar
+        server={currentServer}
+        channels={localChannels}
+        currentChannelId={currentChannel.id}
+        currentUser={currentUser}
+        isOpen={isMenuOpen}
+        onClose={() => setIsMenuOpen(false)}
+        basePath={basePath}
+        isAuthenticated={isAuthenticated}
+        serverId={currentServer.id}
+        members={members}
+        mentionCountByChannel={mentionCountByChannel}
+        onCreateChannel={defaultType => {
+          setCreateChannelDefaultType(defaultType);
+          setIsCreateChannelOpen(true);
+        }}
+      />
+
+      {/* 3. Main column */}
+      <main
+        id='main-content'
+        className='flex flex-1 flex-col overflow-hidden'
+        aria-label={`${currentChannel.name} channel`}
+        tabIndex={-1}
+      >
+        <TopBar
+          channel={currentChannel}
+          serverSlug={currentServer.slug}
+          isAdmin={checkIsAdmin(currentServer.ownerId)}
+          isMembersOpen={isMembersOpen}
+          onMembersToggle={() => setIsMembersOpen(!isMembersOpen)}
+          onSearchOpen={isChannelLocked ? undefined : () => setIsSearchOpen(true)}
+          onPinsOpen={isChannelLocked ? undefined : () => setIsPinsOpen(v => !v)}
+          disableMessageActions={isChannelLocked}
+          isMenuOpen={isMenuOpen}
+          onMenuToggle={() => setIsMenuOpen(v => !v)}
+          userId={authUser?.id}
+          onUnreadCountsByServerChange={setMentionCountByServer}
+          onUnreadCountsByChannelChange={setMentionCountByChannel}
+          currentChannelId={currentChannel.id}
         />
 
-        {/* 2. Channel sidebar — mobile overlay when isMenuOpen, always visible on desktop */}
-        <ChannelSidebar
-          server={currentServer}
-          channels={localChannels}
-          currentChannelId={currentChannel.id}
-          currentUser={currentUser}
-          isOpen={isMenuOpen}
-          onClose={() => setIsMenuOpen(false)}
-          basePath={basePath}
-          isAuthenticated={isAuthenticated}
-          serverId={currentServer.id}
-          members={members}
-          mentionCountByChannel={mentionCountByChannel}
-          onCreateChannel={defaultType => {
-            setCreateChannelDefaultType(defaultType);
-            setIsCreateChannelOpen(true);
+        <div className='flex flex-1 overflow-hidden'>
+          <div className={cn('flex flex-1 flex-col overflow-hidden', BG.primary)}>
+            {lockedMessagePane ? (
+              lockedMessagePane
+            ) : (
+              <>
+                <MessageList
+                  key={currentChannel.id}
+                  channel={currentChannel}
+                  messages={localMessages}
+                  serverId={currentServer.id}
+                  canPin={canPin}
+                  canDeleteAny={canModerate}
+                  currentUsername={authUser?.username}
+                  channels={localChannels}
+                  serverSlug={currentServer.slug}
+                  onReplyClick={handleReplyClick}
+                  onPinToggle={handlePinToggle}
+                  onDelete={handleDeleteMessage}
+                  hasMoreOlder={hasMoreOlder}
+                  isLoadingOlder={isLoadingOlder}
+                  onLoadOlderMessages={handleLoadOlderMessages}
+                />
+                <MessageInput
+                  channelId={currentChannel.id}
+                  channelName={currentChannel.name}
+                  serverId={currentServer.id}
+                  isReadOnly={currentUser.role === 'guest'}
+                  onMessageSent={handleMessageSent}
+                  replyingTo={replyingTo}
+                  onCancelReply={handleCancelReply}
+                />
+                {!isAuthLoading && !isAuthenticated && (
+                  <GuestPromoBanner
+                    serverName={currentServer.name}
+                    memberCount={currentServer.memberCount ?? members.length}
+                  />
+                )}
+              </>
+            )}
+          </div>
+          {!isChannelLocked && (
+            <PinnedMessagesPanel
+              channelId={currentChannel.id}
+              serverId={currentServer.id}
+              channelName={currentChannel.name}
+              isOpen={isPinsOpen}
+              refreshKey={pinsRefreshKey}
+              onClose={() => setIsPinsOpen(false)}
+            />
+          )}
+          <MembersSidebar
+            members={localMembers}
+            isOpen={isMembersOpen}
+            onClose={() => setIsMembersOpen(false)}
+          />
+        </div>
+      </main>
+
+      <CreateServerModal
+        isOpen={isCreateServerOpen}
+        onClose={() => setIsCreateServerOpen(false)}
+        onCreated={handleServerCreated}
+      />
+
+      <BrowseServersModal
+        isOpen={isBrowseServersOpen}
+        onClose={() => setIsBrowseServersOpen(false)}
+        joinedServerIds={new Set(localServers.map(s => s.id))}
+        defaultChannelByServerId={defaultChannelByServerId}
+        basePath={basePath}
+        onJoined={notifyServerJoined}
+      />
+
+      {!isChannelLocked && (
+        <SearchModal
+          messages={localMessages}
+          channelName={currentChannel.name}
+          isOpen={isSearchOpen}
+          onClose={() => setIsSearchOpen(false)}
+          onResultSelect={message => {
+            const el = document.querySelector(`[data-message-id="${message.id}"]`);
+            if (!el) return;
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.remove('message-highlight-flash');
+            // Force a reflow so re-selecting the same message re-triggers the animation.
+            void (el as HTMLElement).offsetWidth;
+            el.classList.add('message-highlight-flash');
           }}
         />
+      )}
 
-        {/* 3. Main column */}
-        <main
-          id='main-content'
-          className='flex flex-1 flex-col overflow-hidden'
-          aria-label={`${currentChannel.name} channel`}
-          tabIndex={-1}
-        >
-          <TopBar
-            channel={currentChannel}
-            serverSlug={currentServer.slug}
-            isAdmin={checkIsAdmin(currentServer.ownerId)}
-            isMembersOpen={isMembersOpen}
-            onMembersToggle={() => setIsMembersOpen(!isMembersOpen)}
-            onSearchOpen={isChannelLocked ? undefined : () => setIsSearchOpen(true)}
-            onPinsOpen={isChannelLocked ? undefined : () => setIsPinsOpen(v => !v)}
-            disableMessageActions={isChannelLocked}
-            isMenuOpen={isMenuOpen}
-            onMenuToggle={() => setIsMenuOpen(v => !v)}
-            userId={authUser?.id}
-            onUnreadCountsByServerChange={setMentionCountByServer}
-            onUnreadCountsByChannelChange={setMentionCountByChannel}
-            currentChannelId={currentChannel.id}
-          />
-
-          <div className='flex flex-1 overflow-hidden'>
-            <div className={cn('flex flex-1 flex-col overflow-hidden', BG.primary)}>
-              {lockedMessagePane ? (
-                lockedMessagePane
-              ) : (
-                <>
-                  <MessageList
-                    key={currentChannel.id}
-                    channel={currentChannel}
-                    messages={localMessages}
-                    serverId={currentServer.id}
-                    canPin={canPin}
-                    canDeleteAny={canModerate}
-                    currentUsername={authUser?.username}
-                    channels={localChannels}
-                    serverSlug={currentServer.slug}
-                    onReplyClick={handleReplyClick}
-                    onPinToggle={handlePinToggle}
-                    onDelete={handleDeleteMessage}
-                    hasMoreOlder={hasMoreOlder}
-                    isLoadingOlder={isLoadingOlder}
-                    onLoadOlderMessages={handleLoadOlderMessages}
-                  />
-                  <MessageInput
-                    channelId={currentChannel.id}
-                    channelName={currentChannel.name}
-                    serverId={currentServer.id}
-                    isReadOnly={currentUser.role === 'guest'}
-                    onMessageSent={handleMessageSent}
-                    replyingTo={replyingTo}
-                    onCancelReply={handleCancelReply}
-                  />
-                  {!isAuthLoading && !isAuthenticated && (
-                    <GuestPromoBanner
-                      serverName={currentServer.name}
-                      memberCount={currentServer.memberCount ?? members.length}
-                    />
-                  )}
-                </>
-              )}
-            </div>
-            {!isChannelLocked && (
-              <PinnedMessagesPanel
-                channelId={currentChannel.id}
-                serverId={currentServer.id}
-                channelName={currentChannel.name}
-                isOpen={isPinsOpen}
-                refreshKey={pinsRefreshKey}
-                onClose={() => setIsPinsOpen(false)}
-              />
-            )}
-            <MembersSidebar
-              members={localMembers}
-              isOpen={isMembersOpen}
-              onClose={() => setIsMembersOpen(false)}
-            />
-          </div>
-        </main>
-
-        <CreateServerModal
-          isOpen={isCreateServerOpen}
-          onClose={() => setIsCreateServerOpen(false)}
-          onCreated={handleServerCreated}
+      {isCreateChannelOpen && (
+        <CreateChannelModal
+          serverId={currentServer.id}
+          serverSlug={currentServer.slug}
+          existingChannels={localChannels}
+          defaultType={createChannelDefaultType}
+          onCreated={newChannel =>
+            setLocalChannels(prev => {
+              // Insert before voice channels so text/announcement channels stay grouped correctly.
+              const insertIdx =
+                newChannel.type === ChannelType.VOICE
+                  ? prev.length
+                  : prev.findIndex(c => c.type === ChannelType.VOICE);
+              const at = insertIdx === -1 ? prev.length : insertIdx;
+              return [...prev.slice(0, at), newChannel, ...prev.slice(at)];
+            })
+          }
+          onClose={() => setIsCreateChannelOpen(false)}
         />
-
-        <BrowseServersModal
-          isOpen={isBrowseServersOpen}
-          onClose={() => setIsBrowseServersOpen(false)}
-          joinedServerIds={new Set(localServers.map(s => s.id))}
-          defaultChannelByServerId={defaultChannelByServerId}
-          basePath={basePath}
-          onJoined={notifyServerJoined}
-        />
-
-        {!isChannelLocked && (
-          <SearchModal
-            messages={localMessages}
-            channelName={currentChannel.name}
-            isOpen={isSearchOpen}
-            onClose={() => setIsSearchOpen(false)}
-            onResultSelect={message => {
-              const el = document.querySelector(`[data-message-id="${message.id}"]`);
-              if (!el) return;
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              el.classList.remove('message-highlight-flash');
-              // Force a reflow so re-selecting the same message re-triggers the animation.
-              void (el as HTMLElement).offsetWidth;
-              el.classList.add('message-highlight-flash');
-            }}
-          />
-        )}
-
-        {isCreateChannelOpen && (
-          <CreateChannelModal
-            serverId={currentServer.id}
-            serverSlug={currentServer.slug}
-            existingChannels={localChannels}
-            defaultType={createChannelDefaultType}
-            onCreated={newChannel =>
-              setLocalChannels(prev => {
-                // Insert before voice channels so text/announcement channels stay grouped correctly.
-                const insertIdx =
-                  newChannel.type === ChannelType.VOICE
-                    ? prev.length
-                    : prev.findIndex(c => c.type === ChannelType.VOICE);
-                const at = insertIdx === -1 ? prev.length : insertIdx;
-                return [...prev.slice(0, at), newChannel, ...prev.slice(at)];
-              })
-            }
-            onClose={() => setIsCreateChannelOpen(false)}
-          />
-        )}
-      </div>
-    </VoiceProvider>
+      )}
+    </div>
   );
 }

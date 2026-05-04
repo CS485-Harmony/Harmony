@@ -480,7 +480,13 @@ describe('channelService.deleteChannel', () => {
   it('CS-21: deletes channel and fires all three cache operations + event', async () => {
     const result = await channelService.deleteChannel(deleteChannelId, serverId);
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: deleteChannelId,
+        serverId,
+        slug: `to-delete-${ts}`,
+      }),
+    );
 
     // Verify the channel is actually gone from the DB
     const gone = await prisma.channel.findUnique({ where: { id: deleteChannelId } });
@@ -534,9 +540,13 @@ describe('channelService.deleteChannel', () => {
     mockCacheInvalidatePattern.mockRejectedValue(new Error('invalidatePattern error'));
     mockPublish.mockRejectedValue(new Error('event bus error'));
 
-    await expect(
-      channelService.deleteChannel(ch.id, serverId),
-    ).resolves.toBeUndefined();
+    await expect(channelService.deleteChannel(ch.id, serverId)).resolves.toEqual(
+      expect.objectContaining({
+        id: ch.id,
+        serverId,
+        slug: `cs25-delete-${ts}`,
+      }),
+    );
   });
 });
 
