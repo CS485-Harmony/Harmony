@@ -90,6 +90,12 @@ export interface UseServerEventsOptions {
   onReactionAdded?: (data: { messageId: string; channelId: string; userId: string; emoji: string }) => void;
   /** Called when a reaction is removed from a message in any channel of the server. Optional. */
   onReactionRemoved?: (data: { messageId: string; channelId: string; userId: string; emoji: string }) => void;
+  /** Called when a user joins a voice channel in this server. Optional. */
+  onVoiceUserJoined?: (data: { channelId: string; userId: string }) => void;
+  /** Called when a user leaves a voice channel in this server. Optional. */
+  onVoiceUserLeft?: (data: { channelId: string; userId: string }) => void;
+  /** Called when a user's mute/deafen state changes in a voice channel. Optional. */
+  onVoiceStateChanged?: (data: { channelId: string; userId: string; muted: boolean; deafened: boolean }) => void;
   /** Set to false to disable the connection (e.g. for unauthenticated guests). Defaults to true. */
   enabled?: boolean;
 }
@@ -110,6 +116,9 @@ export function useServerEvents({
   onServerUpdated,
   onReactionAdded,
   onReactionRemoved,
+  onVoiceUserJoined,
+  onVoiceUserLeft,
+  onVoiceStateChanged,
   enabled = true,
 }: UseServerEventsOptions): void {
   // Incrementing this triggers the effect to re-run with a fresh token after a
@@ -135,6 +144,9 @@ export function useServerEvents({
   const onServerUpdatedRef = useRef(onServerUpdated);
   const onReactionAddedRef = useRef(onReactionAdded);
   const onReactionRemovedRef = useRef(onReactionRemoved);
+  const onVoiceUserJoinedRef = useRef(onVoiceUserJoined);
+  const onVoiceUserLeftRef = useRef(onVoiceUserLeft);
+  const onVoiceStateChangedRef = useRef(onVoiceStateChanged);
 
   useLayoutEffect(() => {
     onCreatedRef.current = onChannelCreated;
@@ -151,6 +163,9 @@ export function useServerEvents({
     onServerUpdatedRef.current = onServerUpdated;
     onReactionAddedRef.current = onReactionAdded;
     onReactionRemovedRef.current = onReactionRemoved;
+    onVoiceUserJoinedRef.current = onVoiceUserJoined;
+    onVoiceUserLeftRef.current = onVoiceUserLeft;
+    onVoiceStateChangedRef.current = onVoiceStateChanged;
   });
 
   useEffect(() => {
@@ -432,6 +447,59 @@ export function useServerEvents({
       }
     };
 
+    const handleVoiceUserJoined = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as { channelId: string; userId: string };
+        onVoiceUserJoinedRef.current?.(payload);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'voice:userJoined',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
+    const handleVoiceUserLeft = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as { channelId: string; userId: string };
+        onVoiceUserLeftRef.current?.(payload);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'voice:userLeft',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
+    const handleVoiceStateChanged = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          channelId: string;
+          userId: string;
+          muted: boolean;
+          deafened: boolean;
+        };
+        onVoiceStateChangedRef.current?.(payload);
+      } catch (error) {
+        logger.warn('Dropped malformed server SSE payload', {
+          feature: 'server-events',
+          event: 'payload_parse_failed',
+          source: 'sse',
+          operation: 'voice:stateChanged',
+          target: '/api/events/server/[serverId]',
+          error,
+        });
+      }
+    };
+
       es.addEventListener('channel:created', handleCreated);
       es.addEventListener('channel:updated', handleUpdated);
       es.addEventListener('channel:deleted', handleDeleted);
@@ -446,6 +514,9 @@ export function useServerEvents({
       es.addEventListener('server:updated', handleServerUpdated);
       es.addEventListener('reaction:added', handleReactionAdded);
       es.addEventListener('reaction:removed', handleReactionRemoved);
+      es.addEventListener('voice:userJoined', handleVoiceUserJoined);
+      es.addEventListener('voice:userLeft', handleVoiceUserLeft);
+      es.addEventListener('voice:stateChanged', handleVoiceStateChanged);
       activeHandlers.push(
         ['channel:created', handleCreated],
         ['channel:updated', handleUpdated],
@@ -461,6 +532,9 @@ export function useServerEvents({
         ['server:updated', handleServerUpdated],
         ['reaction:added', handleReactionAdded],
         ['reaction:removed', handleReactionRemoved],
+        ['voice:userJoined', handleVoiceUserJoined],
+        ['voice:userLeft', handleVoiceUserLeft],
+        ['voice:stateChanged', handleVoiceStateChanged],
       );
 
       let everOpened = false;
@@ -470,6 +544,8 @@ export function useServerEvents({
         reconnectCountRef.current = 0; // reset budget on successful connection
       };
       es.onerror = () => {
+        // Intentional close during cleanup — do not reconnect.
+        if (cancelled) return;
         logger.warn('Server SSE connection failed', {
           feature: 'server-events',
           event: everOpened ? 'stream_disconnected' : 'stream_failed',

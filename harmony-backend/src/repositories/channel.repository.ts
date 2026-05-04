@@ -12,6 +12,20 @@ export const channelRepository = {
     return client.channel.findMany({ where: { serverId }, orderBy: { position: 'asc' } });
   },
 
+  /** Returns channels accessible to a non-admin user: non-private + private channels they're explicitly added to. */
+  findAccessibleByServerId(serverId: string, userId: string, client: Client = prisma) {
+    return client.channel.findMany({
+      where: {
+        serverId,
+        OR: [
+          { visibility: { not: ChannelVisibility.PRIVATE } },
+          { channelMembers: { some: { userId } } },
+        ],
+      },
+      orderBy: { position: 'asc' },
+    });
+  },
+
   findByServerAndSlug(serverId: string, slug: string, client: Client = prisma) {
     return client.channel.findUnique({ where: { serverId_slug: { serverId, slug } } });
   },

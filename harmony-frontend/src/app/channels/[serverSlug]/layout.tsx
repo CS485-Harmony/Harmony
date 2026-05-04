@@ -47,7 +47,11 @@ export default async function ServerVoiceLayout({ children, params }: ServerLayo
   }
 
   return (
-    <VoiceProvider serverId={serverId} voiceChannelIds={voiceChannelIds} currentUserId={currentUserId}>
+    <VoiceProvider
+      serverId={serverId}
+      voiceChannelIds={voiceChannelIds}
+      currentUserId={currentUserId}
+    >
       {children}
     </VoiceProvider>
   );

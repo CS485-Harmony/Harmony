@@ -11,7 +11,7 @@ export const channelRouter = router({
   /** Requires server membership (server:read) — prevents leaking channel metadata to non-members. */
   getChannels: withPermission('server:read')
     .input(z.object({ serverId: z.string().uuid() }))
-    .query(({ input }) => channelService.getChannels(input.serverId)),
+    .query(({ input, ctx }) => channelService.getChannels(input.serverId, ctx.userId)),
 
   /** Requires channel:read — prevents leaking PRIVATE channel metadata to non-members. */
   getChannel: withPermission('channel:read')

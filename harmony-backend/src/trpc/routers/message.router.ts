@@ -68,10 +68,11 @@ export const messageRouter = router({
         limit: z.number().int().min(1).max(100).default(20),
       }),
     )
-    .query(({ input }) =>
+    .query(({ input, ctx }) =>
       messageService.getMessages({
         serverId: input.serverId,
         channelId: input.channelId,
+        userId: ctx.userId,
         cursor: input.cursor,
         limit: input.limit,
       }),
@@ -157,7 +158,7 @@ export const messageRouter = router({
         messageId: z.string().uuid(),
       }),
     )
-    .mutation(({ input }) => messageService.pinMessage(input.messageId, input.serverId)),
+    .mutation(({ input, ctx }) => messageService.pinMessage(input.messageId, input.serverId, ctx.userId)),
 
   /** Unpin a message. Requires message:pin (MODERATOR+). */
   unpinMessage: withPermission('message:pin')
@@ -167,7 +168,7 @@ export const messageRouter = router({
         messageId: z.string().uuid(),
       }),
     )
-    .mutation(({ input }) => messageService.unpinMessage(input.messageId, input.serverId)),
+    .mutation(({ input, ctx }) => messageService.unpinMessage(input.messageId, input.serverId, ctx.userId)),
 
   /** Get all pinned messages for a channel. Requires message:read (GUEST+). */
   getPinnedMessages: withPermission('message:read')
@@ -177,7 +178,7 @@ export const messageRouter = router({
         channelId: z.string().uuid(),
       }),
     )
-    .query(({ input }) => messageService.getPinnedMessages(input.channelId, input.serverId)),
+    .query(({ input, ctx }) => messageService.getPinnedMessages(input.channelId, input.serverId, ctx.userId)),
 
   /** Reply to a message. Requires message:create (MEMBER+). */
   createReply: withPermission('message:create')
@@ -210,11 +211,12 @@ export const messageRouter = router({
         limit: z.number().int().min(1).max(100).default(20),
       }),
     )
-    .query(({ input }) =>
+    .query(({ input, ctx }) =>
       messageService.getThreadMessages({
         parentMessageId: input.parentMessageId,
         channelId: input.channelId,
         serverId: input.serverId,
+        userId: ctx.userId,
         cursor: input.cursor,
         limit: input.limit,
       }),

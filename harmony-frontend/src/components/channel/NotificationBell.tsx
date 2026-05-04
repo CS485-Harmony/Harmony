@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { getAccessToken, fetchSseTicket } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
@@ -19,11 +20,18 @@ interface Notification {
     isDeleted: boolean;
     author: { id: string; username: string; displayName: string; avatarUrl: string | null };
   };
+  channel?: { slug: string; name: string; server: { slug: string; name: string } };
 }
 
 interface NotificationBellProps {
   /** When provided, the component connects to the user SSE stream for real-time badges. */
   userId?: string;
+  /** Called whenever the per-server unread mention counts change. */
+  onUnreadCountsByServerChange?: (counts: Record<string, number>) => void;
+  /** Called whenever the per-channel unread mention counts change. */
+  onUnreadCountsByChannelChange?: (counts: Record<string, number>) => void;
+  /** When the user navigates to a channel, auto-mark its notifications as read. */
+  currentChannelId?: string;
 }
 
 function BellIcon({ className }: { className?: string }) {
@@ -53,10 +61,55 @@ function formatRelativeTime(ts: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function NotificationBell({ userId }: NotificationBellProps) {
+export function NotificationBell({ userId, onUnreadCountsByServerChange, onUnreadCountsByChannelChange, currentChannelId }: NotificationBellProps) {
+  const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
+  const onUnreadCountsByServerChangeRef = useRef(onUnreadCountsByServerChange);
+  onUnreadCountsByServerChangeRef.current = onUnreadCountsByServerChange;
+  const onUnreadCountsByChannelChangeRef = useRef(onUnreadCountsByChannelChange);
+  onUnreadCountsByChannelChangeRef.current = onUnreadCountsByChannelChange;
+
+  const unreadByServer = useMemo(
+    () =>
+      notifications
+        .filter((n) => !n.read)
+        .reduce<Record<string, number>>((acc, n) => ({ ...acc, [n.serverId]: (acc[n.serverId] ?? 0) + 1 }), {}),
+    [notifications],
+  );
+
+  const unreadByChannel = useMemo(
+    () =>
+      notifications
+        .filter((n) => !n.read)
+        .reduce<Record<string, number>>((acc, n) => ({ ...acc, [n.channelId]: (acc[n.channelId] ?? 0) + 1 }), {}),
+    [notifications],
+  );
+
+  useEffect(() => {
+    onUnreadCountsByServerChangeRef.current?.(unreadByServer);
+  }, [unreadByServer]);
+
+  useEffect(() => {
+    onUnreadCountsByChannelChangeRef.current?.(unreadByChannel);
+  }, [unreadByChannel]);
+
+  // Auto-mark notifications as read when the user is in a channel that has unread mentions.
+  // Depends on unreadByChannel so it re-fires when notifications load after initial mount or
+  // when a new SSE-delivered mention arrives while the user is already in that channel.
+  useEffect(() => {
+    if (!currentChannelId || !userId) return;
+    if (!unreadByChannel[currentChannelId]) return;
+    void apiClient
+      .trpcMutation('notification.markChannelAsRead', { channelId: currentChannelId })
+      .then(() => {
+        setNotifications((prev) =>
+          prev.map((n) => (n.channelId === currentChannelId ? { ...n, read: true } : n)),
+        );
+      })
+      .catch((err) => console.error('[NotificationBell] markChannelAsRead failed:', err));
+  }, [currentChannelId, userId, unreadByChannel]);
   const [isLoading, setIsLoading] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -138,6 +191,8 @@ export function NotificationBell({ userId }: NotificationBellProps) {
         } catch {
           // malformed payload — ignore
         }
+        // Refetch to hydrate channel/server slugs for row navigation.
+        loadNotifications();
       });
     })();
 
@@ -179,8 +234,8 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     try {
       await apiClient.trpcMutation('notification.markAllAsRead');
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    } catch {
-      // ignore — non-critical, badge will self-correct on next load
+    } catch (err) {
+      console.error('[NotificationBell] markAllAsRead failed:', err);
     }
   };
 
@@ -239,42 +294,69 @@ export function NotificationBell({ userId }: NotificationBellProps) {
               </li>
             )}
             {!isLoading &&
-              notifications.map((n) => (
-                <li
-                  key={n.id}
-                  className={cn(
-                    'flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white/5',
-                    !n.read && 'bg-indigo-500/10',
-                  )}
-                >
-                  <div className='flex-1 min-w-0'>
-                    <p className='text-xs text-gray-300'>
-                      <span className='font-semibold text-white'>
-                        @{n.message.author.username}
-                      </span>{' '}
-                      mentioned you
-                    </p>
-                    {n.message.content && !n.message.isDeleted && (
-                      <p className='mt-0.5 truncate text-xs text-gray-400'>
-                        {n.message.content}
-                      </p>
-                    )}
-                    <p className='mt-0.5 text-[10px] text-gray-500'>
-                      {formatRelativeTime(n.createdAt)}
-                    </p>
-                  </div>
-                  {!n.read && (
-                    <button
-                      type='button'
-                      onClick={() => markAsRead(n.id)}
-                      title='Mark as read'
-                      className='mt-0.5 flex-shrink-0 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors'
+              notifications.map((n) => {
+                const serverSlug = n.channel?.server?.slug;
+                const channelSlug = n.channel?.slug;
+                const isNavigable = !!(serverSlug && channelSlug);
+                const handleRowClick = () => {
+                  if (!n.read) markAsRead(n.id);
+                  setIsOpen(false);
+                  if (isNavigable) router.push(`/c/${serverSlug}/${channelSlug}`);
+                };
+                return (
+                  <li key={n.id}>
+                    {/* Use div+role instead of <button> so the ✓ sibling <button> isn't nested inside interactive content (invalid HTML) */}
+                    <div
+                      role='button'
+                      tabIndex={0}
+                      onClick={handleRowClick}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleRowClick();
+                        }
+                      }}
+                      className={cn(
+                        'flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5',
+                        !n.read && 'bg-indigo-500/10',
+                        isNavigable ? 'cursor-pointer' : 'cursor-default',
+                      )}
                     >
-                      ✓
-                    </button>
-                  )}
-                </li>
-              ))}
+                      <div className='flex-1 min-w-0'>
+                        <p className='text-xs text-gray-300'>
+                          <span className='font-semibold text-white'>
+                            @{n.message.author.username}
+                          </span>{' '}
+                          mentioned you
+                        </p>
+                        {n.channel && (
+                          <p className='mt-0.5 text-[10px] text-indigo-300'>
+                            in #{n.channel.name} · {n.channel.server.name}
+                          </p>
+                        )}
+                        {n.message.content && !n.message.isDeleted && (
+                          <p className='mt-0.5 truncate text-xs text-gray-400'>
+                            {n.message.content}
+                          </p>
+                        )}
+                        <p className='mt-0.5 text-[10px] text-gray-500'>
+                          {formatRelativeTime(n.createdAt)}
+                        </p>
+                      </div>
+                      {!n.read && (
+                        <button
+                          type='button'
+                          onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}
+                          title='Mark as read'
+                          className='mt-0.5 flex-shrink-0 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors'
+                        >
+                          ✓
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
           </ul>
         </div>
       )}

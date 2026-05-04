@@ -8,9 +8,19 @@
  */
 
 import { revalidatePath } from 'next/cache';
-import { updateChannel, getChannel, getAuditLog } from '@/services/channelService';
-import { getServer } from '@/services/serverService';
+import {
+  updateChannel,
+  getChannel,
+  getAuditLog,
+  getChannelMembers,
+  addChannelMember,
+  removeChannelMember,
+  type ChannelMemberEntry,
+} from '@/services/channelService';
+import { getServer, getServerMembersWithRole } from '@/services/serverService';
+import type { ServerMemberInfo } from '@/types';
 import type { Channel } from '@/types';
+import { ChannelVisibility } from '@/types';
 import type { AuditLogPage } from '@/services/channelService';
 import {
   getMetaTagPreview,
@@ -86,6 +96,9 @@ export async function fetchAuditLog(
 async function resolveChannelForSeo(serverSlug: string, channelSlug: string) {
   const channel = await getChannel(serverSlug, channelSlug);
   if (!channel) throw new Error('Channel not found');
+  if (channel.visibility !== ChannelVisibility.PUBLIC_INDEXABLE) {
+    throw new Error('SEO preview is only available for PUBLIC_INDEXABLE channels');
+  }
   return channel;
 }
 
@@ -128,4 +141,48 @@ export async function fetchSeoRegenerationStatus(
 ): Promise<MetaTagJobStatus> {
   const channel = await resolveChannelForSeo(serverSlug, channelSlug);
   return getMetaTagRegenerationStatus(channel.id, jobId);
+}
+
+// ─── Channel membership actions ───────────────────────────────────────────────
+
+async function resolveChannelAndServer(serverSlug: string, channelSlug: string) {
+  const channel = await getChannel(serverSlug, channelSlug);
+  if (!channel) throw new Error('Channel not found');
+  const server = await getServer(serverSlug);
+  if (!server) throw new Error('Server not found');
+  return { channel, server };
+}
+
+export async function fetchChannelMembers(
+  serverSlug: string,
+  channelSlug: string,
+): Promise<ChannelMemberEntry[]> {
+  const { channel, server } = await resolveChannelAndServer(serverSlug, channelSlug);
+  return getChannelMembers(server.id, channel.id);
+}
+
+export async function addChannelMemberAction(
+  serverSlug: string,
+  channelSlug: string,
+  userId: string,
+): Promise<void> {
+  const { channel, server } = await resolveChannelAndServer(serverSlug, channelSlug);
+  await addChannelMember(server.id, channel.id, userId);
+}
+
+export async function removeChannelMemberAction(
+  serverSlug: string,
+  channelSlug: string,
+  userId: string,
+): Promise<void> {
+  const { channel, server } = await resolveChannelAndServer(serverSlug, channelSlug);
+  await removeChannelMember(server.id, channel.id, userId);
+}
+
+export async function fetchServerMembersForChannel(
+  serverSlug: string,
+): Promise<ServerMemberInfo[]> {
+  const server = await getServer(serverSlug);
+  if (!server) throw new Error('Server not found');
+  return getServerMembersWithRole(server.id);
 }

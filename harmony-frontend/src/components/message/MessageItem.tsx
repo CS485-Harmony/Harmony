@@ -48,12 +48,27 @@ function getEmbedVideoUrl(url: string): string | null {
 
 type ContentPart = { kind: 'text'; value: string } | { kind: 'link'; url: string };
 
-function MessageContent({ content, currentUsername }: { content: string; currentUsername?: string }) {
+function MessageContent({
+  content,
+  currentUsername,
+  channels,
+  serverSlug,
+}: {
+  content: string;
+  currentUsername?: string;
+  channels?: { slug: string; name: string }[];
+  serverSlug?: string;
+}) {
   const matches = [...content.matchAll(URL_PATTERN)];
   if (matches.length === 0) {
     return (
       <p className='whitespace-pre-line text-sm leading-relaxed text-[#dcddde]'>
-        <MentionText content={content} currentUsername={currentUsername} />
+        <MentionText
+          content={content}
+          currentUsername={currentUsername}
+          channels={channels}
+          serverSlug={serverSlug}
+        />
       </p>
     );
   }
@@ -104,7 +119,15 @@ function MessageContent({ content, currentUsername }: { content: string; current
                 </a>
               );
             }
-            return <MentionText key={i} content={part.value} currentUsername={currentUsername} />;
+            return (
+              <MentionText
+                key={i}
+                content={part.value}
+                currentUsername={currentUsername}
+                channels={channels}
+                serverSlug={serverSlug}
+              />
+            );
           })}
         </p>
       )}
@@ -612,6 +635,9 @@ export function MessageItem({
   showHeader = true,
   canPin,
   serverId,
+  currentUsername,
+  channels,
+  serverSlug,
   onReplyClick,
   onPinToggle,
 }: {
@@ -622,6 +648,12 @@ export function MessageItem({
   canPin?: boolean;
   /** Required for pin actions. Passed alongside canPin. */
   serverId?: string;
+  /** The authenticated user's username — used for self-mention detection and highlight. */
+  currentUsername?: string;
+  /** Channels in the current server — used to resolve #channel-name pills. */
+  channels?: { slug: string; name: string }[];
+  /** Current server slug — used for #channel pill hrefs. */
+  serverSlug?: string;
   /** Called when the user clicks Reply on this message. */
   onReplyClick?: (message: Message) => void;
   /** Called when the user triggers a pin/unpin action for this message. */
@@ -669,8 +701,6 @@ export function MessageItem({
   }
 
   const isOwnMessage = !!user && user.id === message.author.id;
-
-  const currentUsername = user?.username;
   const displayedContent = localContent ?? message.content;
   const isMentioned = !!currentUsername && (() => {
     const re = /@([a-zA-Z0-9_-]{1,32})/g;
@@ -983,7 +1013,12 @@ export function MessageItem({
               editUi
             ) : (
               <div>
-                <MessageContent content={displayedContent} currentUsername={currentUsername} />
+                <MessageContent
+                  content={displayedContent}
+                  currentUsername={currentUsername}
+                  channels={channels}
+                  serverSlug={serverSlug}
+                />
                 {(message.editedAt || localContent !== undefined) && (
                   <span className='ml-1 text-[10px] text-gray-500'>(edited)</span>
                 )}
@@ -1062,7 +1097,12 @@ export function MessageItem({
           {isEditing ? (
             editUi
           ) : (
-            <MessageContent content={displayedContent} currentUsername={currentUsername} />
+            <MessageContent
+              content={displayedContent}
+              currentUsername={currentUsername}
+              channels={channels}
+              serverSlug={serverSlug}
+            />
           )}
           <AttachmentList attachments={message.attachments} />
           <ReactionList

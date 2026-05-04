@@ -158,6 +158,8 @@ export interface ChannelSidebarProps {
    * Only shown when the current user is owner/admin.
    */
   onCreateChannel?: (defaultType: ChannelType) => void;
+  /** Unread mention counts keyed by channelId — shows badge on channel items. */
+  mentionCountByChannel?: Record<string, number>;
 }
 
 export function ChannelSidebar({
@@ -172,6 +174,7 @@ export function ChannelSidebar({
   serverId,
   members,
   onCreateChannel,
+  mentionCountByChannel = {},
 }: ChannelSidebarProps) {
   const [textCollapsed, setTextCollapsed] = useState(false);
   const [voiceCollapsed, setVoiceCollapsed] = useState(false);
@@ -342,6 +345,7 @@ export function ChannelSidebar({
                   {textChannels.map(channel => {
                     const isActive = channel.id === currentChannelId;
                     const badge = VISIBILITY_BADGE[channel.visibility];
+                    const mentionCount = mentionCountByChannel[channel.id] ?? 0;
                     return (
                       <li key={channel.id}>
                         <Link
@@ -356,6 +360,11 @@ export function ChannelSidebar({
                         >
                           <ChannelIcon type={channel.type} />
                           <span className='flex-1 truncate'>{channel.name}</span>
+                          {mentionCount > 0 && (
+                            <span className='flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-0.5 text-[10px] font-bold text-white'>
+                              {mentionCount > 99 ? '99+' : mentionCount}
+                            </span>
+                          )}
                           {badge && (
                             <span
                               className='text-xs opacity-60'

@@ -62,10 +62,14 @@ export async function ChannelPageContent({
     sessionUser?.isSystemAdmin ||
     currentMember?.role === 'admin' ||
     currentMember?.role === 'owner';
-  const isLockedPrivateChannel = channel.visibility === ChannelVisibility.PRIVATE && !isServerAdmin;
-  const sortedMessages = isLockedPrivateChannel
-    ? []
-    : [...(await getMessages(channel.id, 1, { serverId: server.id })).messages].reverse();
+  // Non-admin, non-authenticated users should not reach here with a private channel
+  // because getChannels filters inaccessible channels server-side. The lock pane
+  // still displays for unauthenticated guest views (/c/* route).
+  const isLockedPrivateChannel = channel.visibility === ChannelVisibility.PRIVATE && !isServerAdmin && !sessionUser;
+  const initialMessagesResult = isLockedPrivateChannel
+    ? { messages: [], hasMore: false, nextCursor: undefined }
+    : await getMessages(channel.id, 1, { serverId: server.id });
+  const sortedMessages = [...initialMessagesResult.messages].reverse();
 
   return (
     <HarmonyShell
@@ -75,6 +79,8 @@ export async function ChannelPageContent({
       allChannels={allChannels}
       currentChannel={channel}
       messages={sortedMessages}
+      initialHasMore={initialMessagesResult.hasMore}
+      initialNextCursor={initialMessagesResult.nextCursor}
       members={members}
       basePath={isGuestView ? '/c' : '/channels'}
       lockedMessagePane={

@@ -41,8 +41,9 @@ function toFrontendChannel(raw: Record<string, unknown>): Channel {
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 /**
- * Returns all channels for a given server.
- * Uses tRPC authed endpoint for full channel list (including PRIVATE channels).
+ * Returns channels accessible to the current user for a given server.
+ * Admin+ users receive all channels. Non-admin members receive non-private channels
+ * plus private channels they are explicitly added to.
  * Errors propagate to the caller — callers that use the channel count (e.g.
  * createChannelAction position computation) must not silently receive [] on a
  * transient failure, which would corrupt channel ordering.
@@ -239,6 +240,43 @@ export async function getAuditLog(
 export async function deleteChannel(channelId: string, serverId: string): Promise<boolean> {
   await trpcMutate('channel.deleteChannel', { serverId, channelId });
   return true;
+}
+
+// ─── Channel membership ──────────────────────��────────────────────────────────
+
+export interface ChannelMemberEntry {
+  userId: string;
+  channelId: string;
+  addedAt: string;
+  user: {
+    id: string;
+    username: string;
+    displayName: string;
+    avatarUrl: string | null;
+  };
+}
+
+export async function getChannelMembers(
+  serverId: string,
+  channelId: string,
+): Promise<ChannelMemberEntry[]> {
+  return trpcQuery<ChannelMemberEntry[]>('channelMember.getMembers', { serverId, channelId });
+}
+
+export async function addChannelMember(
+  serverId: string,
+  channelId: string,
+  userId: string,
+): Promise<void> {
+  await trpcMutate('channelMember.addMember', { serverId, channelId, userId });
+}
+
+export async function removeChannelMember(
+  serverId: string,
+  channelId: string,
+  userId: string,
+): Promise<void> {
+  await trpcMutate('channelMember.removeMember', { serverId, channelId, userId });
 }
 
 // Re-export ChannelVisibility for convenience
