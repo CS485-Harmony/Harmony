@@ -11,7 +11,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
   updateChannel,
-  getChannel,
+  getChannelAuthenticated,
   getAuditLog,
   deleteChannel,
   getChannelMembers,
@@ -19,7 +19,7 @@ import {
   removeChannelMember,
   type ChannelMemberEntry,
 } from '@/services/channelService';
-import { getServer, getServerMembersWithRole } from '@/services/serverService';
+import { getServerAuthenticated, getServerMembersWithRole } from '@/services/serverService';
 import { createFrontendLogger } from '@/lib/frontend-logger';
 import { SEO_PREVIEW_LOAD_ERROR } from '@/lib/seoConstants';
 import type { ServerMemberInfo } from '@/types';
@@ -46,16 +46,16 @@ export async function saveChannelSettings(
   channelSlug: string,
   patch: Partial<Pick<Channel, 'name' | 'topic'>>,
 ): Promise<void> {
-  // Resolve channel by route params (don't trust a raw channelId from the client)
-  const channel = await getChannel(serverSlug, channelSlug);
-  if (!channel) {
-    throw new Error('Channel not found');
-  }
-
-  // Resolve server to get serverId for the API call
-  const server = await getServer(serverSlug);
+  // Resolve server first (authenticated — works for private servers too)
+  const server = await getServerAuthenticated(serverSlug);
   if (!server) {
     throw new Error('Server not found');
+  }
+
+  // Resolve channel by route params using server ID (don't trust a raw channelId from the client)
+  const channel = await getChannelAuthenticated(server.id, channelSlug);
+  if (!channel) {
+    throw new Error('Channel not found');
   }
 
   // Build an explicit whitelist so callers cannot sneak in extra fields
@@ -95,15 +95,20 @@ export async function fetchAuditLog(
   channelSlug: string,
   options: { limit?: number; offset?: number } = {},
 ): Promise<AuditLogPage> {
-  const channel = await getChannel(serverSlug, channelSlug);
+  const server = await getServerAuthenticated(serverSlug);
+  if (!server) throw new Error('Server not found');
+
+  const channel = await getChannelAuthenticated(server.id, channelSlug);
   if (!channel) throw new Error('Channel not found');
 
-  // channel.serverId is already resolved by getChannel — no redundant server lookup needed.
-  return getAuditLog(channel.serverId, channel.id, options);
+  return getAuditLog(server.id, channel.id, options);
 }
 
 async function resolveChannelForSeo(serverSlug: string, channelSlug: string) {
-  const channel = await getChannel(serverSlug, channelSlug);
+  const server = await getServerAuthenticated(serverSlug);
+  if (!server) throw new Error('Server not found');
+
+  const channel = await getChannelAuthenticated(server.id, channelSlug);
   if (!channel) throw new Error('Channel not found');
   if (channel.visibility !== ChannelVisibility.PUBLIC_INDEXABLE) {
     throw new Error('SEO preview is only available for PUBLIC_INDEXABLE channels');
@@ -158,11 +163,11 @@ export async function triggerSeoRegeneration(
  * Auth enforced by the backend `channel.deleteChannel` procedure (requires channel:delete).
  */
 export async function deleteChannelAction(serverSlug: string, channelSlug: string): Promise<void> {
-  const channel = await getChannel(serverSlug, channelSlug);
-  if (!channel) throw new Error('Channel not found');
-
-  const server = await getServer(serverSlug);
+  const server = await getServerAuthenticated(serverSlug);
   if (!server) throw new Error('Server not found');
+
+  const channel = await getChannelAuthenticated(server.id, channelSlug);
+  if (!channel) throw new Error('Channel not found');
 
   await deleteChannel(channel.id, server.id);
 
@@ -184,10 +189,10 @@ export async function fetchSeoRegenerationStatus(
 // ─── Channel membership actions ───────────────────────────────────────────────
 
 async function resolveChannelAndServer(serverSlug: string, channelSlug: string) {
-  const channel = await getChannel(serverSlug, channelSlug);
-  if (!channel) throw new Error('Channel not found');
-  const server = await getServer(serverSlug);
+  const server = await getServerAuthenticated(serverSlug);
   if (!server) throw new Error('Server not found');
+  const channel = await getChannelAuthenticated(server.id, channelSlug);
+  if (!channel) throw new Error('Channel not found');
   return { channel, server };
 }
 
@@ -220,7 +225,7 @@ export async function removeChannelMemberAction(
 export async function fetchServerMembersForChannel(
   serverSlug: string,
 ): Promise<ServerMemberInfo[]> {
-  const server = await getServer(serverSlug);
+  const server = await getServerAuthenticated(serverSlug);
   if (!server) throw new Error('Server not found');
   return getServerMembersWithRole(server.id);
 }
