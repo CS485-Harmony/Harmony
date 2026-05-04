@@ -31,10 +31,7 @@ import { apiClient, getAccessToken } from '@/lib/api-client';
 import { createFrontendLogger } from '@/lib/frontend-logger';
 import { useToast } from '@/hooks/useToast';
 import { getApiBaseUrl } from '@/lib/runtime-config';
-import {
-  getStoredAudioInputDeviceId,
-  getStoredAudioOutputDeviceId,
-} from '@/hooks/useAudioDevices';
+import { getStoredAudioInputDeviceId, getStoredAudioOutputDeviceId } from '@/hooks/useAudioDevices';
 
 const logger = createFrontendLogger({ component: 'voice-context' });
 
@@ -76,6 +73,16 @@ export interface VoiceContextValue {
   leaveChannel: () => Promise<void>;
   setMuted: (muted: boolean) => Promise<void>;
   setDeafened: (deafened: boolean) => Promise<void>;
+  /** Updates the server's live voice channel set after channel create/delete events. */
+  setVoiceChannelIds: (channelIds: string[]) => void;
+  notifyUserJoined: (channelId: string, userId: string) => void;
+  notifyUserLeft: (channelId: string, userId: string) => void;
+  notifyStateChanged: (
+    channelId: string,
+    userId: string,
+    muted: boolean,
+    deafened: boolean,
+  ) => void;
 }
 
 // ─── Context ─────────────────────────────────────────────────────────────────
@@ -107,7 +114,12 @@ export function useVoiceOptional(): VoiceContextValue | null {
 export interface VoiceExternalActions {
   notifyUserJoined: (channelId: string, userId: string) => void;
   notifyUserLeft: (channelId: string, userId: string) => void;
-  notifyStateChanged: (channelId: string, userId: string, muted: boolean, deafened: boolean) => void;
+  notifyStateChanged: (
+    channelId: string,
+    userId: string,
+    muted: boolean,
+    deafened: boolean,
+  ) => void;
 }
 
 interface VoiceProviderProps {
@@ -130,9 +142,16 @@ interface VoiceProviderProps {
   externalActionsRef?: { current: VoiceExternalActions | null };
 }
 
-export function VoiceProvider({ children, serverId, voiceChannelIds, currentUserId, externalActionsRef }: VoiceProviderProps) {
+export function VoiceProvider({
+  children,
+  serverId,
+  voiceChannelIds,
+  currentUserId,
+  externalActionsRef,
+}: VoiceProviderProps) {
   const { showToast } = useToast();
 
+  const [liveVoiceChannelIds, setLiveVoiceChannelIds] = useState<string[]>(voiceChannelIds);
   const [connectedChannelId, setConnectedChannelId] = useState<string | null>(null);
   const [connectedChannelName, setConnectedChannelName] = useState<string | null>(null);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
@@ -168,16 +187,63 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const remoteAudioTracksRef = useRef<Map<string, any[]>>(new Map());
 
+  const setVoiceChannelIds = useCallback((channelIds: string[]) => {
+    setLiveVoiceChannelIds(prev => {
+      const nextKey = channelIds.join(',');
+      return prev.join(',') === nextKey ? prev : channelIds;
+    });
+  }, []);
+
+  const notifyUserJoined = useCallback((channelId: string, userId: string) => {
+    setChannelParticipants(prev => {
+      const existing = prev[channelId] ?? [];
+      if (existing.some(p => p.userId === userId)) return prev;
+      return { ...prev, [channelId]: [...existing, { userId, muted: false, deafened: false }] };
+    });
+  }, []);
+
+  const notifyUserLeft = useCallback((channelId: string, userId: string) => {
+    setChannelParticipants(prev => ({
+      ...prev,
+      [channelId]: (prev[channelId] ?? []).filter(p => p.userId !== userId),
+    }));
+  }, []);
+
+  const notifyStateChanged = useCallback(
+    (channelId: string, userId: string, muted: boolean, deafened: boolean) => {
+      setChannelParticipants(prev => ({
+        ...prev,
+        [channelId]: (prev[channelId] ?? []).map(p =>
+          p.userId === userId ? { ...p, muted, deafened } : p,
+        ),
+      }));
+    },
+    [],
+  );
+
   // ── Fetch participant lists for all voice channels on mount / server change ──
   // This populates the sidebar before the user has joined any channel.
   // Stable string key so text-channel mutations don't trigger a re-fetch here.
-  // voiceChannelIds itself changes reference on every setLocalChannels call in HarmonyShell,
+  // liveVoiceChannelIds itself changes reference on every setLocalChannels call in HarmonyShell,
   // but the IDs only change when a voice channel is actually added or removed.
-  const voiceChannelIdsKey = voiceChannelIds.join(',');
+  const voiceChannelIdsKey = liveVoiceChannelIds.join(',');
 
   useEffect(() => {
-    if (!serverId || !voiceChannelIdsKey) return;
-    const ids = voiceChannelIdsKey.split(',');
+    setLiveVoiceChannelIds(voiceChannelIds);
+  }, [serverId, voiceChannelIds]);
+
+  useEffect(() => {
+    if (!serverId) return;
+    const ids = voiceChannelIdsKey ? voiceChannelIdsKey.split(',') : [];
+    const idSet = new Set(ids);
+    setChannelParticipants(prev => {
+      const next: Record<string, VoiceParticipant[]> = {};
+      for (const [channelId, participants] of Object.entries(prev)) {
+        if (idSet.has(channelId)) next[channelId] = participants;
+      }
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+    if (ids.length === 0) return;
     void Promise.all(
       ids.map(channelId =>
         apiClient
@@ -200,32 +266,14 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
   useEffect(() => {
     if (!externalActionsRef) return;
     externalActionsRef.current = {
-      notifyUserJoined: (channelId, userId) => {
-        setChannelParticipants(prev => {
-          const existing = prev[channelId] ?? [];
-          if (existing.some(p => p.userId === userId)) return prev;
-          return { ...prev, [channelId]: [...existing, { userId, muted: false, deafened: false }] };
-        });
-      },
-      notifyUserLeft: (channelId, userId) => {
-        setChannelParticipants(prev => ({
-          ...prev,
-          [channelId]: (prev[channelId] ?? []).filter(p => p.userId !== userId),
-        }));
-      },
-      notifyStateChanged: (channelId, userId, muted, deafened) => {
-        setChannelParticipants(prev => ({
-          ...prev,
-          [channelId]: (prev[channelId] ?? []).map(p =>
-            p.userId === userId ? { ...p, muted, deafened } : p,
-          ),
-        }));
-      },
+      notifyUserJoined,
+      notifyUserLeft,
+      notifyStateChanged,
     };
     return () => {
       externalActionsRef.current = null;
     };
-  }, [externalActionsRef]);
+  }, [externalActionsRef, notifyStateChanged, notifyUserJoined, notifyUserLeft]);
 
   const resetVoiceState = useCallback(() => {
     // Detach all remote audio elements before clearing other state.
@@ -313,11 +361,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
   // while already in a call — they need to rejoin the channel for the change to take effect.
   function applySinkId(el: HTMLAudioElement) {
     const outputDeviceId = getStoredAudioOutputDeviceId();
-    if (
-      outputDeviceId &&
-      outputDeviceId !== 'default' &&
-      'setSinkId' in el
-    ) {
+    if (outputDeviceId && outputDeviceId !== 'default' && 'setSinkId' in el) {
       (el as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> })
         .setSinkId(outputDeviceId)
         .catch((err: unknown) => {
@@ -603,8 +647,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
           error: err,
         });
         // Distinguish getUserMedia device errors from Twilio server errors for actionable toasts.
-        const isPermissionError =
-          err instanceof DOMException && err.name === 'NotAllowedError';
+        const isPermissionError = err instanceof DOMException && err.name === 'NotAllowedError';
         const isDeviceError =
           err instanceof DOMException &&
           (err.name === 'NotFoundError' ||
@@ -627,7 +670,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
         setJoining(false);
       }
     },
-    [leaveChannel, resetVoiceState, showToast],
+    [currentUserId, leaveChannel, resetVoiceState, showToast],
   );
 
   const setMuted = useCallback(async (muted: boolean) => {
@@ -840,6 +883,10 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
         leaveChannel,
         setMuted,
         setDeafened,
+        setVoiceChannelIds,
+        notifyUserJoined,
+        notifyUserLeft,
+        notifyStateChanged,
       }}
     >
       {children}
