@@ -10,12 +10,14 @@ import { reactionRouter } from './routers/reaction.router';
 import { inviteRouter } from './routers/invite.router';
 import { permissionRouter } from './routers/permission.router';
 import { notificationRouter } from './routers/notification.router';
+import { channelMemberRouter } from './routers/channelMember.router';
 
 export const appRouter = router({
   health: publicProcedure.query(() => {
     return { status: 'ok', timestamp: new Date().toISOString() };
   }),
   channel: channelRouter,
+  channelMember: channelMemberRouter,
   server: serverRouter,
   serverMember: serverMemberRouter,
   message: messageRouter,

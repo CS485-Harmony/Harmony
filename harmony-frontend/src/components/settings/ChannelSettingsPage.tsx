@@ -16,6 +16,7 @@ import {
 } from '@/app/settings/[serverSlug]/[channelSlug]/actions';
 import { VisibilityToggle } from '@/components/channel/VisibilityToggle';
 import { SeoPreviewSection } from '@/components/settings/SeoPreviewSection';
+import { ChannelMembersSection } from '@/components/settings/ChannelMembersSection';
 import { apiClient } from '@/lib/api-client';
 import type { Channel } from '@/types';
 import type { AuditLogEntry, AuditLogPage } from '@/services/channelService';
@@ -40,7 +41,13 @@ const NOTIF_LABELS: Record<NotifLevel, string> = {
   NONE: 'Muted',
 };
 
-function ChannelNotificationsSection({ channel, serverId }: { channel: Channel; serverId: string }) {
+function ChannelNotificationsSection({
+  channel,
+  serverId,
+}: {
+  channel: Channel;
+  serverId: string;
+}) {
   const [level, setLevel] = useState<NotifLevel>('MENTIONS');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -49,7 +56,7 @@ function ChannelNotificationsSection({ channel, serverId }: { channel: Channel; 
   useEffect(() => {
     apiClient
       .trpcQuery<{ level: NotifLevel }[]>('notification.getPreferences')
-      .then((prefs) => {
+      .then(prefs => {
         const pref = prefs.find(
           (p: { channelId?: string | null; level: NotifLevel }) => p.channelId === channel.id,
         );
@@ -86,11 +93,11 @@ function ChannelNotificationsSection({ channel, serverId }: { channel: Channel; 
       <div className='flex items-center gap-3'>
         <select
           value={level}
-          onChange={(e) => setLevel(e.target.value as NotifLevel)}
+          onChange={e => setLevel(e.target.value as NotifLevel)}
           disabled={saving}
           className='rounded bg-[#1e1f22] px-3 py-1.5 text-sm text-gray-200 border border-[#3d4148] focus:outline-none focus:border-indigo-500 disabled:opacity-50'
         >
-          {(Object.keys(NOTIF_LABELS) as NotifLevel[]).map((l) => (
+          {(Object.keys(NOTIF_LABELS) as NotifLevel[]).map(l => (
             <option key={l} value={l}>
               {NOTIF_LABELS[l]}
             </option>
@@ -109,12 +116,20 @@ function ChannelNotificationsSection({ channel, serverId }: { channel: Channel; 
   );
 }
 
-type Section = 'overview' | 'permissions' | 'visibility' | 'seo' | 'notifications' | 'danger';
+type Section =
+  | 'overview'
+  | 'permissions'
+  | 'visibility'
+  | 'members'
+  | 'seo'
+  | 'notifications'
+  | 'danger';
 
 const SECTIONS: { id: Section; label: string; danger?: boolean }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'permissions', label: 'Permissions' },
   { id: 'visibility', label: 'Visibility' },
+  { id: 'members', label: 'Members' },
   { id: 'seo', label: 'SEO Preview' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'danger', label: 'Delete Channel', danger: true },
@@ -717,6 +732,9 @@ export function ChannelSettingsPage({
   const [displayName, setDisplayName] = useState(channel.name);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  const isSeoAllowed = channel.visibility === ChannelVisibility.PUBLIC_INDEXABLE;
+  const visibleSections = SECTIONS.filter(s => s.id !== 'seo' || isSeoAllowed);
+
   // Render-phase derived-state reset: keep sidebar heading and back-button text
   // in sync when channel prop changes without unmounting this component.
   const [prevChannelId, setPrevChannelId] = useState(channel.id);
@@ -726,6 +744,10 @@ export function ChannelSettingsPage({
     setActiveSection('overview');
     setIsSidebarOpen(false);
   }
+
+  // Derive the visible section without a side effect: if SEO is no longer allowed
+  // (e.g. visibility changed while the tab was open), fall back to overview.
+  const effectiveSection = activeSection === 'seo' && !isSeoAllowed ? 'overview' : activeSection;
 
   const backHref = `/channels/${serverSlug}/${channel.slug}`;
 
@@ -760,7 +782,7 @@ export function ChannelSettingsPage({
 
         {/* Nav items */}
         <nav aria-label='Settings sections'>
-          {SECTIONS.map(({ id, label, danger }) => (
+          {visibleSections.map(({ id, label, danger }) => (
             <button
               key={id}
               type='button'
@@ -768,14 +790,14 @@ export function ChannelSettingsPage({
                 setActiveSection(id);
                 setIsSidebarOpen(false);
               }}
-              aria-current={activeSection === id ? 'page' : undefined}
+              aria-current={effectiveSection === id ? 'page' : undefined}
               className={cn(
                 'w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm transition-colors',
                 danger
-                  ? activeSection === id
+                  ? effectiveSection === id
                     ? cn(BG.active, 'font-medium text-red-400')
                     : 'text-red-400/80 hover:bg-[#393c43] hover:text-red-400'
-                  : activeSection === id
+                  : effectiveSection === id
                     ? cn(BG.active, 'font-medium text-white')
                     : 'text-gray-400 hover:bg-[#393c43] hover:text-gray-200',
               )}
@@ -837,21 +859,24 @@ export function ChannelSettingsPage({
 
         {/* Section content */}
         <div className='px-4 py-6 sm:px-10 sm:py-8'>
-          {activeSection === 'overview' && (
+          {effectiveSection === 'overview' && (
             <OverviewSection channel={channel} serverSlug={serverSlug} onSave={setDisplayName} />
           )}
-          {activeSection === 'permissions' && <PermissionsSection />}
-          {activeSection === 'visibility' && (
+          {effectiveSection === 'permissions' && <PermissionsSection />}
+          {effectiveSection === 'visibility' && (
             <VisibilitySection channel={channel} serverSlug={serverSlug} disabled={false} />
           )}
-          {activeSection === 'seo' && (
+          {effectiveSection === 'members' && (
+            <ChannelMembersSection channel={channel} serverSlug={serverSlug} />
+          )}
+          {effectiveSection === 'seo' && (
             <SeoPreviewSection
               serverSlug={serverSlug}
               channelSlug={channel.slug}
               canManageSeo={canManageSeo}
             />
           )}
-          {activeSection === 'notifications' && (
+          {effectiveSection === 'notifications' && (
             <ChannelNotificationsSection channel={channel} serverId={channel.serverId} />
           )}
           {activeSection === 'danger' && (

@@ -31,6 +31,10 @@ import { apiClient, getAccessToken } from '@/lib/api-client';
 import { createFrontendLogger } from '@/lib/frontend-logger';
 import { useToast } from '@/hooks/useToast';
 import { getApiBaseUrl } from '@/lib/runtime-config';
+import {
+  getStoredAudioInputDeviceId,
+  getStoredAudioOutputDeviceId,
+} from '@/hooks/useAudioDevices';
 
 const logger = createFrontendLogger({ component: 'voice-context' });
 
@@ -95,6 +99,17 @@ export function useVoiceOptional(): VoiceContextValue | null {
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
+/**
+ * Imperative handle populated by VoiceProvider so HarmonyShell can forward
+ * voice SSE events (from useServerEvents) into channelParticipants state without
+ * prop-drilling callbacks through the entire component tree.
+ */
+export interface VoiceExternalActions {
+  notifyUserJoined: (channelId: string, userId: string) => void;
+  notifyUserLeft: (channelId: string, userId: string) => void;
+  notifyStateChanged: (channelId: string, userId: string, muted: boolean, deafened: boolean) => void;
+}
+
 interface VoiceProviderProps {
   children: ReactNode;
   /** The current server's UUID — used to scope getParticipants fetches. */
@@ -107,9 +122,15 @@ interface VoiceProviderProps {
    * room.localParticipant.identity is not yet available.
    */
   currentUserId?: string;
+  /**
+   * Optional ref populated by the provider with imperative methods that
+   * update channelParticipants from SSE voice events (userJoined/Left/stateChanged).
+   * Pass a ref created with useRef<VoiceExternalActions | null>(null) from HarmonyShell.
+   */
+  externalActionsRef?: { current: VoiceExternalActions | null };
 }
 
-export function VoiceProvider({ children, serverId, voiceChannelIds, currentUserId }: VoiceProviderProps) {
+export function VoiceProvider({ children, serverId, voiceChannelIds, currentUserId, externalActionsRef }: VoiceProviderProps) {
   const { showToast } = useToast();
 
   const [connectedChannelId, setConnectedChannelId] = useState<string | null>(null);
@@ -173,6 +194,38 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
       ),
     );
   }, [serverId, voiceChannelIdsKey]);
+
+  // Populate the external actions ref so HarmonyShell can forward SSE voice events
+  // into channelParticipants state without prop-drilling.
+  useEffect(() => {
+    if (!externalActionsRef) return;
+    externalActionsRef.current = {
+      notifyUserJoined: (channelId, userId) => {
+        setChannelParticipants(prev => {
+          const existing = prev[channelId] ?? [];
+          if (existing.some(p => p.userId === userId)) return prev;
+          return { ...prev, [channelId]: [...existing, { userId, muted: false, deafened: false }] };
+        });
+      },
+      notifyUserLeft: (channelId, userId) => {
+        setChannelParticipants(prev => ({
+          ...prev,
+          [channelId]: (prev[channelId] ?? []).filter(p => p.userId !== userId),
+        }));
+      },
+      notifyStateChanged: (channelId, userId, muted, deafened) => {
+        setChannelParticipants(prev => ({
+          ...prev,
+          [channelId]: (prev[channelId] ?? []).map(p =>
+            p.userId === userId ? { ...p, muted, deafened } : p,
+          ),
+        }));
+      },
+    };
+    return () => {
+      externalActionsRef.current = null;
+    };
+  }, [externalActionsRef]);
 
   const resetVoiceState = useCallback(() => {
     // Detach all remote audio elements before clearing other state.
@@ -254,6 +307,30 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
     }
   }, [resetVoiceState]);
 
+  // Applies the user's stored output device to an audio element when the browser supports setSinkId.
+  // This is called only at track-attach time (initial join + participant connect events).
+  // Already-attached <audio> elements are NOT re-routed if the user changes their output device
+  // while already in a call — they need to rejoin the channel for the change to take effect.
+  function applySinkId(el: HTMLAudioElement) {
+    const outputDeviceId = getStoredAudioOutputDeviceId();
+    if (
+      outputDeviceId &&
+      outputDeviceId !== 'default' &&
+      'setSinkId' in el
+    ) {
+      (el as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> })
+        .setSinkId(outputDeviceId)
+        .catch((err: unknown) => {
+          logger.warn('Failed to set audio output device', {
+            feature: 'voice',
+            event: 'set_sink_id_failed',
+            operation: 'setSinkId',
+            error: err,
+          });
+        });
+    }
+  }
+
   const joinChannel = useCallback(
     async (channelId: string, serverId: string, channelName: string) => {
       // Already connected to the same channel — no-op.
@@ -290,12 +367,39 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
 
         // Dynamic import keeps the Twilio SDK out of SSR.
         const TwilioVideo = await import('twilio-video');
-        const room = await TwilioVideo.connect(token, {
-          name: channelId,
-          audio: true,
-          video: false,
-          dominantSpeaker: true,
-        });
+        const inputDeviceId = getStoredAudioInputDeviceId();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let room: any;
+        try {
+          room = await TwilioVideo.connect(token, {
+            name: channelId,
+            audio:
+              inputDeviceId && inputDeviceId !== 'default'
+                ? { deviceId: { exact: inputDeviceId } }
+                : true,
+            video: false,
+            dominantSpeaker: true,
+          });
+        } catch (connectErr) {
+          // Stale stored device ID — clear it and retry with the system default so the
+          // join succeeds rather than aborting (satisfies AC: graceful fallback).
+          if (
+            connectErr instanceof DOMException &&
+            (connectErr.name === 'OverconstrainedError' || connectErr.name === 'NotFoundError') &&
+            inputDeviceId &&
+            inputDeviceId !== 'default'
+          ) {
+            localStorage.removeItem('harmony_audio_input_device_id');
+            room = await TwilioVideo.connect(token, {
+              name: channelId,
+              audio: true,
+              video: false,
+              dominantSpeaker: true,
+            });
+          } else {
+            throw connectErr;
+          }
+        }
         roomRef.current = room;
 
         // Store local identity so setMuted/setDeafened can update the participant entry.
@@ -381,6 +485,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
           participant.audioTracks.forEach((pub: any) => {
             if (pub.track) {
               const el: HTMLAudioElement = pub.track.attach();
+              applySinkId(el);
               document.body.appendChild(el);
               const existing = remoteAudioTracksRef.current.get(participant.identity) ?? [];
               remoteAudioTracksRef.current.set(participant.identity, [...existing, pub.track]);
@@ -418,6 +523,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
           participant.on('trackSubscribed', (track: any) => {
             if (track.kind === 'audio') {
               const el: HTMLAudioElement = track.attach();
+              applySinkId(el);
               document.body.appendChild(el);
               const existing = remoteAudioTracksRef.current.get(participant.identity) ?? [];
               remoteAudioTracksRef.current.set(participant.identity, [...existing, track]);
@@ -497,17 +603,18 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
           error: err,
         });
         // Distinguish getUserMedia device errors from Twilio server errors for actionable toasts.
+        const isPermissionError =
+          err instanceof DOMException && err.name === 'NotAllowedError';
         const isDeviceError =
           err instanceof DOMException &&
           (err.name === 'NotFoundError' ||
             err.name === 'NotReadableError' ||
-            err.name === 'OverconstrainedError' ||
-            err.name === 'NotAllowedError');
-        const toastMessage = isDeviceError
-          ? err instanceof DOMException && err.name === 'NotAllowedError'
-            ? 'Microphone access denied. Click the lock icon in your address bar and allow microphone permission, then try again.'
-            : 'Microphone not found. Check System Settings → Privacy & Security → Microphone and grant access to your browser.'
-          : 'Could not connect to voice channel. Please try again.';
+            err.name === 'OverconstrainedError');
+        const toastMessage = isPermissionError
+          ? 'Microphone access denied. Click the lock icon in your address bar and allow microphone permission, then try again.'
+          : isDeviceError
+            ? 'Microphone unavailable. Switching to system default — please try joining again.'
+            : 'Could not connect to voice channel. Please try again.';
         showToast({ message: toastMessage, type: 'error' });
         // If voice.join succeeded (refs were written) but Twilio connect failed,
         // notify the backend so Redis state is not left stale.

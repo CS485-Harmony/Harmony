@@ -50,7 +50,7 @@ beforeAll(async () => {
   channelId = channel.id;
 
   await prisma.serverMember.create({
-    data: { userId: authorId, serverId, role: 'MEMBER' },
+    data: { userId: authorId, serverId, role: 'ADMIN' },
   });
 });
 
@@ -175,7 +175,7 @@ describe('messageService.getMessages', () => {
   });
 
   it('returns messages with author snapshots', async () => {
-    const result = await messageService.getMessages({ serverId, channelId: paginationChannelId });
+    const result = await messageService.getMessages({ serverId, channelId: paginationChannelId, userId: authorId });
     expect(Array.isArray(result.messages)).toBe(true);
     expect(result.messages.length).toBeGreaterThanOrEqual(1);
     expect(result.messages[0].author).toHaveProperty('username');
@@ -186,6 +186,7 @@ describe('messageService.getMessages', () => {
     const result = await messageService.getMessages({
       serverId,
       channelId: paginationChannelId,
+      userId: authorId,
       limit: 3,
     });
     expect(result.messages.length).toBeLessThanOrEqual(3);
@@ -195,6 +196,7 @@ describe('messageService.getMessages', () => {
     const page1 = await messageService.getMessages({
       serverId,
       channelId: paginationChannelId,
+      userId: authorId,
       limit: 2,
     });
     expect(page1.messages.length).toBe(2);
@@ -204,6 +206,7 @@ describe('messageService.getMessages', () => {
     const page2 = await messageService.getMessages({
       serverId,
       channelId: paginationChannelId,
+      userId: authorId,
       cursor: page1.nextCursor!,
     });
     const page1Ids = new Set(page1.messages.map((m) => m.id));
@@ -219,7 +222,7 @@ describe('messageService.getMessages', () => {
     });
     await messageService.deleteMessage({ messageId: msg.id, actorId: authorId, serverId });
 
-    const result = await messageService.getMessages({ serverId, channelId: paginationChannelId });
+    const result = await messageService.getMessages({ serverId, channelId: paginationChannelId, userId: authorId });
     const ids = result.messages.map((m) => m.id);
     expect(ids).not.toContain(msg.id);
   });
@@ -345,23 +348,23 @@ describe('messageService.pinMessage / unpinMessage', () => {
   });
 
   it('pins a message and sets pinnedAt', async () => {
-    const pinned = await messageService.pinMessage(messageId, serverId);
+    const pinned = await messageService.pinMessage(messageId, serverId, authorId);
     expect(pinned.pinned).toBe(true);
     expect(pinned.pinnedAt).toBeTruthy();
   });
 
   it('throws CONFLICT when trying to pin an already-pinned message', async () => {
-    await expect(messageService.pinMessage(messageId, serverId)).rejects.toThrow(TRPCError);
+    await expect(messageService.pinMessage(messageId, serverId, authorId)).rejects.toThrow(TRPCError);
   });
 
   it('unpins a message and clears pinnedAt', async () => {
-    const unpinned = await messageService.unpinMessage(messageId, serverId);
+    const unpinned = await messageService.unpinMessage(messageId, serverId, authorId);
     expect(unpinned.pinned).toBe(false);
     expect(unpinned.pinnedAt).toBeNull();
   });
 
   it('throws CONFLICT when trying to unpin a message that is not pinned', async () => {
-    await expect(messageService.unpinMessage(messageId, serverId)).rejects.toThrow(TRPCError);
+    await expect(messageService.unpinMessage(messageId, serverId, authorId)).rejects.toThrow(TRPCError);
   });
 
   it('throws NOT_FOUND when messageId does not belong to serverId', async () => {
@@ -370,7 +373,7 @@ describe('messageService.pinMessage / unpinMessage', () => {
     });
 
     await expect(
-      messageService.pinMessage(messageId, otherServer.id),
+      messageService.pinMessage(messageId, otherServer.id, authorId),
     ).rejects.toThrow(TRPCError);
 
     await prisma.server.delete({ where: { id: otherServer.id } }).catch(() => {});
@@ -400,15 +403,92 @@ describe('messageService.getPinnedMessages', () => {
       content: 'pinned 2',
     });
 
-    await messageService.pinMessage(msg1.id, serverId);
-    await messageService.pinMessage(msg3.id, serverId);
+    await messageService.pinMessage(msg1.id, serverId, authorId);
+    await messageService.pinMessage(msg3.id, serverId, authorId);
 
-    const pinned = await messageService.getPinnedMessages(channelId, serverId);
+    const pinned = await messageService.getPinnedMessages(channelId, serverId, authorId);
     const pinnedIds = pinned.map((m) => m.id);
 
     expect(pinnedIds).toContain(msg1.id);
     expect(pinnedIds).toContain(msg3.id);
     expect(pinnedIds).not.toContain(msg2.id);
     expect(pinned.every((m) => m.pinned)).toBe(true);
+  });
+});
+
+// ─── Private-channel access enforcement ──────────────────────────────────────
+
+describe('private-channel access enforcement (getPinnedMessages / pinMessage / unpinMessage)', () => {
+  let nonMemberUserId: string;
+  let explicitMemberUserId: string;
+  let pinnableMessageId: string;
+
+  beforeAll(async () => {
+    const ts = Date.now();
+
+    const nonMember = await prisma.user.create({
+      data: {
+        email: `priv-nonmember-${ts}@example.com`,
+        username: `priv_nonmember_${ts}`,
+        passwordHash: await bcrypt.hash('password', 10),
+        displayName: 'Non Member',
+      },
+    });
+    nonMemberUserId = nonMember.id;
+    await prisma.serverMember.create({ data: { userId: nonMemberUserId, serverId, role: 'MEMBER' } });
+
+    const explicitMember = await prisma.user.create({
+      data: {
+        email: `priv-member-${ts}@example.com`,
+        username: `priv_member_${ts}`,
+        passwordHash: await bcrypt.hash('password', 10),
+        displayName: 'Explicit Member',
+      },
+    });
+    explicitMemberUserId = explicitMember.id;
+    await prisma.serverMember.create({ data: { userId: explicitMemberUserId, serverId, role: 'MEMBER' } });
+    await prisma.channelMember.create({ data: { userId: explicitMemberUserId, channelId } });
+
+    // Send a message as admin to pin/unpin in tests
+    const msg = await messageService.sendMessage({ serverId, channelId, authorId, content: 'private pin target' });
+    pinnableMessageId = msg.id;
+  });
+
+  afterAll(async () => {
+    await prisma.user.delete({ where: { id: nonMemberUserId } }).catch(() => {});
+    await prisma.user.delete({ where: { id: explicitMemberUserId } }).catch(() => {});
+  });
+
+  it('getPinnedMessages: throws FORBIDDEN for MEMBER without channel membership', async () => {
+    await expect(
+      messageService.getPinnedMessages(channelId, serverId, nonMemberUserId),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('getPinnedMessages: succeeds for MEMBER with explicit channel membership', async () => {
+    const result = await messageService.getPinnedMessages(channelId, serverId, explicitMemberUserId);
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it('pinMessage: throws FORBIDDEN for MEMBER without channel membership', async () => {
+    await expect(
+      messageService.pinMessage(pinnableMessageId, serverId, nonMemberUserId),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('pinMessage: succeeds for MEMBER with explicit channel membership', async () => {
+    const result = await messageService.pinMessage(pinnableMessageId, serverId, explicitMemberUserId);
+    expect(result.pinned).toBe(true);
+  });
+
+  it('unpinMessage: throws FORBIDDEN for MEMBER without channel membership', async () => {
+    await expect(
+      messageService.unpinMessage(pinnableMessageId, serverId, nonMemberUserId),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('unpinMessage: succeeds for MEMBER with explicit channel membership', async () => {
+    const result = await messageService.unpinMessage(pinnableMessageId, serverId, explicitMemberUserId);
+    expect(result.pinned).toBe(false);
   });
 });

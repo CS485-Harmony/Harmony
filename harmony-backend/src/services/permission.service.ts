@@ -17,7 +17,8 @@ export type ChannelAction =
   | 'channel:create'
   | 'channel:update'
   | 'channel:delete'
-  | 'channel:manage_visibility';
+  | 'channel:manage_visibility'
+  | 'channel:manage_members';
 
 export type MessageAction =
   | 'message:read'
@@ -59,6 +60,7 @@ const ADMIN_PERMISSIONS = new Set<Action>([
   'channel:update',
   'channel:delete',
   'channel:manage_visibility',
+  'channel:manage_members',
   'settings:read',
   'settings:update',
   'server:update',

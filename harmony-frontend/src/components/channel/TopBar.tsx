@@ -170,6 +170,12 @@ export interface TopBarProps {
   disableMessageActions?: boolean;
   /** Authenticated user ID — enables the notification bell when present. */
   userId?: string;
+  /** Called when unread mention counts change per server — forwarded to NotificationBell. */
+  onUnreadCountsByServerChange?: (counts: Record<string, number>) => void;
+  /** Called when unread mention counts change per channel — forwarded to NotificationBell. */
+  onUnreadCountsByChannelChange?: (counts: Record<string, number>) => void;
+  /** ID of the channel currently being viewed — used to auto-mark mentions as read. */
+  currentChannelId?: string;
 }
 
 export function TopBar({
@@ -184,6 +190,9 @@ export function TopBar({
   onPinsOpen,
   disableMessageActions = false,
   userId,
+  onUnreadCountsByServerChange,
+  onUnreadCountsByChannelChange,
+  currentChannelId,
 }: TopBarProps) {
   const settingsHref = `/settings/${serverSlug}/${channel.slug}`;
 
@@ -245,7 +254,7 @@ export function TopBar({
         </IconButton>
 
         {/* Notification bell — authenticated users only */}
-        <NotificationBell userId={userId} />
+        <NotificationBell userId={userId} onUnreadCountsByServerChange={onUnreadCountsByServerChange} onUnreadCountsByChannelChange={onUnreadCountsByChannelChange} currentChannelId={currentChannelId} />
 
         {/* Settings gear — admin/owner only */}
         {isAdmin && (

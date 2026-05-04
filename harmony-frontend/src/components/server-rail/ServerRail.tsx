@@ -21,11 +21,13 @@ function ServerPill({
   defaultChannelSlug,
   isActive,
   basePath,
+  mentionCount = 0,
 }: {
   server: Server;
   defaultChannelSlug: string;
   isActive: boolean;
   basePath: string;
+  mentionCount?: number;
 }) {
   const [iconError, setIconError] = useState(false);
   // Render-phase derived-state reset: when the icon URL changes (including A→B→A),
@@ -80,6 +82,11 @@ function ServerPill({
           <span>{initials}</span>
         )}
       </div>
+      {mentionCount > 0 && (
+        <span className='absolute -bottom-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-0.5 text-[10px] font-bold text-white'>
+          {mentionCount > 99 ? '99+' : mentionCount}
+        </span>
+      )}
     </Link>
   );
 }
@@ -94,10 +101,12 @@ export function ServerRail({
   onAddServer,
   onBrowseServers,
   isMobileVisible = false,
+  mentionCountByServer = {},
 }: {
   servers: Server[];
   /** All channels across every server — used to derive the default channel slug per server. */
   allChannels: Channel[];
+  mentionCountByServer?: Record<string, number>;
   currentServerId: string;
   basePath: string;
   onAddServer?: () => void;
@@ -168,6 +177,7 @@ export function ServerRail({
             defaultChannelSlug={defaultChannelSlug}
             isActive={server.id === currentServerId}
             basePath={basePath}
+            mentionCount={mentionCountByServer[server.id] ?? 0}
           />
         );
       })}

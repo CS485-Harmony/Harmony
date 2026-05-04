@@ -9,6 +9,13 @@ const NOTIFICATION_INCLUDE = {
       author: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
     },
   },
+  channel: {
+    select: {
+      slug: true,
+      name: true,
+      server: { select: { slug: true, name: true } },
+    },
+  },
 } as const;
 
 export const notificationService = {
@@ -39,6 +46,14 @@ export const notificationService = {
   async markAllAsRead(userId: string) {
     return prisma.notification.updateMany({
       where: { userId, read: false },
+      data: { read: true },
+    });
+  },
+
+  /** Mark all unread notifications in a channel as read for a user. */
+  async markChannelAsRead(channelId: string, userId: string) {
+    return prisma.notification.updateMany({
+      where: { channelId, userId, read: false },
       data: { read: true },
     });
   },

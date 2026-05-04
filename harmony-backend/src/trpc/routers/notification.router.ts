@@ -50,6 +50,13 @@ export const notificationRouter = router({
     notificationService.markAllAsRead(ctx.userId),
   ),
 
+  /** Mark all unread notifications in a channel as read. */
+  markChannelAsRead: authedProcedure
+    .input(z.object({ channelId: z.string().uuid() }))
+    .mutation(({ ctx, input }) =>
+      notificationService.markChannelAsRead(input.channelId, ctx.userId),
+    ),
+
   // ─── Web Push subscriptions ─────────────────────────────────────────────────
 
   /** Return the VAPID public key so the frontend can subscribe. */
