@@ -196,8 +196,6 @@ export function ChannelSidebar({
   // Precompute userId → User map to avoid O(members × participants) lookups on every render.
   const memberMap = useMemo(() => new Map(members?.map(m => [m.id, m]) ?? []), [members]);
 
-  const isAdmin =
-    isAuthenticated && (currentUser.isSystemAdmin || currentUser.id === server.ownerId);
   const hasServerSettingsAccess =
     isAuthenticated &&
     (currentUser.isSystemAdmin ||
@@ -336,7 +334,9 @@ export function ChannelSidebar({
                 isCollapsed={textCollapsed}
                 onToggle={() => setTextCollapsed(v => !v)}
                 onAdd={
-                  isAdmin && onCreateChannel ? () => onCreateChannel(ChannelType.TEXT) : undefined
+                  hasServerSettingsAccess && onCreateChannel
+                    ? () => onCreateChannel(ChannelType.TEXT)
+                    : undefined
                 }
                 addLabel='Add text channel'
               />
@@ -348,9 +348,7 @@ export function ChannelSidebar({
                     const mentionCount = mentionCountByChannel[channel.id] ?? 0;
                     return (
                       <li key={channel.id}>
-                        <Link
-                          href={`${basePath}/${server.slug}/${channel.slug}`}
-                          aria-current={isActive ? 'page' : undefined}
+                        <div
                           className={cn(
                             'group flex items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
                             isActive
@@ -358,23 +356,51 @@ export function ChannelSidebar({
                               : 'text-gray-400 hover:bg-[#393c43] hover:text-gray-200',
                           )}
                         >
-                          <ChannelIcon type={channel.type} />
-                          <span className='flex-1 truncate'>{channel.name}</span>
-                          {mentionCount > 0 && (
-                            <span className='flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-0.5 text-[10px] font-bold text-white'>
-                              {mentionCount > 99 ? '99+' : mentionCount}
-                            </span>
-                          )}
-                          {badge && (
-                            <span
-                              className='text-xs opacity-60'
-                              role='img'
-                              aria-label={VISIBILITY_LABEL[channel.visibility]}
+                          <Link
+                            href={`${basePath}/${server.slug}/${channel.slug}`}
+                            aria-current={isActive ? 'page' : undefined}
+                            className='flex flex-1 min-w-0 items-center gap-1.5'
+                          >
+                            <ChannelIcon type={channel.type} />
+                            <span className='flex-1 truncate'>{channel.name}</span>
+                            {mentionCount > 0 && (
+                              <span className='flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-0.5 text-[10px] font-bold text-white'>
+                                {mentionCount > 99 ? '99+' : mentionCount}
+                              </span>
+                            )}
+                            {badge && (
+                              <span
+                                className='text-xs opacity-60'
+                                role='img'
+                                aria-label={VISIBILITY_LABEL[channel.visibility]}
+                              >
+                                {badge}
+                              </span>
+                            )}
+                          </Link>
+                          {hasServerSettingsAccess && (
+                            <Link
+                              href={`/settings/${server.slug}/${channel.slug}`}
+                              title='Channel settings'
+                              aria-label={`Settings for ${channel.name}`}
+                              className='flex-shrink-0 rounded p-0.5 text-gray-500 opacity-0 transition-opacity group-hover:opacity-100 hover:text-gray-200'
                             >
-                              {badge}
-                            </span>
+                              <svg
+                                className='h-3.5 w-3.5'
+                                viewBox='0 0 20 20'
+                                fill='currentColor'
+                                aria-hidden='true'
+                                focusable='false'
+                              >
+                                <path
+                                  fillRule='evenodd'
+                                  d='M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z'
+                                  clipRule='evenodd'
+                                />
+                              </svg>
+                            </Link>
                           )}
-                        </Link>
+                        </div>
                       </li>
                     );
                   })}
@@ -390,7 +416,9 @@ export function ChannelSidebar({
                 isCollapsed={voiceCollapsed}
                 onToggle={() => setVoiceCollapsed(v => !v)}
                 onAdd={
-                  isAdmin && onCreateChannel ? () => onCreateChannel(ChannelType.VOICE) : undefined
+                  hasServerSettingsAccess && onCreateChannel
+                    ? () => onCreateChannel(ChannelType.VOICE)
+                    : undefined
                 }
                 addLabel='Add voice channel'
               />
@@ -398,24 +426,56 @@ export function ChannelSidebar({
                 <ul className='list-none'>
                   {voiceChannels.map(channel => (
                     <li key={channel.id}>
-                      <button
-                        type='button'
-                        disabled={!isAuthenticated || joining}
-                        aria-disabled={!isAuthenticated || joining}
-                        onClick={() => {
-                          if (joinChannel) void joinChannel(channel.id, serverId, channel.name);
-                        }}
+                      <div
                         className={cn(
-                          'group flex w-full items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
+                          'group flex items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
                           connectedChannelId === channel.id
-                            ? cn(BG_ACTIVE, 'text-white')
-                            : 'text-gray-400 hover:bg-[#393c43] hover:text-gray-200',
-                          !isAuthenticated && 'cursor-default opacity-60',
+                            ? cn(BG_ACTIVE, 'hover:bg-[#3d4148]')
+                            : 'hover:bg-[#393c43]',
                         )}
                       >
-                        <ChannelIcon type={channel.type} />
-                        <span className='flex-1 truncate text-left'>{channel.name}</span>
-                      </button>
+                        <button
+                          type='button'
+                          disabled={!isAuthenticated || joining}
+                          aria-disabled={!isAuthenticated || joining}
+                          onClick={() => {
+                            if (joinChannel) void joinChannel(channel.id, serverId, channel.name);
+                          }}
+                          className={cn(
+                            'flex flex-1 min-w-0 items-center gap-1.5',
+                            connectedChannelId === channel.id
+                              ? 'text-white'
+                              : 'text-gray-400 group-hover:text-gray-200',
+                            !isAuthenticated && 'cursor-default opacity-60',
+                          )}
+                        >
+                          <ChannelIcon type={channel.type} />
+                          <span className='flex-1 truncate text-left'>{channel.name}</span>
+                        </button>
+                        {hasServerSettingsAccess && (
+                          <Link
+                            href={`/settings/${server.slug}/${channel.slug}`}
+                            title='Channel settings'
+                            aria-label={`Settings for ${channel.name}`}
+                            className='flex-shrink-0 rounded p-0.5 text-gray-500 opacity-0 transition-opacity group-hover:opacity-100 hover:text-gray-200'
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <svg
+                              className='h-3.5 w-3.5'
+                              viewBox='0 0 20 20'
+                              fill='currentColor'
+                              aria-hidden='true'
+                              focusable='false'
+                            >
+                              <path
+                                fillRule='evenodd'
+                                d='M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z'
+                                clipRule='evenodd'
+                              />
+                            </svg>
+                          </Link>
+                        )}
+                      </div>
                       {/* Participant list for this voice channel — from all-channels map */}
                       {(() => {
                         const channelParticipants = allChannelParticipants[channel.id] ?? [];

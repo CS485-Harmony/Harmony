@@ -254,7 +254,7 @@ export async function fetchSseTicket(apiBaseUrl: string, accessToken: string): P
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`Failed to fetch SSE ticket: ${res.status}`);
-  const data = await res.json() as { ticket: string };
+  const data = (await res.json()) as { ticket: string };
   return data.ticket;
 }
 

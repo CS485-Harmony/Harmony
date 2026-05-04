@@ -67,6 +67,14 @@ const baseChannel = {
   createdAt: new Date().toISOString(),
 };
 
+const voiceChannel = {
+  ...baseChannel,
+  id: '33333333-3333-4333-8333-333333333333',
+  name: 'Voice',
+  slug: 'voice',
+  type: ChannelType.VOICE,
+};
+
 const baseUser: User = {
   id: 'member-1',
   username: 'member',
@@ -75,11 +83,18 @@ const baseUser: User = {
   isSystemAdmin: false,
 };
 
-function renderSidebar(userOverrides: Partial<typeof baseUser> = {}, isAuthenticated = true) {
+function renderSidebar(
+  userOverrides: Partial<typeof baseUser> = {},
+  isAuthenticated = true,
+  options: {
+    channels?: (typeof baseChannel)[];
+    onCreateChannel?: (defaultType: ChannelType) => void;
+  } = {},
+) {
   return render(
     <ChannelSidebar
       server={baseServer}
-      channels={[baseChannel]}
+      channels={options.channels ?? [baseChannel]}
       currentChannelId={baseChannel.id}
       currentUser={{ ...baseUser, ...userOverrides }}
       isOpen
@@ -87,6 +102,7 @@ function renderSidebar(userOverrides: Partial<typeof baseUser> = {}, isAuthentic
       isAuthenticated={isAuthenticated}
       serverId={baseServer.id}
       members={[]}
+      onCreateChannel={options.onCreateChannel}
     />,
   );
 }
@@ -104,12 +120,43 @@ describe('ChannelSidebar server menu', () => {
     expect(screen.getByRole('menuitem', { name: /server settings/i })).toBeInTheDocument();
   });
 
+  it('shows channel management entrypoints for server admin users', () => {
+    const onCreateChannel = jest.fn();
+    renderSidebar({ role: 'admin' }, true, {
+      channels: [baseChannel, voiceChannel],
+      onCreateChannel,
+    });
+
+    expect(screen.getByRole('button', { name: /add text channel/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /add voice channel/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /settings for general/i })).toHaveAttribute(
+      'href',
+      '/settings/meee/general',
+    );
+    expect(screen.getByRole('link', { name: /settings for voice/i })).toHaveAttribute(
+      'href',
+      '/settings/meee/voice',
+    );
+  });
+
   it('hides server settings for non-admin users', () => {
     renderSidebar();
 
     fireEvent.click(screen.getByRole('button', { name: /open server menu/i }));
 
     expect(screen.queryByRole('menuitem', { name: /server settings/i })).not.toBeInTheDocument();
+  });
+
+  it('hides channel management entrypoints for non-admin users', () => {
+    renderSidebar({}, true, {
+      channels: [baseChannel, voiceChannel],
+      onCreateChannel: jest.fn(),
+    });
+
+    expect(screen.queryByRole('button', { name: /add text channel/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add voice channel/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /settings for general/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /settings for voice/i })).not.toBeInTheDocument();
   });
 
   it('shows leave flow and redirects after successful leave', async () => {
