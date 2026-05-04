@@ -29,6 +29,8 @@ export const CacheKeys = {
     `channel:msgs:${sanitizeKeySegment(id)}:page:${page}`,
   serverInfo: (id: string) => `server:${sanitizeKeySegment(id)}:info`,
   metaChannel: (id: string) => `meta:channel:${sanitizeKeySegment(id)}`,
+  metaChannelAdminPreviewFallback: (id: string) =>
+    `meta:channel:${sanitizeKeySegment(id)}:admin-preview-fallback`,
   analysisChannel: (id: string) => `analysis:channel:${sanitizeKeySegment(id)}`,
 } as const;
 
@@ -37,6 +39,7 @@ export const CacheTTL = {
   channelVisibility: 3600, // 1 hour
   channelMessages: 60, // 1 minute
   serverInfo: 300, // 5 minutes
+  metaChannelAdminPreviewFallback: 300, // 5 minutes
 } as const;
 
 export const cacheService = {
