@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useState, useEffect, useCallback, useMemo, useSyncExternalStore, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { TopBar } from '@/components/channel/TopBar';
 import { MembersSidebar } from '@/components/channel/MembersSidebar';
@@ -26,6 +26,7 @@ import { useServerListSync } from '@/hooks/useServerListSync';
 import { ChannelType, ChannelVisibility, UserStatus } from '@/types';
 import { useRouter } from 'next/navigation';
 import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
+import { getOlderMessagesAction } from '@/app/actions/getOlderMessages';
 import type { Server, Channel, Message, User } from '@/types';
 
 // ─── Discord colour tokens ────────────────────────────────────────────────────
@@ -64,6 +65,8 @@ export interface HarmonyShellProps {
   allChannels: Channel[];
   currentChannel: Channel;
   messages: Message[];
+  initialHasMore?: boolean;
+  initialNextCursor?: string;
   members: User[];
   /** Base path for navigation links. Use "/c" for public guest routes, "/channels" for authenticated routes. */
   basePath?: string;
@@ -78,6 +81,8 @@ export function HarmonyShell({
   allChannels,
   currentChannel,
   messages,
+  initialHasMore = false,
+  initialNextCursor,
   members,
   basePath = '/c',
   lockedMessagePane,
@@ -103,6 +108,12 @@ export function HarmonyShell({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   // Local message state so sent messages appear immediately without a page reload
   const [localMessages, setLocalMessages] = useState<Message[]>(messages);
+  const [hasMoreOlder, setHasMoreOlder] = useState(initialHasMore);
+  const [olderCursor, setOlderCursor] = useState<string | undefined>(initialNextCursor);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  // Synchronous mutex — set before any await so rapid scroll events can't dispatch
+  // duplicate fetches while React hasn't yet re-rendered with isLoadingOlder=true.
+  const isLoadingOlderRef = useRef(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   // Track previous channel so we can reset localMessages synchronously on channel
   // switch — avoids a one-render flash where old messages show under the new channel header.
@@ -110,6 +121,9 @@ export function HarmonyShell({
   if (prevChannelId !== currentChannel.id) {
     setPrevChannelId(currentChannel.id);
     setLocalMessages(messages);
+    setHasMoreOlder(initialHasMore);
+    setOlderCursor(initialNextCursor);
+    setIsLoadingOlder(false);
     setIsMenuOpen(false);
     setIsPinsOpen(false);
     setReplyingTo(null);
@@ -138,6 +152,12 @@ export function HarmonyShell({
     () => localChannels.filter(c => c.type === ChannelType.VOICE).map(c => c.id),
     [localChannels],
   );
+  // Reset the synchronous loading mutex when the channel changes. This can't live
+  // in the render-time block above (refs must not be written during render).
+  useEffect(() => {
+    isLoadingOlderRef.current = false;
+  }, [currentChannel.id]);
+
   // Track the channels prop reference so localChannels resets whenever the server
   // passes a fresh array (server navigation or revalidatePath refresh) — same
   // render-time derivation pattern used above for localMessages/prevChannelId.
@@ -244,6 +264,21 @@ export function HarmonyShell({
     setLocalMessages(prev => prev.filter(m => m.id !== messageId));
   }, []);
 
+  const handleLoadOlderMessages = useCallback(async () => {
+    if (!olderCursor || isLoadingOlderRef.current) return;
+    isLoadingOlderRef.current = true;
+    setIsLoadingOlder(true);
+    const result = await getOlderMessagesAction(currentChannel.id, currentServer.id, olderCursor);
+    isLoadingOlderRef.current = false;
+    setIsLoadingOlder(false);
+    if (!result.ok) return;
+    // Older messages come back newest-first from the cursor; reverse to chronological order
+    const olderSorted = [...result.messages].reverse();
+    setLocalMessages(prev => [...olderSorted, ...prev]);
+    setHasMoreOlder(result.hasMore);
+    setOlderCursor(result.nextCursor);
+  }, [olderCursor, currentChannel.id, currentServer.id]);
+
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
   }, []);
@@ -321,7 +356,10 @@ export function HarmonyShell({
           }
           return {
             ...m,
-            reactions: [...(m.reactions ?? []), { emoji: data.emoji, count: 1, userIds: [data.userId] }],
+            reactions: [
+              ...(m.reactions ?? []),
+              { emoji: data.emoji, count: 1, userIds: [data.userId] },
+            ],
           };
         }),
       );
@@ -339,13 +377,18 @@ export function HarmonyShell({
           if (!existing) return m;
           // Guard against duplicate SSE delivery
           if (!existing.userIds.includes(data.userId)) return m;
-          const updated = existing.count <= 1
-            ? (m.reactions ?? []).filter(r => r.emoji !== data.emoji)
-            : m.reactions!.map(r =>
-                r.emoji === data.emoji
-                  ? { ...r, count: r.count - 1, userIds: r.userIds.filter(id => id !== data.userId) }
-                  : r,
-              );
+          const updated =
+            existing.count <= 1
+              ? (m.reactions ?? []).filter(r => r.emoji !== data.emoji)
+              : m.reactions!.map(r =>
+                  r.emoji === data.emoji
+                    ? {
+                        ...r,
+                        count: r.count - 1,
+                        userIds: r.userIds.filter(id => id !== data.userId),
+                      }
+                    : r,
+                );
           return { ...m, reactions: updated };
         }),
       );
@@ -534,7 +577,11 @@ export function HarmonyShell({
   }, [isChannelLocked]);
 
   return (
-    <VoiceProvider serverId={currentServer.id} voiceChannelIds={voiceChannelIds} currentUserId={authUser?.id}>
+    <VoiceProvider
+      serverId={currentServer.id}
+      voiceChannelIds={voiceChannelIds}
+      currentUserId={authUser?.id}
+    >
       <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
         {/* Skip-to-content: visually hidden, appears on keyboard focus (WCAG 2.4.1) */}
         <a
@@ -617,9 +664,15 @@ export function HarmonyShell({
                     serverId={currentServer.id}
                     canPin={canPin}
                     canDeleteAny={canModerate}
+                    currentUsername={authUser?.username}
+                    channels={localChannels}
+                    serverSlug={currentServer.slug}
                     onReplyClick={handleReplyClick}
                     onPinToggle={handlePinToggle}
                     onDelete={handleDeleteMessage}
+                    hasMoreOlder={hasMoreOlder}
+                    isLoadingOlder={isLoadingOlder}
+                    onLoadOlderMessages={handleLoadOlderMessages}
                   />
                   <MessageInput
                     channelId={currentChannel.id}

@@ -75,12 +75,24 @@ interface MessageListProps {
   canPin?: boolean;
   /** When true, shows delete for messages the user doesn't own. Grant to MODERATOR+. */
   canDeleteAny?: boolean;
+  /** Authenticated user's username — forwarded to MessageItem for self-mention highlight. */
+  currentUsername?: string;
+  /** Channels in the current server — forwarded for #channel pill resolution. */
+  channels?: { slug: string; name: string }[];
+  /** Current server slug — forwarded for #channel pill hrefs. */
+  serverSlug?: string;
   /** Called when the user clicks Reply on a message. */
   onReplyClick?: (message: Message) => void;
   /** Called when the user clicks pin/unpin on a message. */
   onPinToggle?: (messageId: string, pinned: boolean) => void;
   /** Called after the user successfully deletes a message. */
   onDelete?: (messageId: string) => void;
+  /** Whether there are older messages to load via pagination. */
+  hasMoreOlder?: boolean;
+  /** Whether older messages are currently being fetched. */
+  isLoadingOlder?: boolean;
+  /** Called when the user requests loading older messages. */
+  onLoadOlderMessages?: () => void;
 }
 
 export function MessageList({
@@ -89,9 +101,15 @@ export function MessageList({
   serverId,
   canPin,
   canDeleteAny,
+  currentUsername,
+  channels,
+  serverSlug,
   onReplyClick,
   onPinToggle,
   onDelete,
+  hasMoreOlder,
+  isLoadingOlder,
+  onLoadOlderMessages,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -101,13 +119,26 @@ export function MessageList({
   // Track whether the initial mount scroll has happened so we jump instantly
   // to the bottom on load rather than smoothly scrolling from the top.
   const hasMountedRef = useRef(false);
+  // Saved scroll height before a prepend operation — restored in useLayoutEffect
+  // to prevent the viewport from jumping when older messages are added at the top.
+  const savedScrollHeightRef = useRef(0);
+
+  const triggerLoadOlder = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (el) savedScrollHeightRef.current = el.scrollHeight;
+    onLoadOlderMessages?.();
+  }, [onLoadOlderMessages]);
 
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     isNearBottomRef.current = distanceFromBottom <= 100;
-  }, []);
+    // Auto-load older messages when the user scrolls within 200px of the top
+    if (el.scrollTop <= 200 && hasMoreOlder && !isLoadingOlder) {
+      triggerLoadOlder();
+    }
+  }, [hasMoreOlder, isLoadingOlder, triggerLoadOlder]);
 
   // When any message content grows in height (images, videos, embeds loading),
   // re-anchor the scroll position to the bottom if the user was already there.
@@ -136,6 +167,11 @@ export function MessageList({
       hasMountedRef.current = true;
       const el = scrollContainerRef.current;
       if (el) el.scrollTop = el.scrollHeight;
+    } else if (savedScrollHeightRef.current > 0) {
+      // Older messages were prepended — restore scroll so the viewport doesn't jump
+      const el = scrollContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight - savedScrollHeightRef.current;
+      savedScrollHeightRef.current = 0;
     } else if (isNearBottomRef.current) {
       // New message while already near bottom: smooth scroll
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -154,6 +190,22 @@ export function MessageList({
       aria-live='polite'
       aria-relevant='additions'
     >
+      {/* Load older messages */}
+      {(hasMoreOlder || isLoadingOlder) && (
+        <div className='flex justify-center px-4 pb-2 pt-1'>
+          {isLoadingOlder ? (
+            <span className='text-xs text-gray-400'>Loading older messages…</span>
+          ) : (
+            <button
+              onClick={triggerLoadOlder}
+              className='rounded px-3 py-1 text-xs font-medium text-gray-300 hover:bg-[#40444b] hover:text-white'
+            >
+              Load older messages
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Channel welcome header */}
       <div className='px-4 pb-4'>
         <div className='flex h-16 w-16 items-center justify-center rounded-full bg-[#40444b]'>
@@ -194,6 +246,9 @@ export function MessageList({
                   serverId={serverId}
                   canPin={canPin}
                   canDeleteAny={canDeleteAny}
+                  currentUsername={currentUsername}
+                  channels={channels}
+                  serverSlug={serverSlug}
                   onReplyClick={onReplyClick}
                   onPinToggle={onPinToggle}
                   onDelete={onDelete}

@@ -9,6 +9,13 @@ const NOTIFICATION_INCLUDE = {
       author: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
     },
   },
+  channel: {
+    select: {
+      slug: true,
+      name: true,
+      server: { select: { slug: true, name: true } },
+    },
+  },
 } as const;
 
 export const notificationService = {

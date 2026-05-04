@@ -50,7 +50,7 @@ beforeAll(async () => {
   channelId = channel.id;
 
   await prisma.serverMember.create({
-    data: { userId: authorId, serverId, role: 'MEMBER' },
+    data: { userId: authorId, serverId, role: 'ADMIN' },
   });
 });
 
@@ -208,6 +208,7 @@ describe('messageService.getThreadMessages', () => {
       parentMessageId: parent.id,
       channelId,
       serverId,
+      userId: authorId,
     });
 
     expect(result.replies).toHaveLength(3);
@@ -224,6 +225,7 @@ describe('messageService.getThreadMessages', () => {
         parentMessageId: '00000000-0000-0000-0000-000000000000',
         channelId,
         serverId,
+        userId: authorId,
       }),
     ).rejects.toThrow(TRPCError);
   });
@@ -243,6 +245,7 @@ describe('messageService.getThreadMessages', () => {
         parentMessageId: parent.id,
         channelId,
         serverId,
+        userId: authorId,
       }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
@@ -268,6 +271,7 @@ describe('messageService.getThreadMessages', () => {
         parentMessageId: reply.id,
         channelId,
         serverId,
+        userId: authorId,
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
@@ -394,5 +398,92 @@ describe('deleteMessage cascade to replies', () => {
 
     expect(r1?.isDeleted).toBe(true);
     expect(r2?.isDeleted).toBe(true);
+  });
+});
+
+// ─── Private-channel access enforcement (createReply / getThreadMessages) ────
+
+describe('private-channel access enforcement (createReply / getThreadMessages)', () => {
+  let nonMemberUserId: string;
+  let explicitMemberUserId: string;
+  let parentMessageId: string;
+
+  beforeAll(async () => {
+    const ts = Date.now();
+
+    const nonMember = await prisma.user.create({
+      data: {
+        email: `reply-priv-nm-${ts}@example.com`,
+        username: `reply_priv_nm_${ts}`,
+        passwordHash: await bcrypt.hash('password', 10),
+        displayName: 'Reply Non Member',
+      },
+    });
+    nonMemberUserId = nonMember.id;
+    await prisma.serverMember.create({ data: { userId: nonMemberUserId, serverId, role: 'MEMBER' } });
+
+    const explicitMember = await prisma.user.create({
+      data: {
+        email: `reply-priv-m-${ts}@example.com`,
+        username: `reply_priv_m_${ts}`,
+        passwordHash: await bcrypt.hash('password', 10),
+        displayName: 'Reply Explicit Member',
+      },
+    });
+    explicitMemberUserId = explicitMember.id;
+    await prisma.serverMember.create({ data: { userId: explicitMemberUserId, serverId, role: 'MEMBER' } });
+    await prisma.channelMember.create({ data: { userId: explicitMemberUserId, channelId } });
+
+    const parent = await messageService.sendMessage({ serverId, channelId, authorId, content: 'private thread parent' });
+    parentMessageId = parent.id;
+  });
+
+  afterAll(async () => {
+    await prisma.user.delete({ where: { id: nonMemberUserId } }).catch(() => {});
+    await prisma.user.delete({ where: { id: explicitMemberUserId } }).catch(() => {});
+  });
+
+  it('createReply: throws FORBIDDEN for MEMBER without channel membership', async () => {
+    await expect(
+      messageService.createReply({
+        parentMessageId,
+        channelId,
+        serverId,
+        authorId: nonMemberUserId,
+        content: 'unauthorized reply',
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('createReply: succeeds for MEMBER with explicit channel membership', async () => {
+    const reply = await messageService.createReply({
+      parentMessageId,
+      channelId,
+      serverId,
+      authorId: explicitMemberUserId,
+      content: 'authorized reply',
+    });
+    expect(reply.parentMessageId).toBe(parentMessageId);
+  });
+
+  it('getThreadMessages: throws FORBIDDEN for MEMBER without channel membership', async () => {
+    await expect(
+      messageService.getThreadMessages({
+        parentMessageId,
+        channelId,
+        serverId,
+        userId: nonMemberUserId,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('getThreadMessages: succeeds for MEMBER with explicit channel membership', async () => {
+    const result = await messageService.getThreadMessages({
+      parentMessageId,
+      channelId,
+      serverId,
+      userId: explicitMemberUserId,
+    });
+    expect(Array.isArray(result.replies)).toBe(true);
   });
 });

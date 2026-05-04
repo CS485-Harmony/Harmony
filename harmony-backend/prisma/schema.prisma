@@ -78,11 +78,12 @@ model User {
 
   messages                Message[]
   reactions               MessageReaction[]
-  visibilityAuditLog      VisibilityAuditLog[]      @relation("AuditActor")
+  visibilityAuditLog      VisibilityAuditLog[]     @relation("AuditActor")
   refreshTokens           RefreshToken[]
-  ownedServers            Server[]                  @relation("ServerOwner")
+  ownedServers            Server[]                 @relation("ServerOwner")
   serverMemberships       ServerMember[]
-  createdInvites          ServerInvite[]            @relation("InviteCreator")
+  channelMemberships      ChannelMember[]
+  createdInvites          ServerInvite[]           @relation("InviteCreator")
   mentions                MessageMention[]
   notifications           Notification[]
   pushSubscriptions       PushSubscription[]
@@ -92,12 +93,12 @@ model User {
 }
 
 model RefreshToken {
-  id         String    @id @default(uuid()) @db.Uuid
-  tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
-  userId     String    @map("user_id") @db.Uuid
-  expiresAt  DateTime  @map("expires_at") @db.Timestamptz
-  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  id        String    @id @default(uuid()) @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(64)
+  userId    String    @map("user_id") @db.Uuid
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -116,9 +117,9 @@ model Server {
   ownerId     String   @map("owner_id") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-  owner    User      @relation("ServerOwner", fields: [ownerId], references: [id])
-  channels Channel[]
-  members  ServerMember[]
+  owner                   User                     @relation("ServerOwner", fields: [ownerId], references: [id])
+  channels                Channel[]
+  members                 ServerMember[]
   invites                 ServerInvite[]
   notificationPreferences NotificationPreference[]
 
@@ -129,10 +130,10 @@ model Server {
 }
 
 model ServerMember {
-  userId    String   @map("user_id") @db.Uuid
-  serverId  String   @map("server_id") @db.Uuid
-  role      RoleType @default(MEMBER)
-  joinedAt  DateTime @default(now()) @map("joined_at") @db.Timestamptz
+  userId   String   @map("user_id") @db.Uuid
+  serverId String   @map("server_id") @db.Uuid
+  role     RoleType @default(MEMBER)
+  joinedAt DateTime @default(now()) @map("joined_at") @db.Timestamptz
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
@@ -140,6 +141,19 @@ model ServerMember {
   @@id([userId, serverId])
   @@index([serverId], map: "idx_server_members_server")
   @@map("server_members")
+}
+
+model ChannelMember {
+  userId    String   @map("user_id") @db.Uuid
+  channelId String   @map("channel_id") @db.Uuid
+  addedAt   DateTime @default(now()) @map("added_at") @db.Timestamptz
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([userId, channelId])
+  @@index([channelId], map: "idx_channel_members_channel")
+  @@map("channel_members")
 }
 
 model Channel {
@@ -155,11 +169,13 @@ model Channel {
   createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz
   updatedAt  DateTime          @updatedAt @map("updated_at") @db.Timestamptz
 
-  server            Server              @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  messages          Message[]
-  auditLog          VisibilityAuditLog[]
-  generatedMetaTags GeneratedMetaTags?
+  server                  Server                   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  messages                Message[]
+  auditLog                VisibilityAuditLog[]
+  generatedMetaTags       GeneratedMetaTags?
   notificationPreferences NotificationPreference[]
+  notifications           Notification[]
+  channelMembers          ChannelMember[]
 
   // Composite unique — one slug per server
   @@unique([serverId, slug], map: "idx_channels_server_slug")
@@ -185,15 +201,15 @@ model Message {
   /// Denormalised count of non-deleted replies. Incremented on createReply; decremented when a reply is soft-deleted.
   replyCount      Int       @default(0) @map("reply_count")
 
-  channel     Channel          @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author      User             @relation(fields: [authorId], references: [id])
-  attachments Attachment[]
-  reactions   MessageReaction[]
+  channel       Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author        User              @relation(fields: [authorId], references: [id])
+  attachments   Attachment[]
+  reactions     MessageReaction[]
   /// The message this is a reply to (null for top-level messages).
-  parent      Message?         @relation("MessageReplies", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  parent        Message?          @relation("MessageReplies", fields: [parentMessageId], references: [id], onDelete: SetNull)
   /// Direct replies to this message.
-  replies     Message[]        @relation("MessageReplies")
-  mentions    MessageMention[]
+  replies       Message[]         @relation("MessageReplies")
+  mentions      MessageMention[]
   notifications Notification[]
 
   // idx_messages_channel_time (non-partial) and
@@ -302,6 +318,7 @@ model Notification {
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
   /// Prevent duplicate mention notifications for the same user+message pair.
   @@unique([userId, type, messageId], map: "idx_notifications_unique")
@@ -311,28 +328,28 @@ model Notification {
 }
 
 model GeneratedMetaTags {
-  id                  String   @id @default(uuid()) @db.Uuid
-  channelId           String   @unique(map: "idx_meta_tags_channel") @map("channel_id") @db.Uuid
-  title               String   @db.VarChar(120)
-  description         String   @db.VarChar(320)
-  ogTitle             String   @map("og_title") @db.VarChar(120)
-  ogDescription       String   @map("og_description") @db.VarChar(320)
-  ogImage             String?  @map("og_image") @db.VarChar(500)
-  twitterCard         String   @map("twitter_card") @db.VarChar(20)
-  keywords            String   @db.Text
-  structuredData      Json     @map("structured_data")
-  contentHash         String   @map("content_hash") @db.VarChar(64)
-  needsRegeneration   Boolean  @default(false) @map("needs_regeneration")
-  generatedAt         DateTime @default(now()) @map("generated_at") @db.Timestamptz
-  schemaVersion       Int      @default(1) @map("schema_version")
+  id                String   @id @default(uuid()) @db.Uuid
+  channelId         String   @unique(map: "idx_meta_tags_channel") @map("channel_id") @db.Uuid
+  title             String   @db.VarChar(120)
+  description       String   @db.VarChar(320)
+  ogTitle           String   @map("og_title") @db.VarChar(120)
+  ogDescription     String   @map("og_description") @db.VarChar(320)
+  ogImage           String?  @map("og_image") @db.VarChar(500)
+  twitterCard       String   @map("twitter_card") @db.VarChar(20)
+  keywords          String   @db.Text
+  structuredData    Json     @map("structured_data")
+  contentHash       String   @map("content_hash") @db.VarChar(64)
+  needsRegeneration Boolean  @default(false) @map("needs_regeneration")
+  generatedAt       DateTime @default(now()) @map("generated_at") @db.Timestamptz
+  schemaVersion     Int      @default(1) @map("schema_version")
   /// Admin override title — takes precedence over generated title when present.
-  customTitle         String?  @map("custom_title") @db.VarChar(70)
+  customTitle       String?  @map("custom_title") @db.VarChar(70)
   /// Admin override description — takes precedence over generated description when present.
-  customDescription   String?  @map("custom_description") @db.VarChar(200)
+  customDescription String?  @map("custom_description") @db.VarChar(200)
   /// Admin override OG image URL — takes precedence over generated og_image when present.
-  customOgImage       String?  @map("custom_og_image") @db.VarChar(500)
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  customOgImage     String?  @map("custom_og_image") @db.VarChar(500)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
