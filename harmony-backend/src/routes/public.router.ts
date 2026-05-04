@@ -21,7 +21,7 @@ function parseSearchQuery(value: unknown): string {
 
 function parseSearchLimit(value: unknown): number {
   const raw = Array.isArray(value) ? value[0] : value;
-  const parsed = typeof raw === 'string' ? Number(raw) : Number(raw);
+  const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return DEFAULT_SEARCH_LIMIT;
   return Math.min(MAX_SEARCH_LIMIT, Math.max(1, Math.floor(parsed)));
 }
@@ -128,6 +128,7 @@ export function createPublicRouter(store?: Store) {
         select: { id: true, visibility: true },
       });
 
+      // PUBLIC_NO_INDEX controls crawler indexing only; guests can still read and search it.
       if (!channel || channel.visibility === ChannelVisibility.PRIVATE) {
         res.status(404).json({ error: 'Channel not found' });
         return;

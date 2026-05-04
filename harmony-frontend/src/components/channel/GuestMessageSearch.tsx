@@ -60,7 +60,6 @@ export function GuestMessageSearch({ channelId, channelName }: GuestMessageSearc
       setHasSearched(false);
       return;
     }
-    setIsLoading(true);
   }, []);
 
   useEffect(() => {
@@ -89,6 +88,7 @@ export function GuestMessageSearch({ channelId, channelName }: GuestMessageSearc
 
     let cancelled = false;
     const searchTimer = window.setTimeout(async () => {
+      setIsLoading(true);
       const response = await searchPublicChannelMessages(channelId, trimmedQuery);
       if (cancelled) return;
       setResults(response.results);

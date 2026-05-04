@@ -1093,4 +1093,23 @@ describe('Rate limiting on publicRouter', () => {
       nowSpy.mockRestore();
     }
   });
+
+  it('returns 429 after exhausting the limit on guest message search', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([]);
+
+    for (let i = 0; i < 100; i++) {
+      await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/search?q=guest`);
+    }
+
+    const res = await request(app).get(
+      `/api/public/channels/${CHANNEL.id}/messages/search?q=guest`,
+    );
+
+    expect(res.status).toBe(429);
+    expect(res.body).toHaveProperty('error');
+  });
 });
