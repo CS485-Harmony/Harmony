@@ -116,6 +116,34 @@ type DiscoveredServerFixture = {
 
 let cloudFixturePromise: Promise<CloudFixture> | null = null;
 
+async function resolveIndexableChannelsForServer(
+  serverSlug: string,
+  channelCandidates: Array<{ slug?: string }>,
+): Promise<string[]> {
+  const publicChannels: string[] = [];
+
+  // Sequential fetch: stop as soon as we have 3 PUBLIC_INDEXABLE channels.
+  for (const candidate of channelCandidates) {
+    if (!candidate.slug) continue;
+
+    const channelRes = await fetch(
+      `${BACKEND_URL}/api/public/servers/${serverSlug}/channels/${candidate.slug}`,
+    );
+    if (!channelRes.ok) continue;
+
+    const channel = (await channelRes.json()) as {
+      slug?: string;
+      visibility?: string;
+    };
+    if (channel.visibility !== 'PUBLIC_INDEXABLE') continue;
+
+    publicChannels.push(channel.slug ?? candidate.slug);
+    if (publicChannels.length >= 3) break;
+  }
+
+  return publicChannels;
+}
+
 async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
   const serversRes = await fetch(`${BACKEND_URL}/api/public/servers`);
   if (!serversRes.ok) {
@@ -139,10 +167,10 @@ async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
     const channelsBody = (await channelsRes.json()) as {
       channels?: Array<{ slug?: string }>;
     };
-    const publicChannels = (channelsBody.channels ?? [])
-      .filter((ch): ch is { slug: string } => typeof ch.slug === 'string' && ch.slug.length > 0)
-      .slice(0, 3)
-      .map((ch) => ch.slug);
+    const publicChannels = await resolveIndexableChannelsForServer(
+      server.slug,
+      channelsBody.channels ?? [],
+    );
     if (!publicChannels.length) continue;
 
     discoveredFixtures.push({
@@ -183,7 +211,7 @@ async function resolveCloudFixtureFromPublicApi(): Promise<CloudFixture> {
   }
 
   throw new Error(
-    'Cloud fixture discovery failed: no public server/channel pair is available at the configured BACKEND_URL',
+    'Cloud fixture discovery failed: no PUBLIC_INDEXABLE public server/channel pair is available at the configured BACKEND_URL',
   );
 }
 

@@ -1,4 +1,4 @@
-import { ChannelVisibility, Prisma } from '@prisma/client';
+import { ChannelType, ChannelVisibility, Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 
 type Client = Prisma.TransactionClient | typeof prisma;
@@ -65,5 +65,9 @@ export const channelRepository = {
 
   delete(id: string, client: Client = prisma) {
     return client.channel.delete({ where: { id } });
+  },
+
+  countByServerIdAndType(serverId: string, type: ChannelType, client: Client = prisma) {
+    return client.channel.count({ where: { serverId, type } });
   },
 };

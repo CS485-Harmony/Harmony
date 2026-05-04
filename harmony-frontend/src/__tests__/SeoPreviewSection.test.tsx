@@ -7,6 +7,7 @@ import {
   saveSeoOverrides,
   triggerSeoRegeneration,
 } from '@/app/settings/[serverSlug]/[channelSlug]/actions';
+import { SEO_PREVIEW_LOAD_ERROR } from '@/lib/seoConstants';
 
 jest.mock('@/app/settings/[serverSlug]/[channelSlug]/actions', () => ({
   fetchSeoPreview: jest.fn(),
@@ -64,6 +65,19 @@ describe('SeoPreviewSection', () => {
 
     expect(screen.getByText(/only available to server admins/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save overrides/i })).not.toBeInTheDocument();
+  });
+
+  it('shows a safe retry fallback when preview loading fails', async () => {
+    mockFetchSeoPreview.mockRejectedValue(
+      new Error(
+        'An error occurred in the Server Components render. The specific message is omitted in production builds.',
+      ),
+    );
+
+    render(<SeoPreviewSection serverSlug='demo' channelSlug='general' canManageSeo />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(SEO_PREVIEW_LOAD_ERROR);
+    expect(screen.queryByText(/specific message is omitted/i)).not.toBeInTheDocument();
   });
 
   it('shows inline validation and submits valid overrides', async () => {

@@ -10,6 +10,65 @@ import { metaTagService } from '../services/metaTag/metaTagService';
 import { inviteService } from '../services/invite.service';
 
 const logger = createLogger({ component: 'public-router' });
+const DEFAULT_SEARCH_LIMIT = 20;
+const MAX_SEARCH_LIMIT = 50;
+const MAX_SEARCH_QUERY_LENGTH = 120;
+
+function parseSearchQuery(value: unknown): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return typeof raw === 'string' ? raw.trim().slice(0, MAX_SEARCH_QUERY_LENGTH) : '';
+}
+
+function parseSearchLimit(value: unknown): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_SEARCH_LIMIT;
+  return Math.min(MAX_SEARCH_LIMIT, Math.max(1, Math.floor(parsed)));
+}
+
+function buildSearchContext(content: string, query: string): string {
+  const normalizedContent = content.toLowerCase();
+  const normalizedQuery = query.toLowerCase();
+  const matchIndex = normalizedContent.indexOf(normalizedQuery);
+  if (matchIndex === -1) return content.length > 180 ? `${content.slice(0, 177)}...` : content;
+
+  const radius = 70;
+  const start = Math.max(0, matchIndex - radius);
+  const end = Math.min(content.length, matchIndex + query.length + radius);
+  const prefix = start > 0 ? '...' : '';
+  const suffix = end < content.length ? '...' : '';
+  return `${prefix}${content.slice(start, end)}${suffix}`;
+}
+
+const PUBLIC_ATTACHMENT_SELECT = {
+  id: true,
+  url: true,
+  filename: true,
+  contentType: true,
+} as const;
+
+type PublicMessageRecord = {
+  attachments?: Array<{
+    id: string;
+    url: string;
+    filename: string;
+    contentType: string;
+  }>;
+};
+
+function toJsonSafePublicMessage<T extends PublicMessageRecord>(message: T) {
+  const { attachments = [], ...rest } = message;
+
+  return {
+    ...rest,
+    attachments: attachments.map((attachment) => ({
+      id: attachment.id,
+      url: attachment.url,
+      filename: attachment.filename,
+      contentType: attachment.contentType,
+    })),
+  };
+}
 
 /**
  * Factory so createApp() can inject a rate-limit store (e.g. a mock in tests
@@ -63,13 +122,13 @@ export function createPublicRouter(store?: Store) {
             editedAt: true,
             author: { select: { id: true, username: true } },
             attachments: {
-              select: { id: true, url: true, filename: true, contentType: true, sizeBytes: true },
+              select: PUBLIC_ATTACHMENT_SELECT,
             },
           },
         });
 
         res.set('Cache-Control', `public, max-age=${CacheTTL.channelMessages}`);
-        res.json({ messages, page, pageSize });
+        res.json({ messages: messages.map(toJsonSafePublicMessage), page, pageSize });
       } catch (err) {
         logger.error({ err, channelId: req.params.channelId }, 'Public messages route failed');
         if (!res.headersSent) {
@@ -78,6 +137,66 @@ export function createPublicRouter(store?: Store) {
       }
     },
   );
+
+  /**
+   * GET /api/public/channels/:channelId/messages/search?q=<keyword>
+   * Searches non-deleted messages within a single guest-accessible public channel.
+   */
+  router.get('/channels/:channelId/messages/search', async (req: Request, res: Response) => {
+    try {
+      const { channelId } = req.params;
+      const query = parseSearchQuery(req.query.q);
+      const limit = parseSearchLimit(req.query.limit);
+
+      if (!query) {
+        res.status(400).json({ error: 'Search query is required' });
+        return;
+      }
+
+      const channel = await prisma.channel.findUnique({
+        where: { id: channelId },
+        select: { id: true, visibility: true },
+      });
+
+      // PUBLIC_NO_INDEX controls crawler indexing only; guests can still read and search it.
+      if (!channel || channel.visibility === ChannelVisibility.PRIVATE) {
+        res.status(404).json({ error: 'Channel not found' });
+        return;
+      }
+
+      const messages = await prisma.message.findMany({
+        where: {
+          channelId,
+          isDeleted: false,
+          content: { contains: query, mode: 'insensitive' },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        select: {
+          id: true,
+          content: true,
+          createdAt: true,
+          editedAt: true,
+          author: { select: { id: true, username: true } },
+        },
+      });
+
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        results: messages.map((message) => ({
+          ...message,
+          context: buildSearchContext(message.content, query),
+        })),
+        query,
+        limit,
+      });
+    } catch (err) {
+      logger.error({ err, channelId: req.params.channelId }, 'Public message search route failed');
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  });
 
   /**
    * GET /api/public/channels/:channelId/messages/:messageId
@@ -115,7 +234,7 @@ export function createPublicRouter(store?: Store) {
             editedAt: true,
             author: { select: { id: true, username: true } },
             attachments: {
-              select: { id: true, url: true, filename: true, contentType: true, sizeBytes: true },
+              select: PUBLIC_ATTACHMENT_SELECT,
             },
           },
         });
@@ -126,7 +245,7 @@ export function createPublicRouter(store?: Store) {
         }
 
         res.set('Cache-Control', `public, max-age=${CacheTTL.channelMessages}`);
-        res.json(message);
+        res.json(toJsonSafePublicMessage(message));
       } catch (err) {
         logger.error(
           { err, channelId: req.params.channelId, messageId: req.params.messageId },
@@ -247,7 +366,9 @@ export function createPublicRouter(store?: Store) {
         const channels = await prisma.channel.findMany({
           where: {
             serverId: server.id,
-            visibility: { in: [ChannelVisibility.PUBLIC_INDEXABLE, ChannelVisibility.PUBLIC_NO_INDEX] },
+            visibility: {
+              in: [ChannelVisibility.PUBLIC_INDEXABLE, ChannelVisibility.PUBLIC_NO_INDEX],
+            },
           },
           orderBy: { position: 'asc' },
           select: { id: true, name: true, slug: true, type: true, topic: true },

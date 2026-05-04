@@ -49,4 +49,12 @@ export const notificationService = {
       data: { read: true },
     });
   },
+
+  /** Mark all unread notifications in a channel as read for a user. */
+  async markChannelAsRead(channelId: string, userId: string) {
+    return prisma.notification.updateMany({
+      where: { channelId, userId, read: false },
+      data: { read: true },
+    });
+  },
 };

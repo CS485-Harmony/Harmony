@@ -187,7 +187,20 @@ export const channelService = {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
     }
 
-    await channelRepository.delete(channelId);
+    if (channel.type === ChannelType.TEXT) {
+      const textChannelCount = await channelRepository.countByServerIdAndType(
+        serverId,
+        ChannelType.TEXT,
+      );
+      if (textChannelCount <= 1) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Cannot delete the last text channel in a server',
+        });
+      }
+    }
+
+    const deleted = await channelRepository.delete(channelId);
 
     // Write-through: invalidate all caches for deleted channel (best-effort)
     cacheService
@@ -228,6 +241,8 @@ export const channelService = {
           'Failed to publish channel deleted event',
         ),
       );
+
+    return deleted;
   },
 
   async createDefaultChannel(serverId: string, isPublic = false, tx?: Prisma.TransactionClient) {

@@ -22,6 +22,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { cn, formatMessageTimestamp, formatTimeOnly } from '@/lib/utils';
 import { pinMessageAction, unpinMessageAction } from '@/app/actions/pinMessage';
 import { editMessageAction } from '@/app/actions/editMessage';
+import { deleteMessageAction } from '@/app/actions/deleteMessage';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
 import { ThreadView } from '@/components/message/ThreadView';
@@ -334,12 +335,14 @@ function PinMenuIcon() {
 // ─── Hover action bar ─────────────────────────────────────────────────────────
 
 type PinState = 'idle' | 'loading' | 'success' | 'error';
+type DeleteState = 'idle' | 'loading' | 'error';
 
 /**
  * Hover/focus-within action bar for a message.
  * Reply triggers onReplyClick (opens thread for authenticated users).
- * More (⋯) is rendered when canPin or isOwnMessage is true, and opens a
- * dropdown with Pin/Unpin (canPin) and Edit Message (isOwnMessage).
+ * More (⋯) is rendered when canPin, isOwnMessage, or canDeleteAny is true, and opens a
+ * dropdown with Pin/Unpin (canPin), Edit Message (isOwnMessage), and Delete Message
+ * (isOwnMessage or canDeleteAny).
  */
 function ActionBar({
   messageId,
@@ -348,9 +351,11 @@ function ActionBar({
   canPin,
   initialPinned,
   isOwnMessage,
+  canDeleteAny,
   onEditClick,
   onReplyClick,
   onPinToggle,
+  onDelete,
   onReactionAdd,
   onReactionConflict,
 }: {
@@ -360,9 +365,13 @@ function ActionBar({
   canPin?: boolean;
   initialPinned?: boolean;
   isOwnMessage?: boolean;
+  /** When true, shows delete for messages the user doesn't own (MODERATOR+). */
+  canDeleteAny?: boolean;
   onEditClick?: () => void;
   onReplyClick?: () => void;
   onPinToggle?: (messageId: string, pinned: boolean) => void;
+  /** Called after successful deletion so the parent can remove the message. */
+  onDelete?: () => void;
   onReactionAdd?: (emoji: string) => void;
   onReactionConflict?: (emoji: string) => void;
 }) {
@@ -375,6 +384,8 @@ function ActionBar({
   const [isPinned, setIsPinned] = useState(initialPinned ?? false);
   const [pinState, setPinState] = useState<PinState>('idle');
   const [pinErrorMsg, setPinErrorMsg] = useState('');
+  const [deleteState, setDeleteState] = useState<DeleteState>('idle');
+  const [deleteErrorMsg, setDeleteErrorMsg] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [emojiPickerOpenUpward, setEmojiPickerOpenUpward] = useState(true);
   const moreRef = useRef<HTMLDivElement>(null);
@@ -383,12 +394,14 @@ function ActionBar({
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deleteErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Close dropdown on outside click; clean up timers on unmount
   useEffect(() => {
     return () => {
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+      if (deleteErrorTimerRef.current) clearTimeout(deleteErrorTimerRef.current);
     };
   }, []);
 
@@ -479,6 +492,38 @@ function ActionBar({
     }
   }, [isPinned, messageId, onPinToggle, serverId]);
 
+  const handleDelete = useCallback(async () => {
+    if (!serverId) return;
+    if (!window.confirm('Delete this message? This cannot be undone.')) return;
+    setIsMoreOpen(false);
+    setDeleteState('loading');
+    try {
+      const result = await deleteMessageAction(messageId, serverId);
+      if (result.ok) {
+        onDelete?.();
+      } else {
+        const msg = result.forbidden
+          ? "You don't have permission to delete this message."
+          : 'Failed to delete message. Please try again.';
+        setDeleteErrorMsg(msg);
+        setDeleteState('error');
+        if (deleteErrorTimerRef.current) clearTimeout(deleteErrorTimerRef.current);
+        deleteErrorTimerRef.current = setTimeout(() => {
+          setDeleteState('idle');
+          setDeleteErrorMsg('');
+        }, 3000);
+      }
+    } catch {
+      setDeleteErrorMsg('Failed to delete message. Please try again.');
+      setDeleteState('error');
+      if (deleteErrorTimerRef.current) clearTimeout(deleteErrorTimerRef.current);
+      deleteErrorTimerRef.current = setTimeout(() => {
+        setDeleteState('idle');
+        setDeleteErrorMsg('');
+      }, 3000);
+    }
+  }, [messageId, onDelete, serverId]);
+
   return (
     <div className='absolute -top-3 right-4 z-10 flex items-center rounded-md border border-white/10 bg-[#2f3136] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'>
       {/* Inline pin feedback */}
@@ -486,6 +531,10 @@ function ActionBar({
         <span className='px-2 text-xs text-green-400'>{isPinned ? '📌 Pinned' : 'Unpinned'}</span>
       )}
       {pinState === 'error' && <span className='px-2 text-xs text-red-400'>{pinErrorMsg}</span>}
+      {/* Inline delete feedback */}
+      {deleteState === 'error' && (
+        <span className='px-2 text-xs text-red-400'>{deleteErrorMsg}</span>
+      )}
 
       {/* Reply — redirects guests to login; opens thread for authenticated users */}
       <button
@@ -553,8 +602,8 @@ function ActionBar({
         )}
       </div>
 
-      {/* More — rendered when user can pin or is the message author */}
-      {(canPin || isOwnMessage) && (
+      {/* More — rendered when user can pin, delete any message, or is the message author */}
+      {(canPin || isOwnMessage || canDeleteAny) && (
         <div ref={moreRef} className='relative'>
           <button
             type='button'
@@ -620,6 +669,30 @@ function ActionBar({
                   {isPinned ? 'Unpin Message' : 'Pin Message'}
                 </button>
               )}
+              {(isOwnMessage || canDeleteAny) && (
+                <button
+                  type='button'
+                  onClick={handleDelete}
+                  disabled={deleteState === 'loading'}
+                  className='flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 hover:bg-red-500 hover:text-white disabled:opacity-50 transition-colors'
+                >
+                  <svg
+                    className='h-3.5 w-3.5 flex-shrink-0'
+                    viewBox='0 0 24 24'
+                    fill='none'
+                    stroke='currentColor'
+                    strokeWidth={2}
+                    aria-hidden='true'
+                  >
+                    <polyline points='3 6 5 6 21 6' />
+                    <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6' />
+                    <path d='M10 11v6' />
+                    <path d='M14 11v6' />
+                    <path d='M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2' />
+                  </svg>
+                  {deleteState === 'loading' ? 'Deleting…' : 'Delete Message'}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -634,19 +707,23 @@ export function MessageItem({
   message,
   showHeader = true,
   canPin,
+  canDeleteAny,
   serverId,
   currentUsername,
   channels,
   serverSlug,
   onReplyClick,
   onPinToggle,
+  onDelete,
 }: {
   message: Message;
   /** Set to false for grouped follow-up messages from the same author. Hides the avatar and author line. */
   showHeader?: boolean;
   /** When true, shows the pin/unpin option in the action bar. Grant to MODERATOR+. */
   canPin?: boolean;
-  /** Required for pin actions. Passed alongside canPin. */
+  /** When true, allows deleting messages the user doesn't own. Grant to MODERATOR+. */
+  canDeleteAny?: boolean;
+  /** Required for pin/delete actions. */
   serverId?: string;
   /** The authenticated user's username — used for self-mention detection and highlight. */
   currentUsername?: string;
@@ -658,6 +735,8 @@ export function MessageItem({
   onReplyClick?: (message: Message) => void;
   /** Called when the user triggers a pin/unpin action for this message. */
   onPinToggle?: (messageId: string, pinned: boolean) => void;
+  /** Called after the user successfully deletes this message. */
+  onDelete?: (messageId: string) => void;
 }) {
   const { user, isAuthenticated } = useAuth();
   const { showToast } = useToast();
@@ -906,11 +985,13 @@ export function MessageItem({
       serverId={serverId}
       channelId={message.channelId}
       canPin={canPin}
+      canDeleteAny={canDeleteAny}
       initialPinned={!!message.pinned}
       isOwnMessage={isOwnMessage}
       onEditClick={handleEditClick}
       onReplyClick={isTopLevel ? handleReplyClick : undefined}
       onPinToggle={onPinToggle}
+      onDelete={onDelete ? () => onDelete(message.id) : undefined}
       onReactionAdd={handleReactionAdd}
       onReactionConflict={handleReactionConflict}
     />

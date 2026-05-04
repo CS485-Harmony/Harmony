@@ -23,6 +23,9 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 **Related Issue:** #514
 **Mistake / Situation:** I began issue work in the shared Codex worktree before the coordination update specified an isolated per-issue worktree under `/private/tmp`.
 **Rule / Fix:** For coordinated Harmony issue work, use the explicitly requested per-issue worktree before editing project files, and leave the original checkout untouched except for read-only inspection or necessary worktree setup.
+**Related Issue:** #592
+**Mistake / Situation:** I started issue work from an existing shared checkout instead of immediately isolating the issue branch in a per-issue worktree while other workers were active.
+**Rule / Fix:** When the user says other workers are making disjoint Harmony issue branches, create or switch into the requested isolated per-issue worktree before any branch-changing or editing command, and leave the original checkout untouched.
 
 **Date:** 2026-04-28  
 **Caught by:** [Human: user]  

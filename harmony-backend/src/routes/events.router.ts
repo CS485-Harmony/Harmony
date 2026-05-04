@@ -40,6 +40,9 @@ import type {
   UserMentionedPayload,
   ReactionAddedPayload,
   ReactionRemovedPayload,
+  UserJoinedVoicePayload,
+  UserLeftVoicePayload,
+  VoiceStateChangedPayload,
 } from '../events/eventTypes';
 
 export const eventsRouter = Router();
@@ -909,6 +912,38 @@ eventsRouter.get('/server/:serverId', async (req: Request, res: Response) => {
     },
   );
   subscriptions.push(serverReactionRemovedSubscription);
+
+  const voiceUserJoinedSubscription = eventBus.subscribe(
+    EventChannels.USER_JOINED_VOICE,
+    (payload: UserJoinedVoicePayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+      writeEvent('voice:userJoined', { channelId: payload.channelId, userId: payload.userId });
+    },
+  );
+  subscriptions.push(voiceUserJoinedSubscription);
+
+  const voiceUserLeftSubscription = eventBus.subscribe(
+    EventChannels.USER_LEFT_VOICE,
+    (payload: UserLeftVoicePayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+      writeEvent('voice:userLeft', { channelId: payload.channelId, userId: payload.userId });
+    },
+  );
+  subscriptions.push(voiceUserLeftSubscription);
+
+  const voiceStateChangedSubscription = eventBus.subscribe(
+    EventChannels.VOICE_STATE_CHANGED,
+    (payload: VoiceStateChangedPayload) => {
+      if (!serverChannelIds.has(payload.channelId)) return;
+      writeEvent('voice:stateChanged', {
+        channelId: payload.channelId,
+        userId: payload.userId,
+        muted: payload.muted,
+        deafened: payload.deafened,
+      });
+    },
+  );
+  subscriptions.push(voiceStateChangedSubscription);
 
   // ── Replay messages missed during reconnect gap ──────────────────────────
   const serverReplayFrames = lastEventId

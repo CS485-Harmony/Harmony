@@ -24,6 +24,11 @@ describe('getCloudFixture cache behavior', () => {
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ channels: [{ slug: 'general' }] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'general', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
       );
     global.fetch = fetchMock;
 
@@ -43,7 +48,7 @@ describe('getCloudFixture cache behavior', () => {
       publicChannelTargets: [{ serverSlug: 'harmony-hq', channelSlug: 'general' }],
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   test('reuses an in-flight discovery promise for concurrent callers', async () => {
@@ -58,6 +63,11 @@ describe('getCloudFixture cache behavior', () => {
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ channels: [{ slug: 'general' }] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'general', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
       );
     global.fetch = fetchMock;
 
@@ -91,7 +101,7 @@ describe('getCloudFixture cache behavior', () => {
       },
     ]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   test('discovers up to 3 channels and populates publicChannels', async () => {
@@ -112,6 +122,21 @@ describe('getCloudFixture cache behavior', () => {
           }),
           { status: 200 },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'general', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'announcements', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'dev-updates', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
       );
     global.fetch = fetchMock;
 
@@ -131,7 +156,67 @@ describe('getCloudFixture cache behavior', () => {
       ],
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  test('skips PUBLIC_NO_INDEX channels when choosing JSON-LD cloud fixture targets', async () => {
+    const fetchMock = jest
+      .fn<ReturnType<typeof fetch>, Parameters<typeof fetch>>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: 'server-1', slug: 'harmony-hq' }]), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            channels: [
+              { slug: 'introductions' },
+              { slug: 'general' },
+              { slug: 'announcements' },
+              { slug: 'dev-updates' },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'introductions', visibility: 'PUBLIC_NO_INDEX' }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'general', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'announcements', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'dev-updates', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
+      );
+    global.fetch = fetchMock;
+
+    const { getCloudFixture } = await loadCloudEnvModule();
+
+    const fixture = await getCloudFixture();
+
+    expect(fixture).toEqual({
+      serverId: 'server-1',
+      serverSlug: 'harmony-hq',
+      publicChannel: 'general',
+      publicChannels: ['general', 'announcements', 'dev-updates'],
+      publicChannelTargets: [
+        { serverSlug: 'harmony-hq', channelSlug: 'general' },
+        { serverSlug: 'harmony-hq', channelSlug: 'announcements' },
+        { serverSlug: 'harmony-hq', channelSlug: 'dev-updates' },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
   test('collects crawler targets across multiple servers while keeping the primary fixture on the richest server', async () => {
@@ -155,12 +240,27 @@ describe('getCloudFixture cache behavior', () => {
         ),
       )
       .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'one', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
             channels: [{ slug: 'two' }, { slug: 'three' }],
           }),
           { status: 200 },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'two', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ slug: 'three', visibility: 'PUBLIC_INDEXABLE' }), {
+          status: 200,
+        }),
       );
     global.fetch = fetchMock;
 

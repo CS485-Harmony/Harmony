@@ -197,7 +197,7 @@ describe('useServerEvents — connection', () => {
     expect(mockEventSourceInstance?.close).toHaveBeenCalled();
   });
 
-  it('registers listeners for all eleven event types', async () => {
+  it('registers listeners for all fourteen event types', async () => {
     renderHook(() =>
       useServerEvents({
         serverId: SERVER_ID,
@@ -212,6 +212,9 @@ describe('useServerEvents — connection', () => {
         onMessageEdited: jest.fn(),
         onMessageDeleted: jest.fn(),
         onServerUpdated: jest.fn(),
+        onVoiceUserJoined: jest.fn(),
+        onVoiceUserLeft: jest.fn(),
+        onVoiceStateChanged: jest.fn(),
       }),
     );
     await flushPromises();
@@ -231,6 +234,9 @@ describe('useServerEvents — connection', () => {
     expect(addedTypes).toContain('message:edited');
     expect(addedTypes).toContain('message:deleted');
     expect(addedTypes).toContain('server:updated');
+    expect(addedTypes).toContain('voice:userJoined');
+    expect(addedTypes).toContain('voice:userLeft');
+    expect(addedTypes).toContain('voice:stateChanged');
   });
 });
 
@@ -914,5 +920,111 @@ describe('useServerEvents — server:updated events', () => {
     ).map(([type]) => type);
 
     expect(removedTypes).toContain('server:updated');
+  });
+});
+
+// ─── Voice presence events ────────────────────────────────────────────────────
+
+describe('useServerEvents — voice presence events', () => {
+  it('calls onVoiceUserJoined with channelId and userId on voice:userJoined event', async () => {
+    const onVoiceUserJoined = jest.fn();
+
+    renderHook(() =>
+      useServerEvents({ serverId: SERVER_ID, onChannelCreated: jest.fn(), onChannelUpdated: jest.fn(), onChannelDeleted: jest.fn(), onVoiceUserJoined }),
+    );
+    await flushPromises();
+
+    act(() => {
+      mockEventSourceInstance!.simulateEvent('voice:userJoined', {
+        channelId: 'ch-001',
+        userId: 'user-001',
+      });
+    });
+
+    expect(onVoiceUserJoined).toHaveBeenCalledTimes(1);
+    expect(onVoiceUserJoined).toHaveBeenCalledWith({ channelId: 'ch-001', userId: 'user-001' });
+  });
+
+  it('calls onVoiceUserLeft with channelId and userId on voice:userLeft event', async () => {
+    const onVoiceUserLeft = jest.fn();
+
+    renderHook(() =>
+      useServerEvents({ serverId: SERVER_ID, onChannelCreated: jest.fn(), onChannelUpdated: jest.fn(), onChannelDeleted: jest.fn(), onVoiceUserLeft }),
+    );
+    await flushPromises();
+
+    act(() => {
+      mockEventSourceInstance!.simulateEvent('voice:userLeft', {
+        channelId: 'ch-001',
+        userId: 'user-001',
+      });
+    });
+
+    expect(onVoiceUserLeft).toHaveBeenCalledTimes(1);
+    expect(onVoiceUserLeft).toHaveBeenCalledWith({ channelId: 'ch-001', userId: 'user-001' });
+  });
+
+  it('calls onVoiceStateChanged with full payload on voice:stateChanged event', async () => {
+    const onVoiceStateChanged = jest.fn();
+
+    renderHook(() =>
+      useServerEvents({ serverId: SERVER_ID, onChannelCreated: jest.fn(), onChannelUpdated: jest.fn(), onChannelDeleted: jest.fn(), onVoiceStateChanged }),
+    );
+    await flushPromises();
+
+    act(() => {
+      mockEventSourceInstance!.simulateEvent('voice:stateChanged', {
+        channelId: 'ch-001',
+        userId: 'user-001',
+        muted: true,
+        deafened: false,
+      });
+    });
+
+    expect(onVoiceStateChanged).toHaveBeenCalledTimes(1);
+    expect(onVoiceStateChanged).toHaveBeenCalledWith({
+      channelId: 'ch-001',
+      userId: 'user-001',
+      muted: true,
+      deafened: false,
+    });
+  });
+
+  it('does not throw when voice callbacks are not provided', async () => {
+    renderHook(() => useServerEvents({ serverId: SERVER_ID, onChannelCreated: jest.fn(), onChannelUpdated: jest.fn(), onChannelDeleted: jest.fn() }));
+    await flushPromises();
+
+    expect(() => {
+      act(() => {
+        mockEventSourceInstance!.simulateEvent('voice:userJoined', { channelId: 'ch-001', userId: 'u1' });
+        mockEventSourceInstance!.simulateEvent('voice:userLeft', { channelId: 'ch-001', userId: 'u1' });
+        mockEventSourceInstance!.simulateEvent('voice:stateChanged', { channelId: 'ch-001', userId: 'u1', muted: false, deafened: false });
+      });
+    }).not.toThrow();
+  });
+
+  it('removes voice listeners on unmount', async () => {
+    const { unmount } = renderHook(() =>
+      useServerEvents({
+        serverId: SERVER_ID,
+        onChannelCreated: jest.fn(),
+        onChannelUpdated: jest.fn(),
+        onChannelDeleted: jest.fn(),
+        onVoiceUserJoined: jest.fn(),
+        onVoiceUserLeft: jest.fn(),
+        onVoiceStateChanged: jest.fn(),
+      }),
+    );
+    await flushPromises();
+
+    unmount();
+
+    const removedTypes = (
+      mockEventSourceInstance!.removeEventListener.mock.calls as [string, unknown][]
+    ).map(([type]) => type);
+
+    expect(removedTypes).toContain('voice:userJoined');
+    expect(removedTypes).toContain('voice:userLeft');
+    expect(removedTypes).toContain('voice:stateChanged');
   });
 });

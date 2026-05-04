@@ -8,16 +8,20 @@
  */
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import {
   updateChannel,
   getChannel,
   getAuditLog,
+  deleteChannel,
   getChannelMembers,
   addChannelMember,
   removeChannelMember,
   type ChannelMemberEntry,
 } from '@/services/channelService';
 import { getServer, getServerMembersWithRole } from '@/services/serverService';
+import { createFrontendLogger } from '@/lib/frontend-logger';
+import { SEO_PREVIEW_LOAD_ERROR } from '@/lib/seoConstants';
 import type { ServerMemberInfo } from '@/types';
 import type { Channel } from '@/types';
 import { ChannelVisibility } from '@/types';
@@ -31,6 +35,11 @@ import {
   type MetaTagJobStatus,
   type MetaTagPreview,
 } from '@/services/metaTagAdminService';
+
+const seoPreviewLogger = createFrontendLogger({
+  component: 'seo-preview-actions',
+  feature: 'seo-preview',
+});
 
 export async function saveChannelSettings(
   serverSlug: string,
@@ -107,7 +116,16 @@ export async function fetchSeoPreview(
   channelSlug: string,
 ): Promise<MetaTagPreview> {
   const channel = await resolveChannelForSeo(serverSlug, channelSlug);
-  return getMetaTagPreview(channel.id);
+  try {
+    return await getMetaTagPreview(channel.id);
+  } catch (err) {
+    seoPreviewLogger.error('SEO preview fetch failed', {
+      error: err,
+      operation: 'fetchSeoPreview',
+      route: `/settings/${serverSlug}/${channelSlug}`,
+    });
+    throw new Error(SEO_PREVIEW_LOAD_ERROR);
+  }
 }
 
 export async function saveSeoOverrides(
@@ -132,6 +150,26 @@ export async function triggerSeoRegeneration(
 ): Promise<MetaTagJobAccepted> {
   const channel = await resolveChannelForSeo(serverSlug, channelSlug);
   return triggerMetaTagRegeneration(channel.id);
+}
+
+/**
+ * Server action: delete a channel. Resolves IDs from route slugs (don't trust raw IDs from
+ * the client), then redirects to the server home after deletion.
+ * Auth enforced by the backend `channel.deleteChannel` procedure (requires channel:delete).
+ */
+export async function deleteChannelAction(serverSlug: string, channelSlug: string): Promise<void> {
+  const channel = await getChannel(serverSlug, channelSlug);
+  if (!channel) throw new Error('Channel not found');
+
+  const server = await getServer(serverSlug);
+  if (!server) throw new Error('Server not found');
+
+  await deleteChannel(channel.id, server.id);
+
+  revalidatePath(`/channels/${serverSlug}`, 'layout');
+  revalidatePath(`/c/${serverSlug}`, 'layout');
+  revalidatePath(`/settings/${serverSlug}`, 'layout');
+  redirect(`/channels/${serverSlug}`);
 }
 
 export async function fetchSeoRegenerationStatus(

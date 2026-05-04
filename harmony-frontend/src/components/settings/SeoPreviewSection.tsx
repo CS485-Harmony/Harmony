@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { getUserErrorMessage, cn } from '@/lib/utils';
+import { SEO_PREVIEW_LOAD_ERROR } from '@/lib/seoConstants';
 import {
   fetchSeoPreview,
   fetchSeoRegenerationStatus,
@@ -86,9 +87,9 @@ export function SeoPreviewSection({
         setCustomTitle(nextPreview.customTitle ?? '');
         setCustomDescription(nextPreview.customDescription ?? '');
         setCustomOgImage(nextPreview.customOgImage ?? '');
-      } catch (err) {
+      } catch {
         if (cancelled) return;
-        setError(getUserErrorMessage(err, 'Failed to load SEO preview.'));
+        setError(SEO_PREVIEW_LOAD_ERROR);
       } finally {
         if (!cancelled) setLoading(false);
       }

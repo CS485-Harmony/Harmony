@@ -73,6 +73,8 @@ interface MessageListProps {
   serverId?: string;
   /** When true, shows the pin/unpin option on message hover. Grant to MODERATOR+. */
   canPin?: boolean;
+  /** When true, shows delete for messages the user doesn't own. Grant to MODERATOR+. */
+  canDeleteAny?: boolean;
   /** Authenticated user's username — forwarded to MessageItem for self-mention highlight. */
   currentUsername?: string;
   /** Channels in the current server — forwarded for #channel pill resolution. */
@@ -83,6 +85,8 @@ interface MessageListProps {
   onReplyClick?: (message: Message) => void;
   /** Called when the user clicks pin/unpin on a message. */
   onPinToggle?: (messageId: string, pinned: boolean) => void;
+  /** Called after the user successfully deletes a message. */
+  onDelete?: (messageId: string) => void;
   /** Whether there are older messages to load via pagination. */
   hasMoreOlder?: boolean;
   /** Whether older messages are currently being fetched. */
@@ -96,11 +100,13 @@ export function MessageList({
   messages,
   serverId,
   canPin,
+  canDeleteAny,
   currentUsername,
   channels,
   serverSlug,
   onReplyClick,
   onPinToggle,
+  onDelete,
   hasMoreOlder,
   isLoadingOlder,
   onLoadOlderMessages,
@@ -239,11 +245,13 @@ export function MessageList({
                   showHeader={mi === 0}
                   serverId={serverId}
                   canPin={canPin}
+                  canDeleteAny={canDeleteAny}
                   currentUsername={currentUsername}
                   channels={channels}
                   serverSlug={serverSlug}
                   onReplyClick={onReplyClick}
                   onPinToggle={onPinToggle}
+                  onDelete={onDelete}
                 />
               ))}
             </div>

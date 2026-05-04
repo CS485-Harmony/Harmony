@@ -5,6 +5,7 @@
  *   GET /api/public/servers/:serverSlug
  *   GET /api/public/servers/:serverSlug/channels
  *   GET /api/public/channels/:channelId/messages
+ *   GET /api/public/channels/:channelId/messages/search
  *   GET /api/public/channels/:channelId/messages/:messageId
  *
  * Prisma and cacheService are mocked so no running database or Redis is required.
@@ -115,6 +116,19 @@ const MESSAGE = {
   author: { id: 'usr-0000-0000-0000-000000000001', username: 'alice' },
 };
 
+const MESSAGE_WITH_ATTACHMENT = {
+  ...MESSAGE,
+  attachments: [
+    {
+      id: 'att-0000-0000-0000-000000000001',
+      url: 'https://cdn.example.test/file.png',
+      filename: 'file.png',
+      contentType: 'image/png',
+      sizeBytes: BigInt(1234),
+    },
+  ],
+};
+
 // ─── Test setup ───────────────────────────────────────────────────────────────
 
 let app: ReturnType<typeof createApp>;
@@ -193,8 +207,20 @@ describe('GET /api/public/servers/:serverSlug/channels', () => {
   it('returns 200 with PUBLIC_INDEXABLE and PUBLIC_NO_INDEX channels', async () => {
     mockPrisma.server.findUnique.mockResolvedValue({ id: SERVER.id });
     mockPrisma.channel.findMany.mockResolvedValue([
-      { id: CHANNEL.id, name: CHANNEL.name, slug: CHANNEL.slug, type: CHANNEL.type, topic: CHANNEL.topic },
-      { id: NO_INDEX_CHANNEL.id, name: NO_INDEX_CHANNEL.name, slug: NO_INDEX_CHANNEL.slug, type: NO_INDEX_CHANNEL.type, topic: null },
+      {
+        id: CHANNEL.id,
+        name: CHANNEL.name,
+        slug: CHANNEL.slug,
+        type: CHANNEL.type,
+        topic: CHANNEL.topic,
+      },
+      {
+        id: NO_INDEX_CHANNEL.id,
+        name: NO_INDEX_CHANNEL.name,
+        slug: NO_INDEX_CHANNEL.slug,
+        type: NO_INDEX_CHANNEL.type,
+        topic: null,
+      },
     ]);
 
     const res = await request(app).get(`/api/public/servers/${SERVER.slug}/channels`);
@@ -203,12 +229,19 @@ describe('GET /api/public/servers/:serverSlug/channels', () => {
     expect(res.body).toHaveProperty('channels');
     expect(res.body.channels).toHaveLength(2);
     expect(res.body.channels[0]).toMatchObject({ id: CHANNEL.id, name: CHANNEL.name });
-    expect(res.body.channels[1]).toMatchObject({ id: NO_INDEX_CHANNEL.id, name: NO_INDEX_CHANNEL.name });
+    expect(res.body.channels[1]).toMatchObject({
+      id: NO_INDEX_CHANNEL.id,
+      name: NO_INDEX_CHANNEL.name,
+    });
     expect(res.body.channels[0]).not.toHaveProperty('visibility');
     expect(res.body.channels[1]).not.toHaveProperty('visibility');
     expect(mockPrisma.channel.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ visibility: { in: [ChannelVisibility.PUBLIC_INDEXABLE, ChannelVisibility.PUBLIC_NO_INDEX] } }),
+        where: expect.objectContaining({
+          visibility: {
+            in: [ChannelVisibility.PUBLIC_INDEXABLE, ChannelVisibility.PUBLIC_NO_INDEX],
+          },
+        }),
       }),
     );
   });
@@ -263,6 +296,27 @@ describe('GET /api/public/channels/:channelId/messages', () => {
     expect(res.body.messages[0]).toMatchObject({ id: MESSAGE.id, content: MESSAGE.content });
     expect(res.body).toHaveProperty('page', 1);
     expect(res.body).toHaveProperty('pageSize', 50);
+  });
+
+  it('returns JSON-safe attachment fields for public paginated messages', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([MESSAGE_WITH_ATTACHMENT]);
+
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages?page=2`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.messages[0].attachments).toEqual([
+      {
+        id: 'att-0000-0000-0000-000000000001',
+        url: 'https://cdn.example.test/file.png',
+        filename: 'file.png',
+        contentType: 'image/png',
+      },
+    ]);
+    expect(res.body.messages[0].attachments[0]).not.toHaveProperty('sizeBytes');
   });
 
   it('PR-2: returns correct page and passes skip/take to Prisma when ?page=3', async () => {
@@ -358,6 +412,27 @@ describe('GET /api/public/channels/:channelId/messages/:messageId', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: MESSAGE.id, content: MESSAGE.content });
     expect(res.body.author).toMatchObject({ username: 'alice' });
+  });
+
+  it('returns JSON-safe attachment fields for a public single-message response', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findFirst.mockResolvedValue(MESSAGE_WITH_ATTACHMENT);
+
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/${MESSAGE.id}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.attachments).toEqual([
+      {
+        id: 'att-0000-0000-0000-000000000001',
+        url: 'https://cdn.example.test/file.png',
+        filename: 'file.png',
+        contentType: 'image/png',
+      },
+    ]);
+    expect(res.body.attachments[0]).not.toHaveProperty('sizeBytes');
   });
 
   it('returns 404 when the channel is PRIVATE', async () => {
@@ -479,6 +554,73 @@ describe('GET /api/public/channels/:channelId/messages — additional', () => {
 
     expect(res.status).toBe(500);
     expect(res.body).toHaveProperty('error', 'Internal server error');
+  });
+});
+
+// ─── GET /api/public/channels/:channelId/messages/search ────────────────────
+
+describe('GET /api/public/channels/:channelId/messages/search', () => {
+  it('returns case-insensitive matches scoped to the current public channel', async () => {
+    const matchingMessage = {
+      ...MESSAGE,
+      content: 'We shipped the Guest Search sidebar today.',
+    };
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([matchingMessage]);
+
+    const res = await request(app).get(
+      `/api/public/channels/${CHANNEL.id}/messages/search?q=guest%20search`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      results: [
+        expect.objectContaining({
+          id: matchingMessage.id,
+          content: matchingMessage.content,
+          context: 'We shipped the Guest Search sidebar today.',
+          author: matchingMessage.author,
+        }),
+      ],
+      query: 'guest search',
+      limit: 20,
+    });
+    expect(mockPrisma.message.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          channelId: CHANNEL.id,
+          isDeleted: false,
+          content: { contains: 'guest search', mode: 'insensitive' },
+        },
+      }),
+    );
+  });
+
+  it('returns 400 for an empty keyword', async () => {
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/search?q=`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toHaveProperty('error', 'Search query is required');
+    expect(mockPrisma.channel.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.message.findMany).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 and does not search messages when the channel is private', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PRIVATE,
+    });
+
+    const res = await request(app).get(
+      `/api/public/channels/${CHANNEL.id}/messages/search?q=secret`,
+    );
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty('error', 'Channel not found');
+    expect(mockPrisma.message.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -1005,5 +1147,24 @@ describe('Rate limiting on publicRouter', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it('returns 429 after exhausting the limit on guest message search', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([]);
+
+    for (let i = 0; i < 100; i++) {
+      await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/search?q=guest`);
+    }
+
+    const res = await request(app).get(
+      `/api/public/channels/${CHANNEL.id}/messages/search?q=guest`,
+    );
+
+    expect(res.status).toBe(429);
+    expect(res.body).toHaveProperty('error');
   });
 });

@@ -12,6 +12,7 @@ import { cn, getUserErrorMessage } from '@/lib/utils';
 import {
   saveChannelSettings,
   fetchAuditLog,
+  deleteChannelAction,
 } from '@/app/settings/[serverSlug]/[channelSlug]/actions';
 import { VisibilityToggle } from '@/components/channel/VisibilityToggle';
 import { SeoPreviewSection } from '@/components/settings/SeoPreviewSection';
@@ -40,7 +41,13 @@ const NOTIF_LABELS: Record<NotifLevel, string> = {
   NONE: 'Muted',
 };
 
-function ChannelNotificationsSection({ channel, serverId }: { channel: Channel; serverId: string }) {
+function ChannelNotificationsSection({
+  channel,
+  serverId,
+}: {
+  channel: Channel;
+  serverId: string;
+}) {
   const [level, setLevel] = useState<NotifLevel>('MENTIONS');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -49,7 +56,7 @@ function ChannelNotificationsSection({ channel, serverId }: { channel: Channel; 
   useEffect(() => {
     apiClient
       .trpcQuery<{ level: NotifLevel }[]>('notification.getPreferences')
-      .then((prefs) => {
+      .then(prefs => {
         const pref = prefs.find(
           (p: { channelId?: string | null; level: NotifLevel }) => p.channelId === channel.id,
         );
@@ -86,11 +93,11 @@ function ChannelNotificationsSection({ channel, serverId }: { channel: Channel; 
       <div className='flex items-center gap-3'>
         <select
           value={level}
-          onChange={(e) => setLevel(e.target.value as NotifLevel)}
+          onChange={e => setLevel(e.target.value as NotifLevel)}
           disabled={saving}
           className='rounded bg-[#1e1f22] px-3 py-1.5 text-sm text-gray-200 border border-[#3d4148] focus:outline-none focus:border-indigo-500 disabled:opacity-50'
         >
-          {(Object.keys(NOTIF_LABELS) as NotifLevel[]).map((l) => (
+          {(Object.keys(NOTIF_LABELS) as NotifLevel[]).map(l => (
             <option key={l} value={l}>
               {NOTIF_LABELS[l]}
             </option>
@@ -109,15 +116,23 @@ function ChannelNotificationsSection({ channel, serverId }: { channel: Channel; 
   );
 }
 
-type Section = 'overview' | 'permissions' | 'visibility' | 'members' | 'seo' | 'notifications';
+type Section =
+  | 'overview'
+  | 'permissions'
+  | 'visibility'
+  | 'members'
+  | 'seo'
+  | 'notifications'
+  | 'danger';
 
-const SECTIONS: { id: Section; label: string }[] = [
+const SECTIONS: { id: Section; label: string; danger?: boolean }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'permissions', label: 'Permissions' },
   { id: 'visibility', label: 'Visibility' },
   { id: 'members', label: 'Members' },
   { id: 'seo', label: 'SEO Preview' },
   { id: 'notifications', label: 'Notifications' },
+  { id: 'danger', label: 'Delete Channel', danger: true },
 ];
 
 // ─── Overview section ─────────────────────────────────────────────────────────
@@ -610,13 +625,97 @@ function VisibilitySection({
   );
 }
 
-// ─── Loading spinner ──────────────────────────────────────────────────────────
+// ─── Danger zone section ──────────────────────────────────────────────────────
+
+function DangerZoneSection({
+  channel,
+  serverSlug,
+  isLastTextChannel,
+}: {
+  channel: Channel;
+  serverSlug: string;
+  isLastTextChannel: boolean;
+}) {
+  const [confirmText, setConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const nameMatches = confirmText === channel.name;
+  const blocked = isLastTextChannel;
+
+  async function handleDelete() {
+    if (!nameMatches || deleting) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteChannelAction(serverSlug, channel.slug);
+    } catch (err) {
+      setError(getUserErrorMessage(err, 'Failed to delete channel.'));
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div className='max-w-lg space-y-6'>
+      <h2 className='text-xl font-semibold text-white'>Delete Channel</h2>
+      <div className='rounded border border-red-500/40 bg-red-950/20 p-5 space-y-4'>
+        {blocked ? (
+          <p className='text-sm text-gray-300'>
+            <span className='font-semibold text-white'>#{channel.name}</span> cannot be deleted
+            because it is the only text channel in this server. Create another text channel first.
+          </p>
+        ) : (
+          <>
+            <p className='text-sm text-gray-300'>
+              Deleting <span className='font-semibold text-white'>#{channel.name}</span> is
+              permanent and cannot be undone. All messages and settings for this channel will be
+              lost.
+            </p>
+            <div>
+              <label
+                htmlFor='confirm-channel-name'
+                className='mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-400'
+              >
+                Type the channel name to confirm
+              </label>
+              <input
+                id='confirm-channel-name'
+                type='text'
+                value={confirmText}
+                onChange={e => setConfirmText(e.target.value)}
+                placeholder={channel.name}
+                disabled={deleting}
+                className={cn(
+                  'w-full rounded px-3 py-2 text-sm text-white placeholder-gray-600 outline-none',
+                  'focus:ring-2 focus:ring-red-500 disabled:opacity-50',
+                  BG.input,
+                )}
+              />
+            </div>
+            {error && <p className='text-xs text-red-400'>{error}</p>}
+            <button
+              type='button'
+              onClick={handleDelete}
+              disabled={!nameMatches || deleting}
+              className='rounded px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+            >
+              {deleting ? 'Deleting…' : 'Delete Channel'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 export interface ChannelSettingsPageProps {
   channel: Channel;
   serverSlug: string;
   serverOwnerId?: string;
   canManageSeo?: boolean;
+  isLastTextChannel?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -626,6 +725,7 @@ export function ChannelSettingsPage({
   serverSlug,
   serverOwnerId: _serverOwnerId,
   canManageSeo = true,
+  isLastTextChannel = false,
 }: ChannelSettingsPageProps) {
   const router = useRouter();
   const [activeSection, setActiveSection] = useState<Section>('overview');
@@ -633,7 +733,7 @@ export function ChannelSettingsPage({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const isSeoAllowed = channel.visibility === ChannelVisibility.PUBLIC_INDEXABLE;
-  const visibleSections = SECTIONS.filter((s) => s.id !== 'seo' || isSeoAllowed);
+  const visibleSections = SECTIONS.filter(s => s.id !== 'seo' || isSeoAllowed);
 
   // Render-phase derived-state reset: keep sidebar heading and back-button text
   // in sync when channel prop changes without unmounting this component.
@@ -682,7 +782,7 @@ export function ChannelSettingsPage({
 
         {/* Nav items */}
         <nav aria-label='Settings sections'>
-          {visibleSections.map(({ id, label }) => (
+          {visibleSections.map(({ id, label, danger }) => (
             <button
               key={id}
               type='button'
@@ -693,9 +793,13 @@ export function ChannelSettingsPage({
               aria-current={effectiveSection === id ? 'page' : undefined}
               className={cn(
                 'w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm transition-colors',
-                effectiveSection === id
-                  ? cn(BG.active, 'font-medium text-white')
-                  : 'text-gray-400 hover:bg-[#393c43] hover:text-gray-200',
+                danger
+                  ? effectiveSection === id
+                    ? cn(BG.active, 'font-medium text-red-400')
+                    : 'text-red-400/80 hover:bg-[#393c43] hover:text-red-400'
+                  : effectiveSection === id
+                    ? cn(BG.active, 'font-medium text-white')
+                    : 'text-gray-400 hover:bg-[#393c43] hover:text-gray-200',
               )}
             >
               {label}
@@ -774,6 +878,13 @@ export function ChannelSettingsPage({
           )}
           {effectiveSection === 'notifications' && (
             <ChannelNotificationsSection channel={channel} serverId={channel.serverId} />
+          )}
+          {effectiveSection === 'danger' && (
+            <DangerZoneSection
+              channel={channel}
+              serverSlug={serverSlug}
+              isLastTextChannel={isLastTextChannel}
+            />
           )}
         </div>
       </main>
