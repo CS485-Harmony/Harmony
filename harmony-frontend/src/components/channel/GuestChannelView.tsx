@@ -21,6 +21,7 @@ import { MessageList } from '@/components/channel/MessageList';
 import { GuestPromoBanner } from '@/components/channel/GuestPromoBanner';
 import { GuestHeader } from '@/components/channel/GuestHeader';
 import { PrivateChannelLockedPane } from '@/components/channel/PrivateChannelLockedPane';
+import { GuestMessageSearch } from '@/components/channel/GuestMessageSearch';
 import type { Channel } from '@/types';
 
 // ─── Channel Header ───────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ function ChannelHeader({ channel }: { channel: Channel }) {
           <p className='truncate text-sm text-gray-400'>{channel.topic}</p>
         </>
       )}
+      <GuestMessageSearch channelId={channel.id} channelName={channel.name} />
     </div>
   );
 }
@@ -93,10 +95,7 @@ export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannel
         {isMember && <AuthRedirect to={`/channels/${serverSlug}/${channelSlug}`} />}
         <GuestHeader server={server} />
         <div className='flex flex-1 overflow-hidden'>
-          <ServerSidebar
-            serverInfo={server}
-            publicChannels={publicChannels}
-          />
+          <ServerSidebar serverInfo={server} publicChannels={publicChannels} />
           <PrivateChannelLockedPane mode='guest' />
         </div>
       </div>
