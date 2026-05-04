@@ -19,6 +19,7 @@ import {
 } from '@/services/channelService';
 import { getServer, getServerMembersWithRole } from '@/services/serverService';
 import { createFrontendLogger } from '@/lib/frontend-logger';
+import { SEO_PREVIEW_LOAD_ERROR } from '@/lib/seoConstants';
 import type { ServerMemberInfo } from '@/types';
 import type { Channel } from '@/types';
 import { ChannelVisibility } from '@/types';
@@ -121,7 +122,7 @@ export async function fetchSeoPreview(
       operation: 'fetchSeoPreview',
       route: `/settings/${serverSlug}/${channelSlug}`,
     });
-    throw new Error('SEO preview is temporarily unavailable. Please try again in a few minutes.');
+    throw new Error(SEO_PREVIEW_LOAD_ERROR);
   }
 }
 

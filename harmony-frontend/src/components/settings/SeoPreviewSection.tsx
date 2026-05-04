@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { getUserErrorMessage, cn } from '@/lib/utils';
+import { SEO_PREVIEW_LOAD_ERROR } from '@/lib/seoConstants';
 import {
   fetchSeoPreview,
   fetchSeoRegenerationStatus,
@@ -13,8 +14,6 @@ import type { MetaTagJobStatus, MetaTagPreview } from '@/services/metaTagAdminSe
 const TITLE_MAX = 70;
 const DESCRIPTION_MAX = 200;
 const OG_IMAGE_MAX = 500;
-const SEO_PREVIEW_LOAD_ERROR =
-  'SEO preview is temporarily unavailable. Please try again in a few minutes.';
 
 function buildValidationError(value: string, max: number, label: string): string | null {
   if (value.length <= max) return null;

@@ -7,6 +7,7 @@ import {
   saveSeoOverrides,
   triggerSeoRegeneration,
 } from '@/app/settings/[serverSlug]/[channelSlug]/actions';
+import { SEO_PREVIEW_LOAD_ERROR } from '@/lib/seoConstants';
 
 jest.mock('@/app/settings/[serverSlug]/[channelSlug]/actions', () => ({
   fetchSeoPreview: jest.fn(),
@@ -75,9 +76,7 @@ describe('SeoPreviewSection', () => {
 
     render(<SeoPreviewSection serverSlug='demo' channelSlug='general' canManageSeo />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'SEO preview is temporarily unavailable. Please try again in a few minutes.',
-    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(SEO_PREVIEW_LOAD_ERROR);
     expect(screen.queryByText(/specific message is omitted/i)).not.toBeInTheDocument();
   });
 

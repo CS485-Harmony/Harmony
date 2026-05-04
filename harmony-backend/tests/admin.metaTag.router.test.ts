@@ -217,6 +217,17 @@ describe('GET /api/admin/channels/:channelId/meta-tags', () => {
     expect(res.body.searchPreview.url).toContain('/c/test-server/general');
   });
 
+  it('caches the ephemeral fallback preview briefly to avoid repeated regeneration work', async () => {
+    mockMetaTagRepo.findByChannelId.mockResolvedValue(null);
+
+    const first = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
+    const second = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(mockPrisma.message.findMany).toHaveBeenCalledTimes(1);
+  });
+
   it('returns 200 with MetaTagPreview on success', async () => {
     mockMetaTagRepo.findByChannelId.mockResolvedValue(META_TAG_RECORD);
     const res = await request(app).get(url).set('Authorization', `Bearer ${VALID_TOKEN}`);
