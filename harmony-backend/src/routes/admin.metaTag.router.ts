@@ -21,13 +21,12 @@ import { prisma } from '../db/prisma';
 import { redis } from '../db/redis';
 import { createLogger } from '../lib/logger';
 import { auditLogService } from '../services/auditLog.service';
-import { cacheService, sanitizeKeySegment } from '../services/cache.service';
+import { cacheService, CacheKeys, CacheTTL } from '../services/cache.service';
 import type { MetaTagPreview } from '../services/metaTag/types';
 
 const logger = createLogger({ component: 'admin-meta-tag-router' });
 
 const BASE_URL = process.env.BASE_URL ?? 'https://harmony.chat';
-const FALLBACK_PREVIEW_TTL_SECONDS = 60;
 
 // ─── Validation schemas ───────────────────────────────────────────────────────
 
@@ -43,10 +42,6 @@ const IDEMPOTENCY_TTL_SECONDS = 60;
 
 function idempotencyKey(channelId: string, key: string): string {
   return `meta-tag:idempotency:${channelId}:${key}`;
-}
-
-function fallbackPreviewCacheKey(channelId: string): string {
-  return `meta-tag:admin-preview-fallback:${sanitizeKeySegment(channelId)}`;
 }
 
 // ─── Admin authorization middleware ──────────────────────────────────────────
@@ -130,11 +125,11 @@ function buildPreview(
 }
 
 async function getCachedFallbackPreview(channelId: string): Promise<MetaTagPreview> {
-  const cacheKey = fallbackPreviewCacheKey(channelId);
+  const cacheKey = CacheKeys.metaChannelAdminPreviewFallback(channelId);
 
   try {
     const entry = await cacheService.get<MetaTagPreview>(cacheKey);
-    if (entry && !cacheService.isStale(entry, FALLBACK_PREVIEW_TTL_SECONDS)) {
+    if (entry && !cacheService.isStale(entry, CacheTTL.metaChannelAdminPreviewFallback)) {
       return entry.data;
     }
   } catch (err) {
@@ -146,7 +141,7 @@ async function getCachedFallbackPreview(channelId: string): Promise<MetaTagPrevi
 
   const fallbackPreview = await metaTagService.getFallbackMetaTagsForPreview(channelId);
   cacheService
-    .set(cacheKey, fallbackPreview, { ttl: FALLBACK_PREVIEW_TTL_SECONDS })
+    .set(cacheKey, fallbackPreview, { ttl: CacheTTL.metaChannelAdminPreviewFallback })
     .catch((err) =>
       logger.warn({ err, channelId, cacheKey }, 'Failed to cache admin SEO fallback preview'),
     );

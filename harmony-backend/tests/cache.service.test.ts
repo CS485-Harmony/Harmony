@@ -6,7 +6,13 @@
  * Requires REDIS_URL pointing at a running Redis instance.
  */
 
-import { cacheService, CacheKeys, CacheTTL, CacheEntry, sanitizeKeySegment } from '../src/services/cache.service';
+import {
+  cacheService,
+  CacheKeys,
+  CacheTTL,
+  CacheEntry,
+  sanitizeKeySegment,
+} from '../src/services/cache.service';
 import { redis } from '../src/db/redis';
 
 beforeAll(async () => {
@@ -37,6 +43,12 @@ describe('CacheKeys', () => {
   it('generates correct server info key', () => {
     expect(CacheKeys.serverInfo('srv-1')).toBe('server:srv-1:info');
   });
+
+  it('generates correct admin meta tag fallback preview key', () => {
+    expect(CacheKeys.metaChannelAdminPreviewFallback('abc-123')).toBe(
+      'meta:channel:abc-123:admin-preview-fallback',
+    );
+  });
 });
 
 // ─── Key sanitization ───────────────────────────────────────────────────────
@@ -56,6 +68,9 @@ describe('sanitizeKeySegment', () => {
   it('produces safe cache keys via CacheKeys helpers', () => {
     expect(CacheKeys.channelVisibility('*')).toBe('channel::visibility');
     expect(CacheKeys.channelMessages('a]b[c', 1)).toBe('channel:msgs:abc:page:1');
+    expect(CacheKeys.metaChannelAdminPreviewFallback('a]b[c')).toBe(
+      'meta:channel:abc:admin-preview-fallback',
+    );
   });
 });
 
@@ -66,6 +81,7 @@ describe('CacheTTL', () => {
     expect(CacheTTL.channelVisibility).toBe(3600);
     expect(CacheTTL.channelMessages).toBe(60);
     expect(CacheTTL.serverInfo).toBe(300);
+    expect(CacheTTL.metaChannelAdminPreviewFallback).toBe(300);
   });
 });
 
@@ -182,7 +198,9 @@ describe('cacheService.getOrRevalidate', () => {
     await redis.set('test:swr-stale', JSON.stringify(staleEntry), 'EX', 300);
 
     let resolveRevalidation: (v: unknown) => void;
-    const revalidationDone = new Promise((r) => { resolveRevalidation = r; });
+    const revalidationDone = new Promise((r) => {
+      resolveRevalidation = r;
+    });
 
     const fetcher = jest.fn().mockImplementation(() => {
       return new Promise((resolve) => {
