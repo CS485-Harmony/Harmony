@@ -21,6 +21,7 @@ import { prisma } from '../db/prisma';
 import { redis } from '../db/redis';
 import { createLogger } from '../lib/logger';
 import { auditLogService } from '../services/auditLog.service';
+import { cacheService, CacheKeys, CacheTTL } from '../services/cache.service';
 import type { MetaTagPreview } from '../services/metaTag/types';
 
 const logger = createLogger({ component: 'admin-meta-tag-router' });
@@ -123,6 +124,30 @@ function buildPreview(
   };
 }
 
+async function getCachedFallbackPreview(channelId: string): Promise<MetaTagPreview> {
+  const cacheKey = CacheKeys.metaChannelAdminPreviewFallback(channelId);
+
+  try {
+    const entry = await cacheService.get<MetaTagPreview>(cacheKey);
+    if (entry && !cacheService.isStale(entry, CacheTTL.metaChannelAdminPreviewFallback)) {
+      return entry.data;
+    }
+  } catch (err) {
+    logger.warn(
+      { err, channelId, cacheKey },
+      'Failed to read admin SEO fallback preview cache; generating directly',
+    );
+  }
+
+  const fallbackPreview = await metaTagService.getFallbackMetaTagsForPreview(channelId);
+  cacheService
+    .set(cacheKey, fallbackPreview, { ttl: CacheTTL.metaChannelAdminPreviewFallback })
+    .catch((err) =>
+      logger.warn({ err, channelId, cacheKey }, 'Failed to cache admin SEO fallback preview'),
+    );
+  return fallbackPreview;
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 export const adminMetaTagRouter = Router();
@@ -143,7 +168,12 @@ adminMetaTagRouter.get(
       const record = await metaTagRepository.findByChannelId(channelId);
 
       if (!record) {
-        res.status(404).json({ error: 'Meta tags not found for this channel' });
+        logger.warn(
+          { channelId, operation: 'adminSeoPreviewFallback' },
+          'Admin SEO preview missing persisted meta tags; generating fallback preview',
+        );
+        const fallbackPreview = await getCachedFallbackPreview(channelId);
+        res.json(fallbackPreview);
         return;
       }
 

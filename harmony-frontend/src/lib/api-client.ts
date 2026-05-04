@@ -234,7 +234,9 @@ class ApiClient {
 
   /** Call a tRPC mutation procedure (POST). Returns the unwrapped data. */
   async trpcMutation<T>(procedure: string, input?: unknown): Promise<T> {
-    const res = await this.client.post<TrpcResponse<T>>(`/trpc/${procedure}`, input);
+    // Always pass at least null so axios sets Content-Type: application/json.
+    // tRPC returns 415 when the header is absent (no-body POST).
+    const res = await this.client.post<TrpcResponse<T>>(`/trpc/${procedure}`, input ?? null);
     return res.data.result.data;
   }
 }
@@ -252,7 +254,7 @@ export async function fetchSseTicket(apiBaseUrl: string, accessToken: string): P
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`Failed to fetch SSE ticket: ${res.status}`);
-  const data = await res.json() as { ticket: string };
+  const data = (await res.json()) as { ticket: string };
   return data.ticket;
 }
 

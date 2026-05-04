@@ -26,6 +26,12 @@ interface Notification {
 interface NotificationBellProps {
   /** When provided, the component connects to the user SSE stream for real-time badges. */
   userId?: string;
+  /** Called whenever the per-server unread mention counts change. */
+  onUnreadCountsByServerChange?: (counts: Record<string, number>) => void;
+  /** Called whenever the per-channel unread mention counts change. */
+  onUnreadCountsByChannelChange?: (counts: Record<string, number>) => void;
+  /** When the user navigates to a channel, auto-mark its notifications as read. */
+  currentChannelId?: string;
 }
 
 function BellIcon({ className }: { className?: string }) {
@@ -55,11 +61,55 @@ function formatRelativeTime(ts: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function NotificationBell({ userId }: NotificationBellProps) {
+export function NotificationBell({ userId, onUnreadCountsByServerChange, onUnreadCountsByChannelChange, currentChannelId }: NotificationBellProps) {
   const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
+  const onUnreadCountsByServerChangeRef = useRef(onUnreadCountsByServerChange);
+  onUnreadCountsByServerChangeRef.current = onUnreadCountsByServerChange;
+  const onUnreadCountsByChannelChangeRef = useRef(onUnreadCountsByChannelChange);
+  onUnreadCountsByChannelChangeRef.current = onUnreadCountsByChannelChange;
+
+  const unreadByServer = useMemo(
+    () =>
+      notifications
+        .filter((n) => !n.read)
+        .reduce<Record<string, number>>((acc, n) => ({ ...acc, [n.serverId]: (acc[n.serverId] ?? 0) + 1 }), {}),
+    [notifications],
+  );
+
+  const unreadByChannel = useMemo(
+    () =>
+      notifications
+        .filter((n) => !n.read)
+        .reduce<Record<string, number>>((acc, n) => ({ ...acc, [n.channelId]: (acc[n.channelId] ?? 0) + 1 }), {}),
+    [notifications],
+  );
+
+  useEffect(() => {
+    onUnreadCountsByServerChangeRef.current?.(unreadByServer);
+  }, [unreadByServer]);
+
+  useEffect(() => {
+    onUnreadCountsByChannelChangeRef.current?.(unreadByChannel);
+  }, [unreadByChannel]);
+
+  // Auto-mark notifications as read when the user is in a channel that has unread mentions.
+  // Depends on unreadByChannel so it re-fires when notifications load after initial mount or
+  // when a new SSE-delivered mention arrives while the user is already in that channel.
+  useEffect(() => {
+    if (!currentChannelId || !userId) return;
+    if (!unreadByChannel[currentChannelId]) return;
+    void apiClient
+      .trpcMutation('notification.markChannelAsRead', { channelId: currentChannelId })
+      .then(() => {
+        setNotifications((prev) =>
+          prev.map((n) => (n.channelId === currentChannelId ? { ...n, read: true } : n)),
+        );
+      })
+      .catch((err) => console.error('[NotificationBell] markChannelAsRead failed:', err));
+  }, [currentChannelId, userId, unreadByChannel]);
   const [isLoading, setIsLoading] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -184,8 +234,8 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     try {
       await apiClient.trpcMutation('notification.markAllAsRead');
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    } catch {
-      // ignore — non-critical, badge will self-correct on next load
+    } catch (err) {
+      console.error('[NotificationBell] markAllAsRead failed:', err);
     }
   };
 

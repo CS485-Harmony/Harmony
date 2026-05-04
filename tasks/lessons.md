@@ -24,6 +24,12 @@ Shared knowledge base for the Harmony team. Add an entry whenever a mistake is c
 **Mistake / Situation:** I briefly started issue work in the shared Codex checkout instead of first creating the requested isolated per-issue worktree.  
 **Rule / Fix:** When Harmony work is coordinated with other workers, create and use the requested issue-specific worktree before making local task files or code edits; leave the original checkout untouched except for the minimum git inspection needed to coordinate branches.
 
+**Date:** 2026-05-03
+**Caught by:** [Human: user]
+**Related Issue:** #592
+**Mistake / Situation:** I started issue work from an existing shared checkout instead of immediately isolating the issue branch in a per-issue worktree while other workers were active.
+**Rule / Fix:** When the user says other workers are making disjoint Harmony issue branches, create or switch into the requested isolated per-issue worktree before any branch-changing or editing command, and leave the original checkout untouched.
+
 **Date:** 2026-04-28  
 **Caught by:** [Human: user]  
 **Related Issue:** N/A  

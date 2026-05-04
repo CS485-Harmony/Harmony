@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { HarmonyShell } from '@/components/layout/HarmonyShell';
 import { ChannelType, ChannelVisibility } from '@/types';
@@ -6,6 +6,8 @@ import type { Channel, Message, Server, User } from '@/types';
 
 const mockUseAuth = jest.fn();
 const mockUseServerEvents = jest.fn();
+const mockSetVoiceChannelIds = jest.fn();
+const mockUseVoiceOptional = jest.fn();
 
 jest.mock('@/hooks/useAuth', () => ({
   useAuth: () => mockUseAuth(),
@@ -17,6 +19,7 @@ jest.mock('next/navigation', () => ({
 
 jest.mock('@/contexts/VoiceContext', () => ({
   VoiceProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useVoiceOptional: () => mockUseVoiceOptional(),
 }));
 
 jest.mock('@/hooks/useServerEvents', () => ({
@@ -166,6 +169,9 @@ beforeAll(() => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockUseVoiceOptional.mockReturnValue({
+    setVoiceChannelIds: mockSetVoiceChannelIds,
+  });
   mockUseAuth.mockReturnValue({
     user: null,
     isAuthenticated: false,
@@ -209,5 +215,34 @@ describe('Issue #338 — private channel denial keeps the shell mounted', () => 
         onMessageDeleted: undefined,
       }),
     );
+  });
+
+  it('publishes live voice channel ids after channel events update local channels', async () => {
+    renderShell();
+
+    await waitFor(() => {
+      expect(mockSetVoiceChannelIds).toHaveBeenLastCalledWith([]);
+    });
+
+    const voiceChannel: Channel = {
+      id: 'voice-1',
+      name: 'Standup',
+      slug: 'standup',
+      serverId: server.id,
+      type: ChannelType.VOICE,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+      position: 1,
+      createdAt: '2026-04-16T12:00:00.000Z',
+    };
+
+    act(() => {
+      const latestServerEventsOptions =
+        mockUseServerEvents.mock.calls[mockUseServerEvents.mock.calls.length - 1][0];
+      latestServerEventsOptions.onChannelCreated(voiceChannel);
+    });
+
+    await waitFor(() => {
+      expect(mockSetVoiceChannelIds).toHaveBeenLastCalledWith(['voice-1']);
+    });
   });
 });
