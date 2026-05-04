@@ -127,10 +127,7 @@ export async function triggerSeoRegeneration(
  * the client), then redirects to the server home after deletion.
  * Auth enforced by the backend `channel.deleteChannel` procedure (requires channel:delete).
  */
-export async function deleteChannelAction(
-  serverSlug: string,
-  channelSlug: string,
-): Promise<void> {
+export async function deleteChannelAction(serverSlug: string, channelSlug: string): Promise<void> {
   const channel = await getChannel(serverSlug, channelSlug);
   if (!channel) throw new Error('Channel not found');
 
@@ -140,6 +137,7 @@ export async function deleteChannelAction(
   await deleteChannel(channel.id, server.id);
 
   revalidatePath(`/channels/${serverSlug}`, 'layout');
+  revalidatePath(`/c/${serverSlug}`, 'layout');
   revalidatePath(`/settings/${serverSlug}`, 'layout');
   redirect(`/channels/${serverSlug}`);
 }

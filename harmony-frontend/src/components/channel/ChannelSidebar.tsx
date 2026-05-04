@@ -415,7 +415,14 @@ export function ChannelSidebar({
                 <ul className='list-none'>
                   {voiceChannels.map(channel => (
                     <li key={channel.id}>
-                      <div className='group flex items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors hover:bg-[#393c43]'>
+                      <div
+                        className={cn(
+                          'group flex items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
+                          connectedChannelId === channel.id
+                            ? cn(BG_ACTIVE, 'hover:bg-[#3d4148]')
+                            : 'hover:bg-[#393c43]',
+                        )}
+                      >
                         <button
                           type='button'
                           disabled={!isAuthenticated || joining}
