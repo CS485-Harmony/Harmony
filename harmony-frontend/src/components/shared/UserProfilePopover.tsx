@@ -110,7 +110,7 @@ export function UserProfilePopover({
   const displayName = displayed?.displayName || displayed?.username || '…';
   const username = displayed?.username || '';
   const avatarUrl = displayed?.avatarUrl;
-  const status = (user?.status ?? 'offline') as UserStatus;
+  const status = (user?.status?.toLowerCase() ?? 'offline') as UserStatus;
   const initial = displayName.charAt(0).toUpperCase();
 
   return (
@@ -121,34 +121,33 @@ export function UserProfilePopover({
       className='fixed z-50 rounded-lg bg-[#18191c] shadow-2xl ring-1 ring-black/40'
       style={style}
     >
-      {/* Banner + avatar */}
-      <div className='h-16 rounded-t-lg bg-[#5865f2]' />
-      <div className='relative px-4 pb-4'>
-        <div className='absolute -top-8 left-4'>
-          <div className='relative'>
-            {avatarUrl && !avatarError ? (
-              <Image
-                src={avatarUrl}
-                alt={displayName}
-                width={56}
-                height={56}
-                unoptimized
-                className='h-14 w-14 rounded-full ring-4 ring-[#18191c]'
-                onError={() => setAvatarError(true)}
-              />
-            ) : (
-              <div className='flex h-14 w-14 items-center justify-center rounded-full bg-[#5865f2] text-xl font-bold text-white ring-4 ring-[#18191c]'>
-                {initial}
-              </div>
-            )}
-            <span
-              className={`absolute bottom-0.5 right-0.5 h-3.5 w-3.5 rounded-full ring-2 ring-[#18191c] ${STATUS_COLOR[status] ?? STATUS_COLOR.offline}`}
-              aria-label={STATUS_LABEL[status] ?? 'Offline'}
+      {/* Banner */}
+      <div className='h-10 rounded-t-lg bg-[#5865f2]' />
+      {/* Avatar + name side-by-side */}
+      <div className='flex items-center gap-3 px-4 py-3'>
+        <div className='relative flex-shrink-0'>
+          {avatarUrl && !avatarError ? (
+            <Image
+              src={avatarUrl}
+              alt={displayName}
+              width={56}
+              height={56}
+              unoptimized
+              className='h-14 w-14 rounded-full ring-4 ring-[#18191c]'
+              onError={() => setAvatarError(true)}
             />
-          </div>
+          ) : (
+            <div className='flex h-14 w-14 items-center justify-center rounded-full bg-[#5865f2] text-xl font-bold text-white ring-4 ring-[#18191c]'>
+              {initial}
+            </div>
+          )}
+          <span
+            className={`absolute bottom-0.5 right-0.5 h-3.5 w-3.5 rounded-full ring-2 ring-[#18191c] ${STATUS_COLOR[status] ?? STATUS_COLOR.offline}`}
+            aria-label={STATUS_LABEL[status] ?? 'Offline'}
+          />
         </div>
 
-        <div className='mt-10'>
+        <div>
           <p className='text-base font-bold leading-tight text-white'>
             {displayName}
           </p>
