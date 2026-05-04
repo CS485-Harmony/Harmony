@@ -368,15 +368,38 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
         // Dynamic import keeps the Twilio SDK out of SSR.
         const TwilioVideo = await import('twilio-video');
         const inputDeviceId = getStoredAudioInputDeviceId();
-        const room = await TwilioVideo.connect(token, {
-          name: channelId,
-          audio:
-            inputDeviceId && inputDeviceId !== 'default'
-              ? { deviceId: { exact: inputDeviceId } }
-              : true,
-          video: false,
-          dominantSpeaker: true,
-        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let room: any;
+        try {
+          room = await TwilioVideo.connect(token, {
+            name: channelId,
+            audio:
+              inputDeviceId && inputDeviceId !== 'default'
+                ? { deviceId: { exact: inputDeviceId } }
+                : true,
+            video: false,
+            dominantSpeaker: true,
+          });
+        } catch (connectErr) {
+          // Stale stored device ID — clear it and retry with the system default so the
+          // join succeeds rather than aborting (satisfies AC: graceful fallback).
+          if (
+            connectErr instanceof DOMException &&
+            (connectErr.name === 'OverconstrainedError' || connectErr.name === 'NotFoundError') &&
+            inputDeviceId &&
+            inputDeviceId !== 'default'
+          ) {
+            localStorage.removeItem('harmony_audio_input_device_id');
+            room = await TwilioVideo.connect(token, {
+              name: channelId,
+              audio: true,
+              video: false,
+              dominantSpeaker: true,
+            });
+          } else {
+            throw connectErr;
+          }
+        }
         roomRef.current = room;
 
         // Store local identity so setMuted/setDeafened can update the participant entry.
@@ -580,17 +603,18 @@ export function VoiceProvider({ children, serverId, voiceChannelIds, currentUser
           error: err,
         });
         // Distinguish getUserMedia device errors from Twilio server errors for actionable toasts.
+        const isPermissionError =
+          err instanceof DOMException && err.name === 'NotAllowedError';
         const isDeviceError =
           err instanceof DOMException &&
           (err.name === 'NotFoundError' ||
             err.name === 'NotReadableError' ||
-            err.name === 'OverconstrainedError' ||
-            err.name === 'NotAllowedError');
-        const toastMessage = isDeviceError
-          ? err instanceof DOMException && err.name === 'NotAllowedError'
-            ? 'Microphone access denied. Click the lock icon in your address bar and allow microphone permission, then try again.'
-            : 'Microphone not found. Check System Settings → Privacy & Security → Microphone and grant access to your browser.'
-          : 'Could not connect to voice channel. Please try again.';
+            err.name === 'OverconstrainedError');
+        const toastMessage = isPermissionError
+          ? 'Microphone access denied. Click the lock icon in your address bar and allow microphone permission, then try again.'
+          : isDeviceError
+            ? 'Microphone unavailable. Switching to system default — please try joining again.'
+            : 'Could not connect to voice channel. Please try again.';
         showToast({ message: toastMessage, type: 'error' });
         // If voice.join succeeded (refs were written) but Twilio connect failed,
         // notify the backend so Redis state is not left stale.
