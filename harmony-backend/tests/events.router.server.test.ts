@@ -160,6 +160,10 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  delete process.env.SSE_MEMBERSHIP_REVALIDATION_INTERVAL_MS;
+});
+
 // ─── SSE headers ──────────────────────────────────────────────────────────────
 
 describe('GET /api/events/server/:serverId — SSE headers', () => {
@@ -627,7 +631,6 @@ describe('GET /api/events/server/:serverId — membership revocation', () => {
     });
 
     expect(prisma.serverMember.findFirst).toHaveBeenCalledTimes(2);
-    delete process.env.SSE_MEMBERSHIP_REVALIDATION_INTERVAL_MS;
   });
 });
 

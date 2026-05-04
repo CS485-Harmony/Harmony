@@ -166,7 +166,6 @@ function createBufferedSseState(): BufferedSseState {
 }
 
 function cleanupSseConnection(state: BufferedSseState, subscriptions: EventSubscription[]): void {
-  if (state.closed) return;
   state.closed = true;
   if (state.heartbeat) {
     clearInterval(state.heartbeat);
@@ -180,6 +179,7 @@ function cleanupSseConnection(state: BufferedSseState, subscriptions: EventSubsc
   for (const subscription of subscriptions) {
     subscription.unsubscribe();
   }
+  subscriptions.length = 0;
 }
 
 function closeSseForRevokedAccess(
@@ -188,6 +188,7 @@ function closeSseForRevokedAccess(
   subscriptions: EventSubscription[],
 ): void {
   if (state.closed) return;
+  state.closed = true;
   cleanupSseConnection(state, subscriptions);
   if (res.headersSent) {
     res.end();
@@ -209,16 +210,18 @@ async function canAccessChannelStream(
   channelId: string,
   serverId: string,
 ): Promise<boolean> {
-  const membership = await prisma.serverMember.findFirst({
-    where: { userId, serverId },
-    select: { role: true },
-  });
+  const [membership, channel] = await Promise.all([
+    prisma.serverMember.findFirst({
+      where: { userId, serverId },
+      select: { role: true },
+    }),
+    prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { serverId: true, visibility: true },
+    }),
+  ]);
   if (!membership) return false;
 
-  const channel = await prisma.channel.findUnique({
-    where: { id: channelId },
-    select: { serverId: true, visibility: true },
-  });
   if (!channel || channel.serverId !== serverId) return false;
   if (channel.visibility !== 'PRIVATE') return true;
   if (membership.role === 'OWNER' || membership.role === 'ADMIN') return true;

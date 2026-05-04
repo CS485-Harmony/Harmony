@@ -152,6 +152,10 @@ beforeEach(() => {
   (prisma.message.findMany as jest.Mock).mockResolvedValue([]);
 });
 
+afterEach(() => {
+  delete process.env.SSE_MEMBERSHIP_REVALIDATION_INTERVAL_MS;
+});
+
 // ─── SSE headers ──────────────────────────────────────────────────────────────
 
 describe('GET /api/events/channel/:channelId — SSE headers', () => {
@@ -375,7 +379,6 @@ describe('GET /api/events/channel/:channelId — membership revocation', () => {
     });
 
     expect(prisma.channelMember.findUnique).toHaveBeenCalledTimes(2);
-    delete process.env.SSE_MEMBERSHIP_REVALIDATION_INTERVAL_MS;
   });
 });
 
