@@ -149,10 +149,6 @@ describe('POST /api/auth/register', () => {
   it.each(['--admin', '_admin', '__system'])(
     'rejects username %s because usernames must start with a letter or number',
     async (username) => {
-      mockPrisma.user.findUnique.mockResolvedValue(null);
-      mockPrisma.user.create.mockResolvedValue({ ...mockUser, username });
-      mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshToken);
-
       const res = await request(app)
         .post('/api/auth/register')
         .set('Origin', 'http://localhost:3000')
@@ -168,6 +164,35 @@ describe('POST /api/auth/register', () => {
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
     },
   );
+
+  it('accepts usernames that start with a number', async () => {
+    const numericUsernameUser = { ...mockUser, username: '0validname' };
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+    mockPrisma.user.create.mockResolvedValue(numericUsernameUser);
+    mockPrisma.refreshToken.create.mockResolvedValue({
+      ...mockRefreshToken,
+      userId: numericUsernameUser.id,
+    });
+
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: '0validname@example.com',
+        username: numericUsernameUser.username,
+        passwordSalt: PASSWORD_SALT,
+        passwordVerifier: derivePasswordVerifier('password123'),
+      });
+
+    expect(res.status).toBe(201);
+    expect(typeof res.body.accessToken).toBe('string');
+    expect(typeof res.body.refreshToken).toBe('string');
+    expect(mockPrisma.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ username: numericUsernameUser.username }),
+      }),
+    );
+  });
 
   it('returns 409 when email is already in use', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(mockUser);
