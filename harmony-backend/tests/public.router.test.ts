@@ -5,6 +5,7 @@
  *   GET /api/public/servers/:serverSlug
  *   GET /api/public/servers/:serverSlug/channels
  *   GET /api/public/channels/:channelId/messages
+ *   GET /api/public/channels/:channelId/messages/search
  *   GET /api/public/channels/:channelId/messages/:messageId
  *
  * Prisma and cacheService are mocked so no running database or Redis is required.
@@ -556,6 +557,73 @@ describe('GET /api/public/channels/:channelId/messages — additional', () => {
   });
 });
 
+// ─── GET /api/public/channels/:channelId/messages/search ────────────────────
+
+describe('GET /api/public/channels/:channelId/messages/search', () => {
+  it('returns case-insensitive matches scoped to the current public channel', async () => {
+    const matchingMessage = {
+      ...MESSAGE,
+      content: 'We shipped the Guest Search sidebar today.',
+    };
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([matchingMessage]);
+
+    const res = await request(app).get(
+      `/api/public/channels/${CHANNEL.id}/messages/search?q=guest%20search`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      results: [
+        expect.objectContaining({
+          id: matchingMessage.id,
+          content: matchingMessage.content,
+          context: 'We shipped the Guest Search sidebar today.',
+          author: matchingMessage.author,
+        }),
+      ],
+      query: 'guest search',
+      limit: 20,
+    });
+    expect(mockPrisma.message.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          channelId: CHANNEL.id,
+          isDeleted: false,
+          content: { contains: 'guest search', mode: 'insensitive' },
+        },
+      }),
+    );
+  });
+
+  it('returns 400 for an empty keyword', async () => {
+    const res = await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/search?q=`);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toHaveProperty('error', 'Search query is required');
+    expect(mockPrisma.channel.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.message.findMany).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 and does not search messages when the channel is private', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PRIVATE,
+    });
+
+    const res = await request(app).get(
+      `/api/public/channels/${CHANNEL.id}/messages/search?q=secret`,
+    );
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty('error', 'Channel not found');
+    expect(mockPrisma.message.findMany).not.toHaveBeenCalled();
+  });
+});
+
 // ─── Cache middleware behavior (routes 1 and 2) ───────────────────────────────
 
 describe('Cache middleware behavior (routes 1 and 2)', () => {
@@ -1079,5 +1147,24 @@ describe('Rate limiting on publicRouter', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it('returns 429 after exhausting the limit on guest message search', async () => {
+    mockPrisma.channel.findUnique.mockResolvedValue({
+      id: CHANNEL.id,
+      visibility: ChannelVisibility.PUBLIC_INDEXABLE,
+    });
+    mockPrisma.message.findMany.mockResolvedValue([]);
+
+    for (let i = 0; i < 100; i++) {
+      await request(app).get(`/api/public/channels/${CHANNEL.id}/messages/search?q=guest`);
+    }
+
+    const res = await request(app).get(
+      `/api/public/channels/${CHANNEL.id}/messages/search?q=guest`,
+    );
+
+    expect(res.status).toBe(429);
+    expect(res.body).toHaveProperty('error');
   });
 });
