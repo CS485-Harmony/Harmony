@@ -41,6 +41,22 @@ function createStoreFactory(): { factory: () => Store; incrementCalls: string[] 
 }
 
 describe('auth rate limiters — store delegation (Issue #318)', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalTrustProxyHops = process.env.TRUST_PROXY_HOPS;
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+    if (originalTrustProxyHops === undefined) {
+      delete process.env.TRUST_PROXY_HOPS;
+    } else {
+      process.env.TRUST_PROXY_HOPS = originalTrustProxyHops;
+    }
+  });
+
   it('calls increment() on the injected store for POST /api/auth/login', async () => {
     const { factory, incrementCalls } = createStoreFactory();
     const app = createApp({ rateLimitStore: factory });
@@ -82,21 +98,50 @@ describe('auth rate limiters — store delegation (Issue #318)', () => {
   });
 
   it('does not lock out local development after 10 login attempts', async () => {
-    const previousEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'development';
 
-    try {
-      const app = createApp();
-      let lastStatus = 0;
+    const app = createApp();
+    let lastStatus = 0;
 
-      for (let attempt = 0; attempt < 11; attempt += 1) {
-        const res = await request(app).post('/api/auth/login').send({});
-        lastStatus = res.status;
-      }
-
-      expect(lastStatus).not.toBe(429);
-    } finally {
-      process.env.NODE_ENV = previousEnv;
+    for (let attempt = 0; attempt < 11; attempt += 1) {
+      const res = await request(app).post('/api/auth/login').send({});
+      lastStatus = res.status;
     }
+
+    expect(lastStatus).not.toBe(429);
+  });
+
+  it('throws in production when TRUST_PROXY_HOPS is unset', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.TRUST_PROXY_HOPS;
+
+    expect(() => createApp({ rateLimitStore: createStoreFactory().factory })).toThrow(
+      'TRUST_PROXY_HOPS must be set to a positive integer in production.',
+    );
+  });
+
+  it('throws in production when TRUST_PROXY_HOPS is zero', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.TRUST_PROXY_HOPS = '0';
+
+    expect(() => createApp({ rateLimitStore: createStoreFactory().factory })).toThrow(
+      'TRUST_PROXY_HOPS must be set to a positive integer in production.',
+    );
+  });
+
+  it('sets trust proxy in production when TRUST_PROXY_HOPS is positive', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.TRUST_PROXY_HOPS = '1';
+
+    const app = createApp({ rateLimitStore: createStoreFactory().factory });
+
+    expect(app.get('trust proxy')).toBe(1);
+  });
+
+  it('allows local development without TRUST_PROXY_HOPS', () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.TRUST_PROXY_HOPS;
+
+    expect(() => createApp()).not.toThrow();
   });
 });

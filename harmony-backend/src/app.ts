@@ -153,15 +153,14 @@ export function createApp(options: CreateAppOptions = {}) {
   // clients spoof XFF and poison rate-limit buckets. Set to `1` on Railway.
   const trustProxyHopsEnv = process.env.TRUST_PROXY_HOPS;
   if (trustProxyHopsEnv !== undefined && trustProxyHopsEnv.trim() === '') {
-    throw new Error(
-      `Invalid TRUST_PROXY_HOPS value "${trustProxyHopsEnv}". Expected a non-negative integer.`,
-    );
+    throw new Error(`Invalid TRUST_PROXY_HOPS value "${trustProxyHopsEnv}". Expected a non-negative integer.`);
   }
   const trustProxyHops = trustProxyHopsEnv === undefined ? 0 : Number(trustProxyHopsEnv);
   if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
-    throw new Error(
-      `Invalid TRUST_PROXY_HOPS value "${trustProxyHopsEnv}". Expected a non-negative integer.`,
-    );
+    throw new Error(`Invalid TRUST_PROXY_HOPS value "${trustProxyHopsEnv}". Expected a non-negative integer.`);
+  }
+  if (isProduction && trustProxyHops < 1) {
+    throw new Error('TRUST_PROXY_HOPS must be set to a positive integer in production.');
   }
   if (trustProxyHops > 0) {
     app.set('trust proxy', trustProxyHops);

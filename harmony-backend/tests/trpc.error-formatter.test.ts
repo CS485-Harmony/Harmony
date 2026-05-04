@@ -13,6 +13,7 @@
  */
 
 import request from 'supertest';
+import type { Store, IncrementResponse, ClientRateLimitInfo, Options } from 'express-rate-limit';
 import { createApp } from '../src/app';
 
 // ─── Mock Prisma ──────────────────────────────────────────────────────────────
@@ -31,20 +32,43 @@ jest.mock('../src/db/prisma', () => ({
 
 const AUTHED_ENDPOINT = '/trpc/user.getCurrentUser';
 
+function createNoopRateLimitStore(): Store {
+  return {
+    init(_options: Options) {},
+    async increment(_key: string): Promise<IncrementResponse> {
+      return { totalHits: 1, resetTime: new Date(Date.now() + 15 * 60 * 1000) };
+    },
+    async decrement(_key: string): Promise<void> {},
+    async resetKey(_key: string): Promise<void> {},
+    async get(_key: string): Promise<ClientRateLimitInfo | undefined> {
+      return { totalHits: 1, resetTime: new Date(Date.now() + 15 * 60 * 1000) };
+    },
+  };
+}
+
 describe('tRPC errorFormatter — stack trace suppression', () => {
   const originalEnv = process.env.NODE_ENV;
+  const originalTrustProxyHops = process.env.TRUST_PROXY_HOPS;
 
   afterEach(() => {
-    process.env.NODE_ENV = originalEnv;
+    if (originalEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalEnv;
+    }
+    if (originalTrustProxyHops === undefined) {
+      delete process.env.TRUST_PROXY_HOPS;
+    } else {
+      process.env.TRUST_PROXY_HOPS = originalTrustProxyHops;
+    }
   });
 
   it('omits stack trace when NODE_ENV is production', async () => {
     process.env.NODE_ENV = 'production';
-    const app = createApp();
+    process.env.TRUST_PROXY_HOPS = '1';
+    const app = createApp({ rateLimitStore: createNoopRateLimitStore });
 
-    const res = await request(app)
-      .get(AUTHED_ENDPOINT)
-      .set('Accept', 'application/json');
+    const res = await request(app).get(AUTHED_ENDPOINT).set('Accept', 'application/json');
 
     expect(res.status).toBe(401);
     expect(res.body.error).toBeDefined();
@@ -54,12 +78,10 @@ describe('tRPC errorFormatter — stack trace suppression', () => {
   it('includes stack trace when NODE_ENV is development and EXPOSE_STACK=1', async () => {
     process.env.NODE_ENV = 'development';
     process.env.EXPOSE_STACK = '1';
-    const app = createApp();
+    const app = createApp({ rateLimitStore: createNoopRateLimitStore });
 
     try {
-      const res = await request(app)
-        .get(AUTHED_ENDPOINT)
-        .set('Accept', 'application/json');
+      const res = await request(app).get(AUTHED_ENDPOINT).set('Accept', 'application/json');
 
       expect(res.status).toBe(401);
       expect(res.body.error).toBeDefined();
@@ -72,11 +94,9 @@ describe('tRPC errorFormatter — stack trace suppression', () => {
   it('omits stack trace when NODE_ENV is development but EXPOSE_STACK is unset', async () => {
     process.env.NODE_ENV = 'development';
     delete process.env.EXPOSE_STACK;
-    const app = createApp();
+    const app = createApp({ rateLimitStore: createNoopRateLimitStore });
 
-    const res = await request(app)
-      .get(AUTHED_ENDPOINT)
-      .set('Accept', 'application/json');
+    const res = await request(app).get(AUTHED_ENDPOINT).set('Accept', 'application/json');
 
     expect(res.status).toBe(401);
     expect(res.body.error).toBeDefined();
