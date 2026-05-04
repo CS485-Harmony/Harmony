@@ -10,20 +10,26 @@ import type { Channel } from '@/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockGetChannel = jest.fn();
+const mockGetChannelAuthenticated = jest.fn();
+const mockGetServerAuthenticated = jest.fn();
 const mockGetMetaTagPreview = jest.fn();
 const mockUpdateMetaTagOverrides = jest.fn();
 const mockTriggerMetaTagRegeneration = jest.fn();
 const mockGetMetaTagRegenerationStatus = jest.fn();
 
 jest.mock('@/services/channelService', () => ({
-  getChannel: (...args: unknown[]) => mockGetChannel(...args),
+  getChannelAuthenticated: (...args: unknown[]) => mockGetChannelAuthenticated(...args),
   getAuditLog: jest.fn(),
   updateChannel: jest.fn(),
+  deleteChannel: jest.fn(),
+  getChannelMembers: jest.fn(),
+  addChannelMember: jest.fn(),
+  removeChannelMember: jest.fn(),
 }));
 
 jest.mock('@/services/serverService', () => ({
-  getServer: jest.fn(),
+  getServerAuthenticated: (...args: unknown[]) => mockGetServerAuthenticated(...args),
+  getServerMembersWithRole: jest.fn(),
 }));
 
 jest.mock('@/services/metaTagAdminService', () => ({
@@ -56,6 +62,7 @@ function buildChannel(visibility: ChannelVisibility): Channel {
 describe('resolveChannelForSeo guard (issue #568)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetServerAuthenticated.mockResolvedValue({ id: 'srv-1', slug: 'my-server', name: 'My Server' });
   });
 
   describe('fetchSeoPreview', () => {
@@ -63,7 +70,7 @@ describe('resolveChannelForSeo guard (issue #568)', () => {
       const { fetchSeoPreview } = await import(
         '@/app/settings/[serverSlug]/[channelSlug]/actions'
       );
-      mockGetChannel.mockResolvedValue(buildChannel(ChannelVisibility.PUBLIC_NO_INDEX));
+      mockGetChannelAuthenticated.mockResolvedValue(buildChannel(ChannelVisibility.PUBLIC_NO_INDEX));
       await expect(fetchSeoPreview('my-server', 'general')).rejects.toThrow(
         /only available for PUBLIC_INDEXABLE/i,
       );
@@ -73,7 +80,7 @@ describe('resolveChannelForSeo guard (issue #568)', () => {
       const { fetchSeoPreview } = await import(
         '@/app/settings/[serverSlug]/[channelSlug]/actions'
       );
-      mockGetChannel.mockResolvedValue(buildChannel(ChannelVisibility.PRIVATE));
+      mockGetChannelAuthenticated.mockResolvedValue(buildChannel(ChannelVisibility.PRIVATE));
       await expect(fetchSeoPreview('my-server', 'general')).rejects.toThrow(
         /only available for PUBLIC_INDEXABLE/i,
       );
@@ -83,7 +90,7 @@ describe('resolveChannelForSeo guard (issue #568)', () => {
       const { fetchSeoPreview } = await import(
         '@/app/settings/[serverSlug]/[channelSlug]/actions'
       );
-      mockGetChannel.mockResolvedValue(buildChannel(ChannelVisibility.PUBLIC_INDEXABLE));
+      mockGetChannelAuthenticated.mockResolvedValue(buildChannel(ChannelVisibility.PUBLIC_INDEXABLE));
       mockGetMetaTagPreview.mockResolvedValue({ title: 'Title' });
       await expect(fetchSeoPreview('my-server', 'general')).resolves.toBeDefined();
     });
@@ -94,7 +101,7 @@ describe('resolveChannelForSeo guard (issue #568)', () => {
       const { saveSeoOverrides } = await import(
         '@/app/settings/[serverSlug]/[channelSlug]/actions'
       );
-      mockGetChannel.mockResolvedValue(buildChannel(ChannelVisibility.PRIVATE));
+      mockGetChannelAuthenticated.mockResolvedValue(buildChannel(ChannelVisibility.PRIVATE));
       await expect(saveSeoOverrides('my-server', 'general', {})).rejects.toThrow(
         /only available for PUBLIC_INDEXABLE/i,
       );
@@ -106,7 +113,7 @@ describe('resolveChannelForSeo guard (issue #568)', () => {
       const { triggerSeoRegeneration } = await import(
         '@/app/settings/[serverSlug]/[channelSlug]/actions'
       );
-      mockGetChannel.mockResolvedValue(buildChannel(ChannelVisibility.PUBLIC_NO_INDEX));
+      mockGetChannelAuthenticated.mockResolvedValue(buildChannel(ChannelVisibility.PUBLIC_NO_INDEX));
       await expect(triggerSeoRegeneration('my-server', 'general')).rejects.toThrow(
         /only available for PUBLIC_INDEXABLE/i,
       );

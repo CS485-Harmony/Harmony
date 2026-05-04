@@ -5,12 +5,17 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useTransition, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { sanitizeDisplayLabel, getUserErrorMessage } from '@/lib/utils';
-import { joinServerAction } from '@/app/channels/actions';
 import type { Server } from '@/types';
 
 type PublicServer = Omit<Server, 'ownerId'>;
 
-export function GuestHeader({ server }: { server: PublicServer }) {
+interface GuestHeaderProps {
+  server: PublicServer;
+  /** Server action bound to the current server's ID. Omit for contexts where joining is not available. */
+  joinAction?: () => Promise<{ channelSlug: string }>;
+}
+
+export function GuestHeader({ server, joinAction }: GuestHeaderProps) {
   const { isAuthenticated } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
@@ -20,10 +25,11 @@ export function GuestHeader({ server }: { server: PublicServer }) {
   const safeServerName = sanitizeDisplayLabel(server.name) || 'Server';
 
   function handleJoin() {
+    if (!joinAction) return;
     setJoinError(null);
     startTransition(async () => {
       try {
-        const { channelSlug } = await joinServerAction(server.id);
+        const { channelSlug } = await joinAction();
         router.push(`/channels/${server.slug}/${channelSlug}`);
       } catch (err) {
         setJoinError(getUserErrorMessage(err, 'Could not join server. Please try again.'));
@@ -79,14 +85,16 @@ export function GuestHeader({ server }: { server: PublicServer }) {
           >
             My Servers
           </Link>
-          <button
-            type='button'
-            onClick={handleJoin}
-            disabled={isPending}
-            className='inline-flex h-7 items-center justify-center rounded-md bg-[#5865f2] px-3 text-xs font-medium text-white transition-colors hover:bg-[#4752c4] disabled:opacity-60'
-          >
-            {isPending ? 'Joining…' : 'Join Server'}
-          </button>
+          {joinAction && (
+            <button
+              type='button'
+              onClick={handleJoin}
+              disabled={isPending}
+              className='inline-flex h-7 items-center justify-center rounded-md bg-[#5865f2] px-3 text-xs font-medium text-white transition-colors hover:bg-[#4752c4] disabled:opacity-60'
+            >
+              {isPending ? 'Joining…' : 'Join Server'}
+            </button>
+          )}
         </div>
       )}
     </header>
