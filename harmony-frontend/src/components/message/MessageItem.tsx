@@ -1046,7 +1046,6 @@ export function MessageItem({
         channelId={message.channelId}
         serverId={serverId}
         incomingReply={latestReply}
-        onReplyCountChange={delta => setLocalReplyCount(c => c + delta)}
       />
     ) : null;
 

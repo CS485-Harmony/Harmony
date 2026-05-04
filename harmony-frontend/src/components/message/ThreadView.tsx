@@ -175,19 +175,11 @@ export interface ThreadViewProps {
   parentMessage: Message;
   channelId: string;
   serverId: string;
-  /** Called when a new reply is sent so the parent can update its replyCount. */
-  onReplyCountChange?: (delta: number) => void;
   /** Reply created outside this component, e.g. via channel composer or SSE. */
   incomingReply?: Message;
 }
 
-export function ThreadView({
-  parentMessage,
-  channelId,
-  serverId,
-  onReplyCountChange,
-  incomingReply,
-}: ThreadViewProps) {
+export function ThreadView({ parentMessage, channelId, serverId, incomingReply }: ThreadViewProps) {
   const [replies, setReplies] = useState<Message[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -250,14 +242,10 @@ export function ThreadView({
     };
   }, [parentMessage.id, channelId, serverId]);
 
-  const handleReplySent = useCallback(
-    (reply: Message) => {
-      setReplies(prev => [...prev, reply]);
-      setIsComposerOpen(false);
-      onReplyCountChange?.(1);
-    },
-    [onReplyCountChange],
-  );
+  const handleReplySent = useCallback((reply: Message) => {
+    setReplies(prev => [...prev, reply]);
+    setIsComposerOpen(false);
+  }, []);
 
   return (
     <div className='ml-14 mt-1 border-l-2 border-white/10 pl-3'>
