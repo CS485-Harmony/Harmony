@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { getChannel, getChannels } from '@/services/channelService';
+import { getChannelAuthenticated, getChannels } from '@/services/channelService';
 import { ChannelSettingsPage } from '@/components/settings/ChannelSettingsPage';
 import { requireServerSettingsAccess } from '@/app/settings/[serverSlug]/settings-access';
 import { ChannelType } from '@/types';
@@ -10,9 +10,9 @@ interface PageProps {
 
 export default async function SettingsPage({ params }: PageProps) {
   const { serverSlug, channelSlug } = await params;
-  await requireServerSettingsAccess(serverSlug);
+  const server = await requireServerSettingsAccess(serverSlug);
 
-  const channel = await getChannel(serverSlug, channelSlug);
+  const channel = await getChannelAuthenticated(server.id, channelSlug);
   if (!channel) notFound();
 
   const allChannels = await getChannels(channel.serverId);

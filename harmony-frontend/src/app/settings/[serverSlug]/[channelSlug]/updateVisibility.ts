@@ -15,8 +15,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { ChannelVisibility } from '@/types';
-import { updateVisibility, getChannel } from '@/services/channelService';
-import { getServer } from '@/services/serverService';
+import { updateVisibility, getChannelAuthenticated } from '@/services/channelService';
+import { getServerAuthenticated } from '@/services/serverService';
 
 export async function updateChannelVisibility(
   serverSlug: string,
@@ -28,16 +28,16 @@ export async function updateChannelVisibility(
     throw new Error('Invalid visibility value');
   }
 
-  // Resolve channel by slug so the client cannot target an arbitrary ID.
-  const channel = await getChannel(serverSlug, channelSlug);
-  if (!channel) {
-    throw new Error('Channel not found');
-  }
-
-  // Resolve server to get serverId for the API call
-  const server = await getServer(serverSlug);
+  // Resolve server first (authenticated — works for private servers too)
+  const server = await getServerAuthenticated(serverSlug);
   if (!server) {
     throw new Error('Server not found');
+  }
+
+  // Resolve channel by slug using server ID so the client cannot target an arbitrary ID.
+  const channel = await getChannelAuthenticated(server.id, channelSlug);
+  if (!channel) {
+    throw new Error('Channel not found');
   }
 
   await updateVisibility(channel.id, visibility, server.id);

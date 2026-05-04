@@ -6,6 +6,8 @@ import {
 } from '@/services/publicApiService';
 import { ChannelType, ChannelVisibility } from '@/types';
 
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn(), revalidateTag: jest.fn() }));
+
 jest.mock('@/services/publicApiService', () => ({
   fetchPublicServer: jest.fn(),
   fetchPublicChannel: jest.fn(),

@@ -120,6 +120,34 @@ export const getChannel = cache(
 );
 
 /**
+ * Returns a single channel by server ID + channel slug using the authenticated
+ * tRPC endpoint. Use this in admin/settings contexts where the server may not
+ * be publicly listed (e.g. private servers).
+ */
+export async function getChannelAuthenticated(
+  serverId: string,
+  channelSlug: string,
+): Promise<Channel | null> {
+  try {
+    const data = await trpcQuery<Record<string, unknown>>('channel.getChannel', {
+      serverId,
+      channelSlug,
+    });
+    if (!data) return null;
+    return toFrontendChannel(data);
+  } catch (error) {
+    logger.warn('Authenticated channel lookup failed', {
+      feature: 'channel-service',
+      event: 'get_channel_authenticated_failed',
+      procedure: 'channel.getChannel',
+      route: '/trpc/channel.getChannel',
+      error,
+    });
+    return null;
+  }
+}
+
+/**
  * Updates the visibility of a channel via tRPC.
  * Returns the visibility change result (not a full Channel object).
  */

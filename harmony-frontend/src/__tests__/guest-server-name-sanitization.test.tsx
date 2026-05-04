@@ -11,6 +11,7 @@ jest.mock('@/hooks/useAuth', () => ({
 
 jest.mock('next/navigation', () => ({
   usePathname: () => '/c/admin/general',
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
 }));
 
 describe('guest server name sanitization', () => {

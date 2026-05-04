@@ -16,6 +16,7 @@ import { ServerSidebar } from '@/components/server/ServerSidebar';
 import { getChannels } from '@/services/channelService';
 import { TrpcHttpError } from '@/lib/trpc-errors';
 import { AuthRedirect } from '@/components/channel/AuthRedirect';
+import { joinServerAction } from '@/app/channels/actions';
 import { VisibilityGuard } from '@/components/channel/VisibilityGuard';
 import { MessageList } from '@/components/channel/MessageList';
 import { GuestPromoBanner } from '@/components/channel/GuestPromoBanner';
@@ -89,11 +90,14 @@ export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannel
     isMember = !(err instanceof TrpcHttpError && err.status === 403);
   }
 
+  // Bind the server ID so GuestHeader (a client component) never imports next/cache directly.
+  const boundJoinAction = joinServerAction.bind(null, server.id);
+
   if (channelResult.isPrivate) {
     return (
       <div className='flex h-screen flex-col overflow-hidden bg-[#36393f] font-sans'>
         {isMember && <AuthRedirect to={`/channels/${serverSlug}/${channelSlug}`} />}
-        <GuestHeader server={server} />
+        <GuestHeader server={server} joinAction={boundJoinAction} />
         <div className='flex flex-1 overflow-hidden'>
           <ServerSidebar serverInfo={server} publicChannels={publicChannels} />
           <PrivateChannelLockedPane mode='guest' />
@@ -110,7 +114,7 @@ export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannel
   return (
     <div className='flex h-screen flex-col overflow-hidden bg-[#36393f] font-sans'>
       {isMember && <AuthRedirect to={`/channels/${serverSlug}/${channelSlug}`} />}
-      <GuestHeader server={server} />
+      <GuestHeader server={server} joinAction={boundJoinAction} />
 
       <div className='flex flex-1 overflow-hidden'>
         <ServerSidebar
