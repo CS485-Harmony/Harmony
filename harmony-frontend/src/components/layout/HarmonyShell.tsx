@@ -266,6 +266,7 @@ export function HarmonyShell({
 
   const handleDeleteMessage = useCallback((messageId: string) => {
     setLocalMessages(prev => prev.filter(m => m.id !== messageId));
+    setPinsRefreshKey(prev => prev + 1);
   }, []);
 
   const handleLoadOlderMessages = useCallback(async () => {
@@ -329,6 +330,7 @@ export function HarmonyShell({
     (messageId: string, channelId: string) => {
       if (channelId !== currentChannel.id) return;
       setLocalMessages(prev => prev.filter(m => m.id !== messageId));
+      setPinsRefreshKey(prev => prev + 1);
     },
     [currentChannel.id],
   );
