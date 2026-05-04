@@ -349,7 +349,7 @@ describe('POST /api/auth/password-reset-required', () => {
     expect(typeof loginRes.body.accessToken).toBe('string');
   });
 
-  it('rejects reset when the account does not require one', async () => {
+  it('uses the generic invalid-credentials response when reset is not required', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(mockUser);
 
     const res = await request(app)
@@ -361,8 +361,8 @@ describe('POST /api/auth/password-reset-required', () => {
         passwordVerifier: derivePasswordVerifier('new-password-123'),
       });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Password reset is not required for this account.');
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('Invalid credentials');
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
   });
 });

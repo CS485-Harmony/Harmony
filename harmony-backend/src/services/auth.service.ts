@@ -264,10 +264,7 @@ export const authService = {
     }
 
     if (decodePasswordVerifierRecord(user.passwordHash)) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: 'Password reset is not required for this account.',
-      });
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
     }
 
     await userRepository.update(user.id, {

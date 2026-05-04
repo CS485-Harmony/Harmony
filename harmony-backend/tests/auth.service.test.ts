@@ -521,7 +521,7 @@ describe('authService.resetRequiredPassword', () => {
     expect(updateArgs.data.passwordHash).not.toContain('NewSecurePass123!');
   });
 
-  it('rejects reset attempts for accounts that already have a valid verifier record', async () => {
+  it('uses the generic invalid-credentials response when reset is not required', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(mockUser);
 
     await expect(
@@ -530,10 +530,7 @@ describe('authService.resetRequiredPassword', () => {
         PASSWORD_SALT,
         derivePasswordVerifier('NewSecurePass123!'),
       ),
-    ).rejects.toMatchObject({
-      code: 'BAD_REQUEST',
-      message: 'Password reset is not required for this account.',
-    });
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
   });
 
