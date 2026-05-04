@@ -243,7 +243,7 @@ export function ThreadView({ parentMessage, channelId, serverId, incomingReply }
   }, [parentMessage.id, channelId, serverId]);
 
   const handleReplySent = useCallback((reply: Message) => {
-    setReplies(prev => [...prev, reply]);
+    setReplies(prev => appendUniqueReplies(prev, [reply]));
     setIsComposerOpen(false);
   }, []);
 
